@@ -284,6 +284,26 @@ function Find-ProjectPath {
     return $null
 }
 
+function Find-PublishedAppPath {
+    param([Parameter(Mandatory = $true)][string]$RootPath)
+
+    $runtimeConfig = Get-ChildItem -Path $RootPath -Filter *.runtimeconfig.json -Recurse -ErrorAction SilentlyContinue |
+        Where-Object { $_.FullName -notmatch '[\\/](ref|refs)[\\/]' } |
+        Select-Object -First 1
+
+    if (-not $runtimeConfig) {
+        return $null
+    }
+
+    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($runtimeConfig.BaseName)
+    $dllPath = Join-Path $runtimeConfig.DirectoryName "$baseName.dll"
+    if (Test-Path -LiteralPath $dllPath) {
+        return $runtimeConfig.DirectoryName
+    }
+
+    return $null
+}
+
 function Publish-LocalSource {
     param(
         [Parameter(Mandatory = $true)][string]$SourceRoot,
@@ -302,12 +322,12 @@ function Publish-LocalSource {
 
     New-Item -ItemType Directory -Path $publishPath -Force | Out-Null
     Write-Host "Publishing local source project: $projectPath"
-    & dotnet publish $projectPath -c Release -o $publishPath
+    & dotnet publish $projectPath -c Release -o $publishPath | Out-Host
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet publish failed."
     }
 
-    return $publishPath
+    return [string]$publishPath
 }
 
 function Resolve-DeploymentSource {
@@ -321,9 +341,21 @@ function Resolve-DeploymentSource {
 
     if (Test-Path -LiteralPath $SourceValue -PathType Container) {
         $resolvedSource = (Resolve-Path -LiteralPath $SourceValue).Path
+        $existingPublishedPath = Find-PublishedAppPath -RootPath $resolvedSource
+        if ($existingPublishedPath) {
+            Write-Host "Found published application under: $existingPublishedPath"
+
+            if (Test-Path -LiteralPath $targetPath) {
+                Remove-Item -LiteralPath $targetPath -Recurse -Force
+            }
+
+            Copy-Item -LiteralPath $existingPublishedPath -Destination $targetPath -Recurse -Force
+            return [string]$targetPath
+        }
+
         $publishedPath = Publish-LocalSource -SourceRoot $resolvedSource -TargetRoot $targetPath
         if ($publishedPath) {
-            return $publishedPath
+            return [string]$publishedPath
         }
 
         if (Test-Path -LiteralPath $targetPath) {
@@ -331,12 +363,12 @@ function Resolve-DeploymentSource {
         }
 
         Copy-Item -LiteralPath $resolvedSource -Destination $targetPath -Recurse -Force
-        return $targetPath
+        return [string]$targetPath
     }
 
     if (Test-Path -LiteralPath $SourceValue -PathType Leaf) {
         Expand-DeploymentPackage -SourceFile (Resolve-Path -LiteralPath $SourceValue).Path -TargetPath $targetPath
-        return $targetPath
+        return [string]$targetPath
     }
 
     if (-not (Test-IsUrl -Value $SourceValue)) {
@@ -365,7 +397,7 @@ function Resolve-DeploymentSource {
         Remove-Item -LiteralPath $downloadPath -Force -ErrorAction SilentlyContinue
     }
 
-    return $targetPath
+    return [string]$targetPath
 }
 
 function Find-ApplicationAssembly {
