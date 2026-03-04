@@ -496,6 +496,20 @@ server {
 EOF
 }
 
+ensure_nginx_running() {
+  if ! nginx -t >/dev/null 2>&1; then
+    echo "Nginx configuration test failed. Run 'nginx -t' and 'journalctl -xeu nginx.service' for details." >&2
+    exit 1
+  fi
+
+  if systemctl is-active --quiet nginx; then
+    run_cmd systemctl reload nginx
+    return
+  fi
+
+  run_cmd systemctl restart nginx
+}
+
 resolve_application_source() {
   local source_value="$1"
   local target_root="$2"
@@ -592,7 +606,7 @@ main() {
   run_cmd systemctl daemon-reload
   run_cmd systemctl enable --now "${SERVICE_NAME}"
   run_cmd systemctl enable --now nginx
-  run_cmd systemctl reload nginx
+  ensure_nginx_running
 
   echo "Deployment complete."
   echo "Preferred host: ${resolved_host}"
