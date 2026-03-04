@@ -30,7 +30,7 @@ What it does:
 - Prompts for a build artifact URL, a local source folder, a local published folder, or a local published `.zip`.
 - If a local source folder contains a `.csproj`, it runs `dotnet publish -c Release` first and deploys that build output.
 - Prompts for an optional domain name.
-- If no domain is provided, it tries to use the public IP first and falls back to the local LAN IP.
+- If no domain is provided, it uses a user-provided static/public IP when entered; otherwise it uses the local LAN IP.
 - Creates both HTTP and HTTPS IIS bindings and generates a self-signed certificate when needed.
 - Deploys site files under `C:\inetpub\wwwroot\<site-or-package-name>`.
 - Skips IIS features and .NET installers that are already present.
@@ -71,7 +71,7 @@ What it does:
 - Prompts for a build artifact URL, a local source folder, a local published folder, or a local published `.zip` / `.tar.gz`.
 - If a local source folder contains a `.csproj`, it runs `dotnet publish -c Release` first and deploys that build output.
 - Prompts for an optional domain name.
-- If no domain is provided, it tries to use the public IP first and falls back to the local LAN IP.
+- If no domain is provided, it uses a user-provided static/public IP when entered; otherwise it uses the local LAN IP.
 - Runs the app on local Kestrel and places Nginx in front of it for HTTP and HTTPS.
 - Generates a self-signed certificate when needed.
 - Deploys site files under `/var/www/<service-or-package-name>`.

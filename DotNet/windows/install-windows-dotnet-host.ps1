@@ -436,19 +436,6 @@ function Find-ApplicationAssembly {
     return $dll.FullName
 }
 
-function Get-PublicIPAddress {
-    try {
-        $value = Invoke-RestMethod -Uri "https://api.ipify.org" -TimeoutSec 5
-        if ($value -match '^\d{1,3}(\.\d{1,3}){3}$') {
-            return $value
-        }
-    }
-    catch {
-    }
-
-    return $null
-}
-
 function Get-LocalIPAddress {
     $candidates = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
         Where-Object {
@@ -462,15 +449,17 @@ function Get-LocalIPAddress {
 }
 
 function Resolve-HostName {
-    param([string]$DomainName)
+    param(
+        [string]$DomainName,
+        [string]$StaticIpAddress
+    )
 
     if (-not [string]::IsNullOrWhiteSpace($DomainName)) {
         return $DomainName.Trim()
     }
 
-    $publicIp = Get-PublicIPAddress
-    if (-not [string]::IsNullOrWhiteSpace($publicIp)) {
-        return $publicIp
+    if (-not [string]::IsNullOrWhiteSpace($StaticIpAddress)) {
+        return $StaticIpAddress.Trim()
     }
 
     $localIp = Get-LocalIPAddress
@@ -644,8 +633,9 @@ if ([string]::IsNullOrWhiteSpace($sourceValue)) {
     exit 0
 }
 
-$domainName = Read-Host "Enter a domain name for the site (leave blank to use public IP if available, otherwise local IP)"
-$resolvedHost = Resolve-HostName -DomainName $domainName
+$domainName = Read-Host "Enter a domain name for the site (leave blank to use an IP address)"
+$staticIpAddress = Read-Host "Enter a static/public IP address if you have one (leave blank to use the local LAN IP)"
+$resolvedHost = Resolve-HostName -DomainName $domainName -StaticIpAddress $staticIpAddress
 $certificate = Ensure-ServerCertificate -HostName $resolvedHost
 
 $deploymentRoot = Join-Path $env:SystemDrive "inetpub\wwwroot"

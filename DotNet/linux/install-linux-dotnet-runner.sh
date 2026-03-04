@@ -290,14 +290,6 @@ find_app_dll() {
   printf '%s\n' "${dll_path}"
 }
 
-get_public_ip() {
-  local public_ip
-  public_ip="$(curl -fsSL --max-time 5 https://api.ipify.org 2>/dev/null || true)"
-  if [[ "${public_ip}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    printf '%s\n' "${public_ip}"
-  fi
-}
-
 get_local_ip() {
   local local_ip
   local_ip="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++) if ($i=="src") { print $(i+1); exit }}')"
@@ -309,15 +301,14 @@ get_local_ip() {
 
 resolve_host_name() {
   local domain_name="$1"
+  local static_ip="$2"
   if [[ -n "${domain_name}" ]]; then
     printf '%s\n' "${domain_name}"
     return
   fi
 
-  local public_ip
-  public_ip="$(get_public_ip)"
-  if [[ -n "${public_ip}" ]]; then
-    printf '%s\n' "${public_ip}"
+  if [[ -n "${static_ip}" ]]; then
+    printf '%s\n' "${static_ip}"
     return
   fi
 
@@ -494,9 +485,10 @@ main() {
     exit 0
   fi
 
-  read -r -p "Enter a domain name for the site (leave blank to use public IP if available, otherwise local IP): " domain_name
+  read -r -p "Enter a domain name for the site (leave blank to use an IP address): " domain_name
+  read -r -p "Enter a static/public IP address if you have one (leave blank to use the local LAN IP): " static_ip
   local resolved_host
-  resolved_host="$(resolve_host_name "${domain_name}")"
+  resolved_host="$(resolve_host_name "${domain_name}" "${static_ip}")"
 
   mkdir -p "${APP_ROOT}"
 
