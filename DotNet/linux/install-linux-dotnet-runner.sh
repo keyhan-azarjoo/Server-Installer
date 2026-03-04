@@ -270,12 +270,14 @@ find_published_app_path() {
   local root_path="$1"
   find "${root_path}" -name '*.runtimeconfig.json' ! -path '*/ref/*' ! -path '*/refs/*' 2>/dev/null | awk '
     {
+      path=$0
       score=0
-      lower=tolower($0)
+      lower=tolower(path)
       if (lower ~ /\/(publish|published)\//) score+=100
       if (lower ~ /\/release\//) score+=50
       if (lower ~ /\/debug\//) score-=25
-      print score "|" $0
+      sub(/\/[^\/]+$/, "", path)
+      print score "|" path
     }
   ' | sort -t'|' -k1,1nr -k2,2 | head -n 1 | cut -d'|' -f2-
 }
