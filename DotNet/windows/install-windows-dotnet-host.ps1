@@ -14,12 +14,41 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$script:OriginalBoundParameters = @{}
+foreach ($entry in $PSBoundParameters.GetEnumerator()) {
+    $script:OriginalBoundParameters[$entry.Key] = $entry.Value
+}
 
 function Assert-Administrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     $principal = New-Object Security.Principal.WindowsPrincipal($identity)
     if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
-        throw "Run this script from an elevated PowerShell session."
+        $scriptPath = $PSCommandPath
+        if ([string]::IsNullOrWhiteSpace($scriptPath)) {
+            throw "Run this script from an elevated PowerShell session."
+        }
+
+        $argumentList = @(
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", ('"{0}"' -f $scriptPath)
+        )
+
+        foreach ($entry in $script:OriginalBoundParameters.GetEnumerator()) {
+            $argumentList += "-$($entry.Key)"
+
+            if ($entry.Value -is [switch]) {
+                continue
+            }
+
+            $escapedValue = [string]$entry.Value
+            $escapedValue = $escapedValue.Replace('"', '\"')
+            $argumentList += ('"{0}"' -f $escapedValue)
+        }
+
+        Write-Host "Requesting elevation..."
+        Start-Process -FilePath "powershell.exe" -ArgumentList $argumentList -Verb RunAs | Out-Null
+        exit 0
     }
 }
 
@@ -274,6 +303,41 @@ function Expand-DeploymentPackage {
     throw "Unsupported package format '$extension'. Provide a published .zip package or a local published folder."
 }
 
+function Stop-IisDeploymentLocking {
+    param([Parameter(Mandatory = $true)][string]$WebsiteName)
+
+    Import-Module WebAdministration
+
+    if (Test-Path "IIS:\Sites\$WebsiteName") {
+        Stop-Website -Name $WebsiteName -ErrorAction SilentlyContinue | Out-Null
+    }
+
+    if (Test-Path "IIS:\AppPools\$WebsiteName") {
+        Stop-WebAppPool -Name $WebsiteName -ErrorAction SilentlyContinue | Out-Null
+    }
+}
+
+function Remove-DeploymentPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$TargetPath,
+        [Parameter(Mandatory = $true)][string]$WebsiteName
+    )
+
+    if (-not (Test-Path -LiteralPath $TargetPath)) {
+        return
+    }
+
+    Stop-IisDeploymentLocking -WebsiteName $WebsiteName
+    Start-Sleep -Seconds 2
+
+    try {
+        Remove-Item -LiteralPath $TargetPath -Recurse -Force
+    }
+    catch {
+        throw "Failed to remove existing deployment path '$TargetPath'. IIS files may still be locked. Stop the related site or worker process and retry. $($_.Exception.Message)"
+    }
+}
+
 function Find-ProjectPath {
     param([Parameter(Mandatory = $true)][string]$RootPath)
 
@@ -346,7 +410,8 @@ function Publish-LocalSource {
 function Resolve-DeploymentSource {
     param(
         [Parameter(Mandatory = $true)][string]$SourceValue,
-        [Parameter(Mandatory = $true)][string]$TargetRoot
+        [Parameter(Mandatory = $true)][string]$TargetRoot,
+        [Parameter(Mandatory = $true)][string]$WebsiteName
     )
 
     $targetName = Get-ArtifactName -SourcePath $SourceValue
@@ -358,9 +423,7 @@ function Resolve-DeploymentSource {
         if ($existingPublishedPath) {
             Write-Host "Found published application under: $existingPublishedPath"
 
-            if (Test-Path -LiteralPath $targetPath) {
-                Remove-Item -LiteralPath $targetPath -Recurse -Force
-            }
+            Remove-DeploymentPath -TargetPath $targetPath -WebsiteName $WebsiteName
 
             Copy-Item -LiteralPath $existingPublishedPath -Destination $targetPath -Recurse -Force
             return [string]$targetPath
@@ -371,9 +434,7 @@ function Resolve-DeploymentSource {
             return [string]$publishedPath
         }
 
-        if (Test-Path -LiteralPath $targetPath) {
-            Remove-Item -LiteralPath $targetPath -Recurse -Force
-        }
+        Remove-DeploymentPath -TargetPath $targetPath -WebsiteName $WebsiteName
 
         Copy-Item -LiteralPath $resolvedSource -Destination $targetPath -Recurse -Force
         return [string]$targetPath
@@ -670,7 +731,7 @@ $certificate = Ensure-ServerCertificate -HostName $resolvedHost
 $deploymentRoot = Join-Path $env:SystemDrive "inetpub\wwwroot"
 New-Item -ItemType Directory -Path $deploymentRoot -Force | Out-Null
 
-$deploymentPath = Resolve-DeploymentSource -SourceValue $sourceValue -TargetRoot $deploymentRoot
+$deploymentPath = Resolve-DeploymentSource -SourceValue $sourceValue -TargetRoot $deploymentRoot -WebsiteName $SiteName
 $assemblyPath = Find-ApplicationAssembly -DeploymentPath $deploymentPath
 $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assemblyPath)
 $publishPath = Split-Path -Path $assemblyPath -Parent
