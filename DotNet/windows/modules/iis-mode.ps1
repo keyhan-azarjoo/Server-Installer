@@ -47,8 +47,8 @@ function Stop-IisDeploymentLocking {
     }
 
     if (Test-Path "IIS:\AppPools\$WebsiteName") {
-        $appPool = Get-ChildItem "IIS:\AppPools\$WebsiteName" -ErrorAction SilentlyContinue
-        if ($appPool -and $appPool.State -eq "Started") {
+        $appPoolState = Get-WebAppPoolState -Name $WebsiteName -ErrorAction SilentlyContinue
+        if ($null -ne $appPoolState -and $appPoolState.Value -eq "Started") {
             Stop-WebAppPool -Name $WebsiteName | Out-Null
         }
     }
