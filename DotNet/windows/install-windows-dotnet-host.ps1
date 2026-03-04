@@ -21,7 +21,7 @@ foreach ($entry in $PSBoundParameters.GetEnumerator()) {
     $originalBoundParameters[$entry.Key] = $entry.Value
 }
 
-$moduleRoot = Join-Path $PSScriptRoot "modules"
+$moduleRoot = Join-Path $env:ProgramData "IIS-Installer\modules"
 function Ensure-LocalWindowsModules {
     param([Parameter(Mandatory = $true)][string]$ModuleRoot)
 
@@ -41,6 +41,31 @@ Ensure-LocalWindowsModules -ModuleRoot $moduleRoot
 . (Join-Path $moduleRoot "common.ps1")
 . (Join-Path $moduleRoot "iis-mode.ps1")
 . (Join-Path $moduleRoot "docker-mode.ps1")
+
+function Install-DotNetForSelectedMode {
+    param(
+        [Parameter(Mandatory = $true)][string]$SelectedMode,
+        [Parameter(Mandatory = $true)][string]$Channel,
+        [string]$SdkUrl,
+        [string]$RuntimeUrl,
+        [string]$HostingUrl
+    )
+
+    $installCommand = Get-Command Install-DotNetPrerequisites -ErrorAction Stop
+    $supportsSkipHostingBundle = $installCommand.Parameters.ContainsKey("SkipHostingBundle")
+
+    if ($SelectedMode -eq "Docker") {
+        if ($supportsSkipHostingBundle) {
+            Install-DotNetPrerequisites -Channel $Channel -SdkUrl $SdkUrl -RuntimeUrl $RuntimeUrl -HostingUrl $HostingUrl -SkipHostingBundle
+        }
+        else {
+            Install-DotNetPrerequisites -Channel $Channel -SdkUrl $SdkUrl -RuntimeUrl $RuntimeUrl -HostingUrl $HostingUrl
+        }
+        return
+    }
+
+    Install-DotNetPrerequisites -Channel $Channel -SdkUrl $SdkUrl -RuntimeUrl $RuntimeUrl -HostingUrl $HostingUrl
+}
 
 Assert-Administrator -OriginalBoundParameters $originalBoundParameters
 
@@ -68,11 +93,8 @@ $domainName = if (-not [string]::IsNullOrWhiteSpace($DomainName)) { $DomainName 
 
 if ($DeploymentMode -eq "IIS") {
     Install-WindowsFeatureSet
-    Install-DotNetPrerequisites -Channel $DotNetChannel -SdkUrl $SdkInstallerUrl -RuntimeUrl $AspNetRuntimeUrl -HostingUrl $HostingBundleUrl
 }
-else {
-    Install-DotNetPrerequisites -Channel $DotNetChannel -SdkUrl $SdkInstallerUrl -RuntimeUrl $AspNetRuntimeUrl -HostingUrl $HostingBundleUrl -SkipHostingBundle
-}
+Install-DotNetForSelectedMode -SelectedMode $DeploymentMode -Channel $DotNetChannel -SdkUrl $SdkInstallerUrl -RuntimeUrl $AspNetRuntimeUrl -HostingUrl $HostingBundleUrl
 
 $stagingRoot = Join-Path $env:TEMP ("iis-installer-stage-" + [System.Guid]::NewGuid().ToString("N"))
 $contentPath = Prepare-DeploymentContent -SourceValue $sourceValue -StagingRoot $stagingRoot -GitHubToken $GitHubToken
