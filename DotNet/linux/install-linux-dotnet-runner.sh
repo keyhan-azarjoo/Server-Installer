@@ -2,6 +2,8 @@
 
 set -euo pipefail
 
+SCRIPT_VERSION="2026.03.04.1"
+
 DOTNET_CHANNEL="${DOTNET_CHANNEL:-}"
 DOTNET_INSTALL_SCRIPT_URL="${DOTNET_INSTALL_SCRIPT_URL:-https://dot.net/v1/dotnet-install.sh}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
@@ -627,6 +629,7 @@ resolve_application_source() {
 }
 
 main() {
+  echo "IIS-Installer Linux version: ${SCRIPT_VERSION}"
   require_root
   resolve_dotnet_channel
   install_os_packages

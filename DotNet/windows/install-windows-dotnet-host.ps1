@@ -16,6 +16,7 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$scriptVersion = "2026.03.04.1"
 $originalBoundParameters = @{}
 foreach ($entry in $PSBoundParameters.GetEnumerator()) {
     $originalBoundParameters[$entry.Key] = $entry.Value
@@ -41,6 +42,8 @@ Ensure-LocalWindowsModules -ModuleRoot $moduleRoot
 . (Join-Path $moduleRoot "common.ps1")
 . (Join-Path $moduleRoot "iis-mode.ps1")
 . (Join-Path $moduleRoot "docker-mode.ps1")
+
+Write-Host "IIS-Installer Windows version: $scriptVersion"
 
 function Install-DotNetForSelectedMode {
     param(
