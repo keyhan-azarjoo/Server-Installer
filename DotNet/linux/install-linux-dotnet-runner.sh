@@ -284,10 +284,24 @@ find_published_app_path() {
   ' | sort -t'|' -k1,1nr -k2,2 | head -n 1 | cut -d'|' -f2-
 }
 
+find_best_runtimeconfig() {
+  local root_path="$1"
+  find "${root_path}" -name '*.runtimeconfig.json' ! -path '*/ref/*' ! -path '*/refs/*' 2>/dev/null | awk '
+    {
+      score=0
+      lower=tolower($0)
+      if (lower ~ /\/(publish|published)\//) score+=100
+      if (lower ~ /\/release\//) score+=50
+      if (lower ~ /\/debug\//) score-=25
+      print score "|" $0
+    }
+  ' | sort -t'|' -k1,1nr -k2,2 | head -n 1 | cut -d'|' -f2-
+}
+
 find_app_dll() {
   local deployment_path="$1"
   local runtime_config
-  runtime_config="$(find_published_app_path "${deployment_path}")"
+  runtime_config="$(find_best_runtimeconfig "${deployment_path}")"
 
   if [[ -n "${runtime_config}" ]]; then
     local base_name
