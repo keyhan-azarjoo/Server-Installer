@@ -271,6 +271,45 @@ function Expand-DeploymentPackage {
     throw "Unsupported package format '$extension'. Provide a published .zip package or a local published folder."
 }
 
+function Find-ProjectPath {
+    param([Parameter(Mandatory = $true)][string]$RootPath)
+
+    $project = Get-ChildItem -Path $RootPath -Filter *.csproj -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+
+    if ($project) {
+        return $project.FullName
+    }
+
+    return $null
+}
+
+function Publish-LocalSource {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceRoot,
+        [Parameter(Mandatory = $true)][string]$TargetRoot
+    )
+
+    $projectPath = Find-ProjectPath -RootPath $SourceRoot
+    if (-not $projectPath) {
+        return $null
+    }
+
+    $publishPath = Join-Path $TargetRoot "published"
+    if (Test-Path -LiteralPath $publishPath) {
+        Remove-Item -LiteralPath $publishPath -Recurse -Force
+    }
+
+    New-Item -ItemType Directory -Path $publishPath -Force | Out-Null
+    Write-Host "Publishing local source project: $projectPath"
+    & dotnet publish $projectPath -c Release -o $publishPath
+    if ($LASTEXITCODE -ne 0) {
+        throw "dotnet publish failed."
+    }
+
+    return $publishPath
+}
+
 function Resolve-DeploymentSource {
     param(
         [Parameter(Mandatory = $true)][string]$SourceValue,
@@ -282,6 +321,10 @@ function Resolve-DeploymentSource {
 
     if (Test-Path -LiteralPath $SourceValue -PathType Container) {
         $resolvedSource = (Resolve-Path -LiteralPath $SourceValue).Path
+        $publishedPath = Publish-LocalSource -SourceRoot $resolvedSource -TargetRoot $targetPath
+        if ($publishedPath) {
+            return $publishedPath
+        }
 
         if (Test-Path -LiteralPath $targetPath) {
             Remove-Item -LiteralPath $targetPath -Recurse -Force
@@ -520,7 +563,7 @@ $DotNetChannel = Resolve-DotNetChannel -Value $DotNetChannel
 Install-WindowsFeatureSet
 Install-DotNetPrerequisites -Channel $DotNetChannel -SdkUrl $SdkInstallerUrl -RuntimeUrl $AspNetRuntimeUrl -HostingUrl $HostingBundleUrl
 
-$sourceValue = Read-Host "Enter a published build artifact URL, a local published folder path, or a local published .zip path to deploy (leave blank to skip)"
+$sourceValue = Read-Host "Enter a build artifact URL, a local source folder, a local published folder, or a local published .zip path to deploy (leave blank to skip)"
 if ([string]::IsNullOrWhiteSpace($sourceValue)) {
     Write-Host "Setup completed. IIS and .NET prerequisites are installed."
     exit 0

@@ -27,7 +27,8 @@ What it does:
 
 - Enables IIS and required modules, including WebSockets.
 - Prompts for the .NET release channel and installs the matching .NET SDK, ASP.NET Core Runtime, and Hosting Bundle.
-- Prompts for a published build artifact URL, a local published folder, or a local published `.zip`.
+- Prompts for a build artifact URL, a local source folder, a local published folder, or a local published `.zip`.
+- If a local source folder contains a `.csproj`, it runs `dotnet publish -c Release` first and deploys that build output.
 - Prompts for an optional domain name.
 - If no domain is provided, it tries to use the public IP first and falls back to the local LAN IP.
 - Creates both HTTP and HTTPS IIS bindings and generates a self-signed certificate when needed.
@@ -66,7 +67,8 @@ Linux:   https://github.com/keyhan-azarjoo/IIS-Installer/tree/main/DotNet/linux
 What it does:
 
 - Prompts for the .NET release channel, then installs `curl`, `unzip`, `tar`, `openssl`, `nginx`, and the .NET SDK / ASP.NET Core Runtime.
-- Prompts for a published build artifact URL, a local published folder, or a local published `.zip` / `.tar.gz`.
+- Prompts for a build artifact URL, a local source folder, a local published folder, or a local published `.zip` / `.tar.gz`.
+- If a local source folder contains a `.csproj`, it runs `dotnet publish -c Release` first and deploys that build output.
 - Prompts for an optional domain name.
 - If no domain is provided, it tries to use the public IP first and falls back to the local LAN IP.
 - Runs the app on local Kestrel and places Nginx in front of it for HTTP and HTTPS.
@@ -113,8 +115,8 @@ If the artifact is private on GitHub, the installers will prompt for a GitHub to
 
 ## Notes
 
-- Both scripts assume the deployment package already contains a runnable published `.NET` app.
-- For local deployment, pass a folder path that already contains the published output, not raw source code.
+- Remote downloads must already be published build artifacts.
+- For local deployment, you can pass either raw source code (with a `.csproj`) or an already published output folder.
 - The Windows flow is intended for ASP.NET Core web apps hosted behind IIS.
 - The Linux flow runs the app behind Nginx with HTTP and HTTPS termination.
 - The generated certificates are self-signed. Browsers will warn until you replace them with a trusted certificate.

@@ -242,6 +242,30 @@ extract_package() {
   esac
 }
 
+find_project() {
+  local root_path="$1"
+  find "${root_path}" -name '*.csproj' | head -n 1
+}
+
+publish_local_source() {
+  local source_root="$1"
+  local target_root="$2"
+  local project_path
+  project_path="$(find_project "${source_root}")"
+
+  if [[ -z "${project_path}" ]]; then
+    return 1
+  fi
+
+  local publish_path="${target_root}/published"
+  rm -rf "${publish_path}"
+  mkdir -p "${publish_path}"
+
+  echo "Publishing local source project: ${project_path}"
+  run_cmd dotnet publish "${project_path}" -c Release -o "${publish_path}"
+  printf '%s\n' "${publish_path}"
+}
+
 find_app_dll() {
   local deployment_path="$1"
   local runtime_config
@@ -411,6 +435,13 @@ resolve_application_source() {
   local target_path="${target_root}/${app_name}"
 
   if [[ -d "${source_value}" ]]; then
+    local published_path
+    published_path="$(publish_local_source "${source_value}" "${target_path}" || true)"
+    if [[ -n "${published_path}" ]]; then
+      printf '%s\n' "${published_path}"
+      return
+    fi
+
     rm -rf "${target_path}"
     run_cmd cp -R "${source_value}" "${target_path}"
     printf '%s\n' "${target_path}"
@@ -457,7 +488,7 @@ main() {
   install_dotnet
   ensure_service_user
 
-  read -r -p "Enter a published build artifact URL, a local published folder path, or a local .zip/.tar.gz package path to deploy (leave blank to skip): " source_value
+  read -r -p "Enter a build artifact URL, a local source folder, a local published folder, or a local .zip/.tar.gz package path to deploy (leave blank to skip): " source_value
   if [[ -z "${source_value}" ]]; then
     echo "Setup completed. .NET prerequisites are installed."
     exit 0
