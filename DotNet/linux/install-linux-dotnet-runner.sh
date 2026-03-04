@@ -530,10 +530,15 @@ EOF
 ensure_backend_healthy() {
   local attempts=15
   local status
+  local service_state
 
   while (( attempts > 0 )); do
-    if ! systemctl is-active --quiet "${SERVICE_NAME}"; then
-      echo "The ${SERVICE_NAME} service is not running. Check 'systemctl status ${SERVICE_NAME}' and 'journalctl -u ${SERVICE_NAME} -n 100'." >&2
+    service_state="$(systemctl is-active "${SERVICE_NAME}" 2>/dev/null || true)"
+
+    if [[ "${service_state}" == "failed" || "${service_state}" == "inactive" ]]; then
+      echo "The ${SERVICE_NAME} service is not running." >&2
+      systemctl status "${SERVICE_NAME}" --no-pager >&2 || true
+      journalctl -u "${SERVICE_NAME}" -n 100 --no-pager >&2 || true
       exit 1
     fi
 
@@ -546,7 +551,9 @@ ensure_backend_healthy() {
     attempts=$((attempts - 1))
   done
 
-  echo "The ${SERVICE_NAME} service did not answer on http://127.0.0.1:${SERVICE_PORT}. Check 'journalctl -u ${SERVICE_NAME} -n 100' for the app startup error." >&2
+  echo "The ${SERVICE_NAME} service did not answer on http://127.0.0.1:${SERVICE_PORT}." >&2
+  systemctl status "${SERVICE_NAME}" --no-pager >&2 || true
+  journalctl -u "${SERVICE_NAME}" -n 100 --no-pager >&2 || true
   exit 1
 }
 
