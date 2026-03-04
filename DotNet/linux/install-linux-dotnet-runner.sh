@@ -290,6 +290,39 @@ find_app_dll() {
   printf '%s\n' "${dll_path}"
 }
 
+ip_address_priority() {
+  local ip="$1"
+  if [[ "${ip}" =~ ^192\.168\. ]]; then
+    printf '%s\n' 0
+    return
+  fi
+  if [[ "${ip}" =~ ^10\. ]]; then
+    printf '%s\n' 1
+    return
+  fi
+  if [[ "${ip}" =~ ^172\.(1[6-9]|2[0-9]|3[0-1])\. ]]; then
+    printf '%s\n' 2
+    return
+  fi
+  printf '%s\n' 3
+}
+
+interface_priority() {
+  local iface="$1"
+  local lower
+  lower="$(printf '%s' "${iface}" | tr '[:upper:]' '[:lower:]')"
+
+  if [[ "${lower}" =~ ^(eth|enp|eno|ens) ]]; then
+    printf '%s\n' 0
+    return
+  fi
+  if [[ "${lower}" =~ ^(wlan|wlp|wifi) ]]; then
+    printf '%s\n' 1
+    return
+  fi
+  printf '%s\n' 2
+}
+
 is_private_ipv4() {
   local ip="$1"
   [[ "${ip}" =~ ^10\. ]] && return 0
@@ -300,23 +333,18 @@ is_private_ipv4() {
 
 get_local_ip() {
   local local_ip
-  local preferred_iface
-
-  preferred_iface="$(
-    ip -o -4 addr show up scope global 2>/dev/null | awk '
-      {
-        iface=$2
-        score=2
-        lower=tolower(iface)
-        if (lower ~ /^(eth|enp|eno|ens)/) score=0
-        else if (lower ~ /^(wlan|wlp|wifi)/) score=1
-        print score " " iface
-      }
-    ' | sort -n | head -n 1 | awk '{print $2}'
+  local best_entry
+  best_entry="$(
+    ip -o -4 addr show up scope global 2>/dev/null | while read -r _ iface _ _ cidr _; do
+      local_ip="${cidr%%/*}"
+      if is_private_ipv4 "${local_ip}"; then
+        printf '%s %s %s\n' "$(ip_address_priority "${local_ip}")" "$(interface_priority "${iface}")" "${local_ip}"
+      fi
+    done | sort -n -k1,1 -k2,2 | head -n 1
   )"
 
-  if [[ -n "${preferred_iface}" ]]; then
-    local_ip="$(ip -o -4 addr show dev "${preferred_iface}" scope global 2>/dev/null | awk '{split($4,a,"/"); print a[1]; exit}')"
+  if [[ -n "${best_entry}" ]]; then
+    local_ip="$(printf '%s' "${best_entry}" | awk '{print $3}')"
   fi
 
   if [[ -z "${local_ip}" ]]; then
@@ -333,20 +361,14 @@ get_local_ip() {
 get_static_ip() {
   local ip_list
   ip_list="$(
-    ip -o -4 addr show up scope global 2>/dev/null | awk '
-      {
-        iface=$2
-        split($4,a,"/")
-        score=2
-        lower=tolower(iface)
-        if (lower ~ /^(eth|enp|eno|ens)/) score=0
-        else if (lower ~ /^(wlan|wlp|wifi)/) score=1
-        print score " " a[1]
-      }
-    ' | sort -n
+    ip -o -4 addr show up scope global 2>/dev/null | while read -r _ iface _ _ cidr _; do
+      local candidate_ip
+      candidate_ip="${cidr%%/*}"
+      printf '%s %s %s\n' "$(ip_address_priority "${candidate_ip}")" "$(interface_priority "${iface}")" "${candidate_ip}"
+    done | sort -n -k1,1 -k2,2
   )"
 
-  while read -r score candidate_ip; do
+  while read -r _ _ candidate_ip; do
     if [[ -n "${candidate_ip:-}" ]] && ! is_private_ipv4 "${candidate_ip}"; then
       printf '%s\n' "${candidate_ip}"
       return

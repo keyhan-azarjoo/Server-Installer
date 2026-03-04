@@ -543,6 +543,13 @@ function Get-PreferredIPv4Addresses {
             }
         }, @{
             Expression = {
+                if ($_.IPAddress -match '^192\.168\.') { return 0 }
+                if ($_.IPAddress -match '^10\.') { return 1 }
+                if ($_.IPAddress -match '^172\.(1[6-9]|2[0-9]|3[0-1])\.') { return 2 }
+                return 3
+            }
+        }, @{
+            Expression = {
                 $ipInterface = $interfaceMap[$_.InterfaceIndex]
                 if ($ipInterface) { return $ipInterface.InterfaceMetric }
                 return 9999
@@ -657,6 +664,59 @@ function Ensure-WebConfig {
     Set-Content -Path $webConfigPath -Value $content -Encoding UTF8
 }
 
+function Grant-IisFolderAccess {
+    param(
+        [Parameter(Mandatory = $true)][string]$PublishPath,
+        [Parameter(Mandatory = $true)][string]$AppPoolName
+    )
+
+    $appPoolIdentity = "IIS AppPool\$AppPoolName"
+    $grantRule = "{0}:(OI)(CI)(RX)" -f $appPoolIdentity
+    $iisUsersRule = "IIS_IUSRS:(OI)(CI)(RX)"
+
+    & icacls $PublishPath /grant $grantRule /grant $iisUsersRule /T /C | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to grant IIS access to '$PublishPath'."
+    }
+}
+
+function Test-LocalHttpsEndpoint {
+    param([Parameter(Mandatory = $true)][int]$Port)
+
+    $previousCallback = [System.Net.ServicePointManager]::ServerCertificateValidationCallback
+    [System.Net.ServicePointManager]::ServerCertificateValidationCallback = { $true }
+
+    try {
+        $request = [System.Net.HttpWebRequest]::Create("https://localhost:$Port/")
+        $request.Method = "GET"
+        $request.Timeout = 10000
+        $request.ReadWriteTimeout = 10000
+
+        try {
+            $response = $request.GetResponse()
+            $response.Close()
+            return $true
+        }
+        catch [System.Net.WebException] {
+            $webResponse = $_.Exception.Response
+            if ($webResponse) {
+                $statusCode = [int]$webResponse.StatusCode
+                $webResponse.Close()
+
+                # 404/401/etc. still proves the app and IIS pipeline are responding.
+                if ($statusCode -ne 503) {
+                    return $true
+                }
+            }
+
+            return $false
+        }
+    }
+    finally {
+        [System.Net.ServicePointManager]::ServerCertificateValidationCallback = $previousCallback
+    }
+}
+
 function Configure-IisSite {
     param(
         [Parameter(Mandatory = $true)][string]$PublishPath,
@@ -711,6 +771,9 @@ function Configure-IisSite {
     }
 
     Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name managedRuntimeVersion -Value ""
+    Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name autoStart -Value $true
+    Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name startMode -Value "AlwaysRunning"
+    Set-ItemProperty "IIS:\AppPools\$AppPoolName" -Name processModel.loadUserProfile -Value $true
 
     if (Test-Path "IIS:\Sites\$WebsiteName") {
         Stop-Website -Name $WebsiteName -ErrorAction SilentlyContinue
@@ -742,7 +805,22 @@ function Configure-IisSite {
         Pop-Location
     }
 
+    Grant-IisFolderAccess -PublishPath $PublishPath -AppPoolName $AppPoolName
+
+    $appPool = Get-ChildItem "IIS:\AppPools\$AppPoolName" -ErrorAction SilentlyContinue
+    if ($appPool -and $appPool.State -ne "Started") {
+        Start-WebAppPool -Name $AppPoolName | Out-Null
+    }
+
     Start-Website -Name $WebsiteName | Out-Null
+
+    Start-Sleep -Seconds 2
+    if (-not (Test-LocalHttpsEndpoint -Port $resolvedHttpsPort)) {
+        $currentPool = Get-ChildItem "IIS:\AppPools\$AppPoolName" -ErrorAction SilentlyContinue
+        $poolState = if ($currentPool) { $currentPool.State } else { "Unknown" }
+        throw "IIS site started, but HTTPS health check failed on port $resolvedHttpsPort (app pool state: $poolState). Check Application Event Log and stdout logs for app startup errors."
+    }
+
     return @{
         HttpPort = $resolvedHttpPort
         HttpsPort = $resolvedHttpsPort
