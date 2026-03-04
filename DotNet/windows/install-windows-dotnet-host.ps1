@@ -73,8 +73,11 @@ $domainName = if (-not [string]::IsNullOrWhiteSpace($DomainName)) { $DomainName 
 
 if ($DeploymentMode -eq "IIS") {
     Install-WindowsFeatureSet
+    Install-DotNetPrerequisites -Channel $DotNetChannel -SdkUrl $SdkInstallerUrl -RuntimeUrl $AspNetRuntimeUrl -HostingUrl $HostingBundleUrl
 }
-Install-DotNetPrerequisites -Channel $DotNetChannel -SdkUrl $SdkInstallerUrl -RuntimeUrl $AspNetRuntimeUrl -HostingUrl $HostingBundleUrl
+else {
+    Install-DotNetPrerequisites -Channel $DotNetChannel -SdkUrl $SdkInstallerUrl -RuntimeUrl $AspNetRuntimeUrl -HostingUrl $HostingBundleUrl -SkipHostingBundle
+}
 
 $stagingRoot = Join-Path $env:TEMP ("iis-installer-stage-" + [System.Guid]::NewGuid().ToString("N"))
 $contentPath = Prepare-DeploymentContent -SourceValue $sourceValue -StagingRoot $stagingRoot -GitHubToken $GitHubToken

@@ -135,6 +135,8 @@ function Test-HostingBundleInstalled {
     foreach ($registryPath in $registryPaths) {
         $match = Get-ItemProperty -Path $registryPath -ErrorAction SilentlyContinue |
             Where-Object {
+                $_.PSObject.Properties.Match("DisplayName").Count -gt 0 -and
+                $_.PSObject.Properties.Match("DisplayVersion").Count -gt 0 -and
                 $_.DisplayName -like "Microsoft ASP.NET Core * Hosting Bundle*" -and
                 $_.DisplayVersion -match "^$([regex]::Escape($MajorVersion))\."
             } |
@@ -153,7 +155,8 @@ function Install-DotNetPrerequisites {
         [Parameter(Mandatory = $true)][string]$Channel,
         [string]$SdkUrl,
         [string]$RuntimeUrl,
-        [string]$HostingUrl
+        [string]$HostingUrl,
+        [switch]$SkipHostingBundle
     )
 
     $majorVersion = Get-DotNetMajorVersion -Channel $Channel
@@ -182,11 +185,16 @@ function Install-DotNetPrerequisites {
         Install-Executable -Url $RuntimeUrl -FileName "aspnetcore-runtime-win-x64.exe" -Arguments "/install /quiet /norestart"
     }
 
-    if (Test-HostingBundleInstalled -MajorVersion $majorVersion) {
-        Write-Host "ASP.NET Core Hosting Bundle $majorVersion already installed."
+    if ($SkipHostingBundle) {
+        Write-Host "Skipping ASP.NET Core Hosting Bundle install."
     }
     else {
-        Install-Executable -Url $HostingUrl -FileName "dotnet-hosting-win.exe" -Arguments "/install /quiet /norestart OPT_NO_ANCM=0"
+        if (Test-HostingBundleInstalled -MajorVersion $majorVersion) {
+            Write-Host "ASP.NET Core Hosting Bundle $majorVersion already installed."
+        }
+        else {
+            Install-Executable -Url $HostingUrl -FileName "dotnet-hosting-win.exe" -Arguments "/install /quiet /norestart OPT_NO_ANCM=0"
+        }
     }
 }
 

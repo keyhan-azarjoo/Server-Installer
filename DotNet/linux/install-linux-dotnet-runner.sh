@@ -20,7 +20,7 @@ require_root() {
 }
 
 run_cmd() {
-  echo ">> $*"
+  echo ">> $*" >&2
   "$@"
 }
 
@@ -261,7 +261,7 @@ publish_local_source() {
   rm -rf "${publish_path}"
   mkdir -p "${publish_path}"
 
-  echo "Publishing local source project: ${project_path}"
+  echo "Publishing local source project: ${project_path}" >&2
   run_cmd dotnet publish "${project_path}" -c Release -o "${publish_path}"
   printf '%s\n' "${publish_path}"
 }

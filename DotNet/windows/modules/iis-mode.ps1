@@ -71,7 +71,48 @@ function Remove-DeploymentPath {
         Remove-Item -LiteralPath $TargetPath -Recurse -Force
     }
     catch {
-        throw "Failed to remove existing deployment path '$TargetPath'. IIS files may still be locked. $($_.Exception.Message)"
+        Write-Host "Initial file removal failed. Stopping IIS core services and retrying."
+
+        Stop-Service W3SVC -Force -ErrorAction SilentlyContinue
+        Stop-Service WAS -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+
+        try {
+            Remove-Item -LiteralPath $TargetPath -Recurse -Force
+        }
+        catch {
+            Start-Service WAS -ErrorAction SilentlyContinue
+            Start-Service W3SVC -ErrorAction SilentlyContinue
+            throw "Failed to remove existing deployment path '$TargetPath'. Files are still locked. $($_.Exception.Message)"
+        }
+
+        Start-Service WAS -ErrorAction SilentlyContinue
+        Start-Service W3SVC -ErrorAction SilentlyContinue
+    }
+}
+
+function Remove-ConflictingBinding {
+    param(
+        [Parameter(Mandatory = $true)][string]$WebsiteName,
+        [Parameter(Mandatory = $true)][string]$Protocol,
+        [Parameter(Mandatory = $true)][int]$Port,
+        [string]$HostHeader
+    )
+
+    Import-Module WebAdministration
+
+    $targetBindingInformation = "*:${Port}:$HostHeader"
+    $conflictingSites = Get-Website | Where-Object {
+        $_.Name -ne $WebsiteName -and
+        ($_.Bindings.Collection | Where-Object {
+            $_.protocol -eq $Protocol -and $_.bindingInformation -eq $targetBindingInformation
+        })
+    }
+
+    foreach ($site in $conflictingSites) {
+        Write-Host "Removing conflicting $Protocol binding from IIS site '$($site.Name)' on port $Port."
+        Stop-Website -Name $site.Name -ErrorAction SilentlyContinue | Out-Null
+        Remove-WebBinding -Name $site.Name -Protocol $Protocol -Port $Port -HostHeader $HostHeader | Out-Null
     }
 }
 
@@ -196,23 +237,8 @@ function Configure-IisSite {
     $resolvedHttpPort = $HttpPort
     $resolvedHttpsPort = $HttpsPortNumber
 
-    if ([string]::IsNullOrWhiteSpace($hostHeader)) {
-        $httpConflict = Get-Website | Where-Object {
-            $_.Name -ne $WebsiteName -and $_.Bindings.Collection.bindingInformation -contains "*:${HttpPort}:"
-        } | Select-Object -First 1
-        if ($httpConflict) {
-            $resolvedHttpPort = 8080
-            Write-Host "HTTP port $HttpPort is already used by IIS site '$($httpConflict.Name)'. Using port $resolvedHttpPort instead."
-        }
-
-        $httpsConflict = Get-WebBinding -Protocol "https" -ErrorAction SilentlyContinue | Where-Object {
-            $_.bindingInformation -eq "*:${HttpsPortNumber}:"
-        } | Select-Object -First 1
-        if ($httpsConflict) {
-            $resolvedHttpsPort = 8443
-            Write-Host "HTTPS port $HttpsPortNumber is already used by another IIS binding. Using port $resolvedHttpsPort instead."
-        }
-    }
+    Remove-ConflictingBinding -WebsiteName $WebsiteName -Protocol "http" -Port $resolvedHttpPort -HostHeader $hostHeader
+    Remove-ConflictingBinding -WebsiteName $WebsiteName -Protocol "https" -Port $resolvedHttpsPort -HostHeader $hostHeader
 
     if (-not (Test-Path "IIS:\AppPools\$AppPoolName")) {
         New-WebAppPool -Name $AppPoolName | Out-Null
@@ -226,6 +252,26 @@ function Configure-IisSite {
     if (Test-Path "IIS:\Sites\$WebsiteName") {
         Stop-Website -Name $WebsiteName -ErrorAction SilentlyContinue
         Remove-Website -Name $WebsiteName
+    }
+
+    $remainingHttpConflict = Get-Website | Where-Object {
+        $_.Name -ne $WebsiteName -and
+        ($_.Bindings.Collection | Where-Object {
+            $_.protocol -eq "http" -and $_.bindingInformation -eq "*:${resolvedHttpPort}:$hostHeader"
+        })
+    } | Select-Object -First 1
+    if ($remainingHttpConflict) {
+        throw "HTTP port $resolvedHttpPort is still occupied by IIS site '$($remainingHttpConflict.Name)'."
+    }
+
+    $remainingHttpsConflict = Get-Website | Where-Object {
+        $_.Name -ne $WebsiteName -and
+        ($_.Bindings.Collection | Where-Object {
+            $_.protocol -eq "https" -and $_.bindingInformation -eq "*:${resolvedHttpsPort}:$hostHeader"
+        })
+    } | Select-Object -First 1
+    if ($remainingHttpsConflict) {
+        throw "HTTPS port $resolvedHttpsPort is still occupied by IIS site '$($remainingHttpsConflict.Name)'."
     }
 
     New-Website -Name $WebsiteName -Port $resolvedHttpPort -PhysicalPath $PublishPath -ApplicationPool $AppPoolName -HostHeader $hostHeader | Out-Null
