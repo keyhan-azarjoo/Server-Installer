@@ -335,10 +335,16 @@ get_local_ip() {
   local local_ip
   local best_entry
   best_entry="$(
-    ip -o -4 addr show up scope global 2>/dev/null | while read -r _ iface _ _ cidr _; do
-      local_ip="${cidr%%/*}"
-      if is_private_ipv4 "${local_ip}"; then
-        printf '%s %s %s\n' "$(ip_address_priority "${local_ip}")" "$(interface_priority "${iface}")" "${local_ip}"
+    ip -o -4 addr show up scope global 2>/dev/null | awk '
+      {
+        iface=$2
+        split($4, parts, "/")
+        ip=parts[1]
+        print iface " " ip
+      }
+    ' | while read -r iface candidate_ip; do
+      if [[ -n "${candidate_ip}" ]] && is_private_ipv4 "${candidate_ip}"; then
+        printf '%s %s %s\n' "$(ip_address_priority "${candidate_ip}")" "$(interface_priority "${iface}")" "${candidate_ip}"
       fi
     done | sort -n -k1,1 -k2,2 | head -n 1
   )"
@@ -361,10 +367,17 @@ get_local_ip() {
 get_static_ip() {
   local ip_list
   ip_list="$(
-    ip -o -4 addr show up scope global 2>/dev/null | while read -r _ iface _ _ cidr _; do
-      local candidate_ip
-      candidate_ip="${cidr%%/*}"
-      printf '%s %s %s\n' "$(ip_address_priority "${candidate_ip}")" "$(interface_priority "${iface}")" "${candidate_ip}"
+    ip -o -4 addr show up scope global 2>/dev/null | awk '
+      {
+        iface=$2
+        split($4, parts, "/")
+        ip=parts[1]
+        print iface " " ip
+      }
+    ' | while read -r iface candidate_ip; do
+      if [[ -n "${candidate_ip}" ]]; then
+        printf '%s %s %s\n' "$(ip_address_priority "${candidate_ip}")" "$(interface_priority "${iface}")" "${candidate_ip}"
+      fi
     done | sort -n -k1,1 -k2,2
   )"
 
