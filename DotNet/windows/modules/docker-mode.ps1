@@ -65,7 +65,17 @@ function Get-DockerRuntimeTag {
     param([Parameter(Mandatory = $true)][string]$DotNetChannel)
 
     $majorVersion = Get-DotNetMajorVersion -Channel $DotNetChannel
-    return "$majorVersion.0"
+    $windowsBuild = [System.Environment]::OSVersion.Version.Build
+
+    if ($windowsBuild -ge 20348) {
+        return "$majorVersion.0-nanoserver-ltsc2022"
+    }
+
+    if ($windowsBuild -ge 17763) {
+        return "$majorVersion.0-nanoserver-1809"
+    }
+
+    throw "Unsupported Windows build $windowsBuild for Windows containers. Use Windows Server 2019 / build 17763 or newer."
 }
 
 function Write-Dockerfile {
