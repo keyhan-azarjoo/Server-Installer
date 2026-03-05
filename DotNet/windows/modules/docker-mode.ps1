@@ -79,6 +79,30 @@ function Get-DockerEngineOsType {
     return $dockerOsType.Trim().ToLowerInvariant()
 }
 
+function Switch-DockerEngineToLinux {
+    $dockerCliPath = Join-Path $env:ProgramFiles "Docker\Docker\DockerCli.exe"
+    if (-not (Test-Path -LiteralPath $dockerCliPath)) {
+        return $false
+    }
+
+    Write-Host "Switching Docker engine to Linux containers"
+    $switchProcess = Start-Process -FilePath $dockerCliPath -ArgumentList "-SwitchLinuxEngine" -PassThru -WindowStyle Hidden
+    if ($switchProcess) {
+        $switchProcess.WaitForExit()
+    }
+
+    $deadline = (Get-Date).AddSeconds(45)
+    while ((Get-Date) -lt $deadline) {
+        Start-Sleep -Seconds 2
+        $engineOsType = Get-DockerEngineOsType
+        if ($engineOsType -eq "linux") {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Install-DockerWithMicrosoftScript {
     $installScriptPath = Join-Path $env:TEMP "install-docker-ce.ps1"
     $installScriptUrl = "https://raw.githubusercontent.com/microsoft/Windows-Containers/Main/helpful_tools/Install-DockerCE/install-docker-ce.ps1"
@@ -187,7 +211,22 @@ function Invoke-DockerDeployment {
     }
 
     if ($engineOsType -eq "windows") {
-        Ensure-WindowsContainerRuntimeReady
+        try {
+            Ensure-WindowsContainerRuntimeReady
+        }
+        catch {
+            Write-Host "Windows container prerequisites are not available: $($_.Exception.Message)"
+            $switchedToLinux = Switch-DockerEngineToLinux
+            if (-not $switchedToLinux) {
+                throw "Windows container prerequisites are missing and Docker could not be switched to Linux engine automatically. Enable Windows Containers feature or switch Docker Desktop to Linux containers, then rerun."
+            }
+
+            $engineOsType = Get-DockerEngineOsType
+            if ($engineOsType -ne "linux") {
+                throw "Docker engine switch was attempted, but Linux engine is still unavailable."
+            }
+            Write-Host "Docker engine switched to Linux containers."
+        }
     }
 
     $deploymentRoot = Join-Path $env:ProgramData "IIS-Installer\docker"
