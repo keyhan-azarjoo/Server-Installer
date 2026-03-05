@@ -81,7 +81,7 @@ function Get-DockerEngineOsType {
 
 function Switch-DockerEngineToLinux {
     $waitForLinuxEngine = {
-        param([int]$TimeoutSeconds = 45)
+        param([int]$TimeoutSeconds = 180)
 
         $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
         while ((Get-Date) -lt $deadline) {
@@ -95,13 +95,42 @@ function Switch-DockerEngineToLinux {
         return $false
     }
 
-    $dockerCliCandidates = @(
-        (Join-Path $env:ProgramFiles "Docker\Docker\DockerCli.exe"),
-        (Join-Path ${env:ProgramFiles(x86)} "Docker\Docker\DockerCli.exe")
+    $dockerDesktopCandidates = @(
+        (Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Docker\Docker\Docker Desktop.exe"),
+        (Join-Path $env:LocalAppData "Docker\Docker\Docker Desktop.exe")
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
 
+    $desktopRunning = [bool](Get-Process -Name "Docker Desktop" -ErrorAction SilentlyContinue)
+    if (-not $desktopRunning) {
+        foreach ($desktopPath in $dockerDesktopCandidates) {
+            if (-not (Test-Path -LiteralPath $desktopPath)) {
+                continue
+            }
+
+            Write-Host "Starting Docker Desktop"
+            Start-Process -FilePath $desktopPath -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+            break
+        }
+    }
+
+    $dockerCliCandidates = @(
+        (Join-Path $env:ProgramFiles "Docker\Docker\DockerCli.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Docker\Docker\DockerCli.exe"),
+        (Join-Path $env:LocalAppData "Docker\Docker\DockerCli.exe")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    $dockerCliCommand = Get-Command "com.docker.cli" -ErrorAction SilentlyContinue
+    if ($dockerCliCommand) {
+        $dockerCliCandidates += $dockerCliCommand.Source
+        $dockerCliCandidates = $dockerCliCandidates | Select-Object -Unique
+    }
+
     foreach ($dockerCliPath in $dockerCliCandidates) {
-        if (-not (Test-Path -LiteralPath $dockerCliPath)) {
+        if ((-not (Test-Path -LiteralPath $dockerCliPath)) -and ($dockerCliPath -notlike "*.exe")) {
+            continue
+        }
+        if ((-not (Test-Path -LiteralPath $dockerCliPath)) -and ($dockerCliPath -like "*.exe")) {
             continue
         }
 
@@ -110,6 +139,19 @@ function Switch-DockerEngineToLinux {
             $switchProcess = Start-Process -FilePath $dockerCliPath -ArgumentList $arg -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
             if ($switchProcess) {
                 $switchProcess.WaitForExit()
+            }
+
+            if (& $waitForLinuxEngine) {
+                return $true
+            }
+
+            $previousErrorActionPreference = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = "Continue"
+                & $dockerCliPath $arg *> $null
+            }
+            finally {
+                $ErrorActionPreference = $previousErrorActionPreference
             }
 
             if (& $waitForLinuxEngine) {
