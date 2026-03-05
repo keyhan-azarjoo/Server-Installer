@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Host = "0.0.0.0",
+    [string]$BindHost = "0.0.0.0",
     [int]$Port = 8090
 )
 
@@ -11,5 +11,5 @@ if (-not (Test-Path -LiteralPath $newLauncher)) {
     throw "Launcher not found: $newLauncher"
 }
 
-Write-Host "Starting Server Installer dashboard (compat mode) on http://$Host`:$Port"
-& $newLauncher -Host $Host -Port $Port
+Write-Host "Starting Server Installer dashboard (compat mode) on http://$BindHost`:$Port"
+& $newLauncher -BindHost $BindHost -Port $Port

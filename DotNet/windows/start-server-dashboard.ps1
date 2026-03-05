@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Host = "0.0.0.0",
+    [string]$BindHost = "0.0.0.0",
     [int]$Port = 8090
 )
 
@@ -30,8 +30,8 @@ else {
 $argsList = @()
 $argsList += $pythonArgsPrefix
 $argsList += $dashboardScript
-$argsList += @("--host", $Host)
+$argsList += @("--host", $BindHost)
 $argsList += @("--port", "$Port")
 
-Write-Host "Starting dashboard on http://$Host`:$Port"
+Write-Host "Starting dashboard on http://$BindHost`:$Port"
 & $pythonCommand @argsList
