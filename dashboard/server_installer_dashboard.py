@@ -3,6 +3,7 @@ import argparse
 import ctypes
 import html
 import ipaddress
+import json
 import os
 import platform
 import secrets
@@ -271,8 +272,43 @@ button{{background:#0f766e;color:#fff;border:0;padding:10px 14px;border-radius:8
 </form></div></body></html>"""
 
 
+def page_dashboard_mui(message="", system_name=""):
+    config = {
+        "os": (system_name or platform.system()).lower(),
+        "os_label": platform.system(),
+        "message": message or "",
+    }
+    return """<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Server Installer Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    html, body, #root { height: 100%; margin: 0; }
+    body { font-family: "Manrope", "Segoe UI", sans-serif; background: #eef3fb; }
+    .terminal-log { white-space: pre-wrap; word-break: break-word; font-family: Consolas, monospace; font-size: 12px; }
+  </style>
+  <script>window.__APP_CONFIG__ = __CONFIG__;</script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/@mui/material@5.16.14/umd/material-ui.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/@mui/icons-material@5.16.14/umd/material-ui-icons.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" src="/static/server_dashboard_ui.js"></script>
+</body>
+</html>""".replace("__CONFIG__", json.dumps(config))
+
+
 def page_dashboard(message=""):
     system_name = platform.system().lower()
+    return page_dashboard_mui(message, system_name)
     is_windows = system_name == "windows"
     is_linux = system_name == "linux"
     is_macos = system_name == "darwin"
@@ -694,6 +730,21 @@ class Handler(BaseHTTPRequestHandler):
             self.write_html(page_output(title, output, code))
 
     def do_GET(self):
+        if self.path == "/static/server_dashboard_ui.js":
+            ui_script = ROOT / "dashboard" / "server_dashboard_ui.js"
+            if not ui_script.exists():
+                self.write_html("Dashboard UI script not found.", HTTPStatus.NOT_FOUND)
+                return
+            data = ui_script.read_bytes()
+            try:
+                self.send_response(HTTPStatus.OK)
+                self.send_header("Content-Type", "application/javascript; charset=utf-8")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+            except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                return
+            return
         if self.path == "/":
             if self.is_local_client() or self.is_auth():
                 self.write_html(page_dashboard())

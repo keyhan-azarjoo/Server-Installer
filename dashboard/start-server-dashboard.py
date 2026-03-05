@@ -12,6 +12,7 @@ from pathlib import Path
 REPO = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
 REQUIRED_FILES = [
     "dashboard/server_installer_dashboard.py",
+    "dashboard/server_dashboard_ui.js",
     "DotNet/windows/install-windows-dotnet-host.ps1",
     "DotNet/windows/modules/common.ps1",
     "DotNet/windows/modules/iis-mode.ps1",

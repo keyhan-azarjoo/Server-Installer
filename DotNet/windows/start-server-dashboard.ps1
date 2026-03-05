@@ -62,6 +62,7 @@ function Ensure-ServerInstallerFiles {
 
     $requiredFiles = @(
         "dashboard/server_installer_dashboard.py",
+        "dashboard/server_dashboard_ui.js",
         "DotNet/windows/install-windows-dotnet-host.ps1",
         "DotNet/windows/modules/common.ps1",
         "DotNet/windows/modules/iis-mode.ps1",
@@ -74,10 +75,21 @@ function Ensure-ServerInstallerFiles {
         $targetDirectory = Split-Path -Path $targetPath -Parent
         New-Item -ItemType Directory -Path $targetDirectory -Force | Out-Null
 
-        if (-not (Test-Path -LiteralPath $targetPath)) {
-            $uri = "$baseUrl/$relativePath"
-            Write-Host "Downloading required file: $relativePath"
-            Invoke-WebRequest -Uri $uri -OutFile $targetPath
+        $uri = "$baseUrl/$relativePath"
+        $tempPath = "$targetPath.download"
+        try {
+            Write-Host "Syncing required file: $relativePath"
+            Invoke-WebRequest -Uri $uri -OutFile $tempPath
+            Move-Item -Force -Path $tempPath -Destination $targetPath
+        }
+        catch {
+            if (Test-Path -LiteralPath $tempPath) {
+                Remove-Item -Force -LiteralPath $tempPath -ErrorAction SilentlyContinue
+            }
+            if (-not (Test-Path -LiteralPath $targetPath)) {
+                throw "Failed to download required file: $relativePath. $($_.Exception.Message)"
+            }
+            Write-Warning "Using cached file for $relativePath. $($_.Exception.Message)"
         }
     }
 
