@@ -762,7 +762,7 @@ resolve_application_source() {
 }
 
 main() {
-  echo "IIS-Installer Linux version: ${SCRIPT_VERSION}"
+  echo "Server-Installer Linux version: ${SCRIPT_VERSION}"
   require_root
   resolve_dotnet_channel
   install_os_packages

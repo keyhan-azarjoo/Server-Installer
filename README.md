@@ -1,4 +1,4 @@
-# IIS / .NET App Installer
+# Server / .NET App Installer
 
 This repository includes OS-specific installers under `DotNet`:
 
@@ -17,7 +17,7 @@ Fetch and run the PowerShell script from an elevated terminal:
 
 ```powershell
 Set-ExecutionPolicy -Scope Process Bypass
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/IIS-Installer/main/DotNet/windows/install-windows-dotnet-host.ps1" -OutFile ".\install-windows-dotnet-host.ps1"
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/DotNet/windows/install-windows-dotnet-host.ps1" -OutFile ".\install-windows-dotnet-host.ps1"
 .\install-windows-dotnet-host.ps1
 ```
 
@@ -26,7 +26,7 @@ If you download only the main Windows script, it will automatically download its
 Repository folder:
 
 ```text
-https://github.com/keyhan-azarjoo/IIS-Installer/tree/main/DotNet/windows
+https://github.com/keyhan-azarjoo/Server-Installer/tree/main/DotNet/windows
 ```
 
 What it does:
@@ -52,7 +52,7 @@ In `Docker` mode:
 - Installs Docker Desktop if Docker is missing and `winget` is available.
 - Builds a container image from the prepared app files.
 - Runs the container on HTTP only by default.
-- Stores the Docker build context under `C:\ProgramData\IIS-Installer\docker\<site-or-package-name>`.
+- Stores the Docker build context under `C:\ProgramData\Server-Installer\docker\<site-or-package-name>`.
 
 Defaults:
 
@@ -102,7 +102,7 @@ Example:
 Fetch and run the shell script as root:
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/IIS-Installer/main/DotNet/linux/install-linux-dotnet-runner.sh" -o ./install-linux-dotnet-runner.sh
+curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/DotNet/linux/install-linux-dotnet-runner.sh" -o ./install-linux-dotnet-runner.sh
 chmod +x ./install-linux-dotnet-runner.sh
 sudo ./install-linux-dotnet-runner.sh
 ```
@@ -110,8 +110,8 @@ sudo ./install-linux-dotnet-runner.sh
 Repository folders:
 
 ```text
-Windows: https://github.com/keyhan-azarjoo/IIS-Installer/tree/main/DotNet/windows
-Linux:   https://github.com/keyhan-azarjoo/IIS-Installer/tree/main/DotNet/linux
+Windows: https://github.com/keyhan-azarjoo/Server-Installer/tree/main/DotNet/windows
+Linux:   https://github.com/keyhan-azarjoo/Server-Installer/tree/main/DotNet/linux
 ```
 
 What it does:

@@ -418,7 +418,7 @@ function Invoke-DockerDeployment {
         throw "Unable to detect Docker engine OS type. Ensure Docker Desktop/Engine is running."
     }
 
-    $deploymentRoot = Join-Path $env:ProgramData "IIS-Installer\docker"
+    $deploymentRoot = Join-Path $env:ProgramData "Server-Installer\docker"
     $targetPath = Join-Path $deploymentRoot $PackageName
     New-Item -ItemType Directory -Path $deploymentRoot -Force | Out-Null
     Copy-FolderContent -SourcePath $ContentPath -TargetPath $targetPath

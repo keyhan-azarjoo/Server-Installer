@@ -22,13 +22,13 @@ foreach ($entry in $PSBoundParameters.GetEnumerator()) {
     $originalBoundParameters[$entry.Key] = $entry.Value
 }
 
-$moduleRoot = Join-Path $env:ProgramData "IIS-Installer\modules"
+$moduleRoot = Join-Path $env:ProgramData "Server-Installer\modules"
 function Ensure-LocalWindowsModules {
     param([Parameter(Mandatory = $true)][string]$ModuleRoot)
 
     $requiredFiles = @("common.ps1", "iis-mode.ps1", "docker-mode.ps1")
     New-Item -ItemType Directory -Path $ModuleRoot -Force | Out-Null
-    $baseUrl = "https://raw.githubusercontent.com/keyhan-azarjoo/IIS-Installer/main/DotNet/windows/modules"
+    $baseUrl = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/DotNet/windows/modules"
 
     foreach ($fileName in $requiredFiles) {
         $targetPath = Join-Path $ModuleRoot $fileName
@@ -43,7 +43,7 @@ Ensure-LocalWindowsModules -ModuleRoot $moduleRoot
 . (Join-Path $moduleRoot "iis-mode.ps1")
 . (Join-Path $moduleRoot "docker-mode.ps1")
 
-Write-Host "IIS-Installer Windows version: $scriptVersion"
+Write-Host "Server-Installer Windows version: $scriptVersion"
 
 function Install-DotNetForSelectedMode {
     param(
@@ -99,7 +99,7 @@ if ($DeploymentMode -eq "IIS") {
 }
 Install-DotNetForSelectedMode -SelectedMode $DeploymentMode -Channel $DotNetChannel -SdkUrl $SdkInstallerUrl -RuntimeUrl $AspNetRuntimeUrl -HostingUrl $HostingBundleUrl
 
-$stagingRoot = Join-Path $env:TEMP ("iis-installer-stage-" + [System.Guid]::NewGuid().ToString("N"))
+$stagingRoot = Join-Path $env:TEMP ("server-installer-stage-" + [System.Guid]::NewGuid().ToString("N"))
 $contentPath = Prepare-DeploymentContent -SourceValue $sourceValue -StagingRoot $stagingRoot -GitHubToken $GitHubToken
 $packageName = Get-ArtifactName -SourcePath $sourceValue
 

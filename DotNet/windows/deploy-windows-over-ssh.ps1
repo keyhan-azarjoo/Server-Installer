@@ -5,7 +5,7 @@ param(
     [Parameter(Mandatory = $true)][string]$RemoteUser,
     [string]$RemoteInstallerPath = "C:\Windows\Temp\install-windows-dotnet-host.ps1",
     [string]$RemoteModuleDirectory = "C:\Windows\Temp",
-    [string]$RemotePackageDirectory = "C:\Windows\Temp\IIS-Installer",
+    [string]$RemotePackageDirectory = "C:\Windows\Temp\Server-Installer",
     [string]$DotNetChannel = "8.0",
     [string]$DomainName,
     [string]$SiteName = "DotNetApp",
