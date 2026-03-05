@@ -118,12 +118,27 @@ function Switch-DockerEngineToLinux {
         }
     }
 
-    $contextNames = & docker context ls --format "{{.Name}}" 2>$null
+    $previousErrorActionPreference = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $contextNames = & docker context ls --format "{{.Name}}" 2>$null
+    }
+    finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+    }
+
     if ($LASTEXITCODE -eq 0 -and $contextNames) {
         foreach ($contextName in @("desktop-linux", "default")) {
             if ($contextNames -contains $contextName) {
                 Write-Host "Switching Docker context to '$contextName'"
-                & docker context use $contextName *> $null
+                $previousErrorActionPreference = $ErrorActionPreference
+                try {
+                    $ErrorActionPreference = "Continue"
+                    & docker context use $contextName 2>$null | Out-Null
+                }
+                finally {
+                    $ErrorActionPreference = $previousErrorActionPreference
+                }
                 if ($LASTEXITCODE -eq 0 -and (& $waitForLinuxEngine)) {
                     return $true
                 }
