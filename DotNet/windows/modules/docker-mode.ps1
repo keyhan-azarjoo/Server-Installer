@@ -150,15 +150,33 @@ function Install-DockerDesktop {
 }
 
 function Switch-DockerEngineToLinux {
+    if ((Get-DockerEngineOsType) -eq "linux") {
+        return $true
+    }
+
     $waitForLinuxEngine = {
-        param([int]$TimeoutSeconds = 180)
+        param(
+            [int]$TimeoutSeconds = 20,
+            [string]$Stage = "switch"
+        )
 
         $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        $lastReportedOsType = $null
         while ((Get-Date) -lt $deadline) {
             Start-Sleep -Seconds 2
             $engineOsType = Get-DockerEngineOsType
             if ($engineOsType -eq "linux") {
                 return $true
+            }
+
+            if ($engineOsType -ne $lastReportedOsType) {
+                if ([string]::IsNullOrWhiteSpace($engineOsType)) {
+                    Write-Host "Waiting for Docker engine to become available ($Stage)..."
+                }
+                else {
+                    Write-Host "Docker engine currently reports '$engineOsType' ($Stage), waiting for 'linux'..."
+                }
+                $lastReportedOsType = $engineOsType
             }
         }
 
@@ -188,7 +206,7 @@ function Switch-DockerEngineToLinux {
         (Join-Path $env:ProgramFiles "Docker\Docker\DockerCli.exe"),
         (Join-Path ${env:ProgramFiles(x86)} "Docker\Docker\DockerCli.exe"),
         (Join-Path $env:LocalAppData "Docker\Docker\DockerCli.exe")
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_) } | Select-Object -Unique
 
     $dockerCliCommand = Get-Command "com.docker.cli" -ErrorAction SilentlyContinue
     if ($dockerCliCommand) {
@@ -196,14 +214,8 @@ function Switch-DockerEngineToLinux {
         $dockerCliCandidates = $dockerCliCandidates | Select-Object -Unique
     }
 
+    $dockerCliCandidates = $dockerCliCandidates | Select-Object -First 2
     foreach ($dockerCliPath in $dockerCliCandidates) {
-        if ((-not (Test-Path -LiteralPath $dockerCliPath)) -and ($dockerCliPath -notlike "*.exe")) {
-            continue
-        }
-        if ((-not (Test-Path -LiteralPath $dockerCliPath)) -and ($dockerCliPath -like "*.exe")) {
-            continue
-        }
-
         foreach ($arg in @("-SwitchLinuxEngine", "-SwitchDaemon")) {
             Write-Host "Switching Docker engine to Linux containers using $arg"
             $switchProcess = Start-Process -FilePath $dockerCliPath -ArgumentList $arg -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
@@ -211,7 +223,7 @@ function Switch-DockerEngineToLinux {
                 $switchProcess.WaitForExit()
             }
 
-            if (& $waitForLinuxEngine) {
+            if (& $waitForLinuxEngine -Stage "DockerCli $arg") {
                 return $true
             }
 
@@ -224,7 +236,7 @@ function Switch-DockerEngineToLinux {
                 $ErrorActionPreference = $previousErrorActionPreference
             }
 
-            if (& $waitForLinuxEngine) {
+            if (& $waitForLinuxEngine -Stage "DockerCli direct $arg") {
                 return $true
             }
         }
@@ -251,7 +263,7 @@ function Switch-DockerEngineToLinux {
                 finally {
                     $ErrorActionPreference = $previousErrorActionPreference
                 }
-                if ($LASTEXITCODE -eq 0 -and (& $waitForLinuxEngine)) {
+                if ($LASTEXITCODE -eq 0 -and (& $waitForLinuxEngine -Stage "docker context $contextName")) {
                     return $true
                 }
             }
@@ -307,16 +319,9 @@ function Ensure-DockerInstalled {
 }
 
 function Get-DockerRuntimeTag {
-    param(
-        [Parameter(Mandatory = $true)][string]$DotNetChannel,
-        [Parameter(Mandatory = $true)][ValidateSet("windows", "linux")][string]$EngineOsType
-    )
+    param([Parameter(Mandatory = $true)][string]$DotNetChannel)
 
     $majorVersion = Get-DotNetMajorVersion -Channel $DotNetChannel
-    if ($EngineOsType -eq "linux") {
-        return "$majorVersion.0"
-    }
-
     $windowsBuild = [System.Environment]::OSVersion.Version.Build
 
     if ($windowsBuild -ge 20348) {
@@ -334,12 +339,11 @@ function Write-Dockerfile {
     param(
         [Parameter(Mandatory = $true)][string]$ContentPath,
         [Parameter(Mandatory = $true)][string]$AssemblyName,
-        [Parameter(Mandatory = $true)][string]$DotNetChannel,
-        [Parameter(Mandatory = $true)][ValidateSet("windows", "linux")][string]$EngineOsType
+        [Parameter(Mandatory = $true)][string]$DotNetChannel
     )
 
     $dockerfilePath = Join-Path $ContentPath "Dockerfile.generated"
-    $runtimeTag = Get-DockerRuntimeTag -DotNetChannel $DotNetChannel -EngineOsType $EngineOsType
+    $runtimeTag = Get-DockerRuntimeTag -DotNetChannel $DotNetChannel
     $content = @"
 FROM mcr.microsoft.com/dotnet/aspnet:$runtimeTag
 WORKDIR /app
@@ -364,32 +368,10 @@ function Invoke-DockerDeployment {
 
     Ensure-DockerInstalled
     $engineOsType = Get-DockerEngineOsType
-    if ($engineOsType -notin @("windows", "linux")) {
-        throw "Unable to detect Docker engine OS type. Ensure Docker Desktop/Engine is running."
+    if ($engineOsType -ne "windows") {
+        throw "Docker engine must be set to Windows containers. Current engine: '$engineOsType'. Switch Docker Desktop to Windows containers and rerun."
     }
-
-    if ($engineOsType -eq "windows") {
-        try {
-            Ensure-WindowsContainerRuntimeReady
-        }
-        catch {
-            Write-Host "Windows container prerequisites are not available: $($_.Exception.Message)"
-            $switchedToLinux = Switch-DockerEngineToLinux
-            if (-not $switchedToLinux -and -not (Test-DockerDesktopInstalled)) {
-                Install-DockerDesktop
-                $switchedToLinux = Switch-DockerEngineToLinux
-            }
-            if (-not $switchedToLinux) {
-                throw "Windows container prerequisites are missing and Docker could not be switched to Linux engine automatically. Enable Windows Containers feature or switch Docker Desktop to Linux containers, then rerun."
-            }
-
-            $engineOsType = Get-DockerEngineOsType
-            if ($engineOsType -ne "linux") {
-                throw "Docker engine switch was attempted, but Linux engine is still unavailable."
-            }
-            Write-Host "Docker engine switched to Linux containers."
-        }
-    }
+    Ensure-WindowsContainerRuntimeReady
 
     $deploymentRoot = Join-Path $env:ProgramData "IIS-Installer\docker"
     $targetPath = Join-Path $deploymentRoot $PackageName
@@ -398,7 +380,7 @@ function Invoke-DockerDeployment {
 
     $assemblyPath = Find-ApplicationAssembly -DeploymentPath $targetPath
     $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($assemblyPath)
-    $dockerfilePath = Write-Dockerfile -ContentPath (Split-Path -Path $assemblyPath -Parent) -AssemblyName $assemblyName -DotNetChannel $DotNetChannel -EngineOsType $engineOsType
+    $dockerfilePath = Write-Dockerfile -ContentPath (Split-Path -Path $assemblyPath -Parent) -AssemblyName $assemblyName -DotNetChannel $DotNetChannel
 
     $imageName = ("{0}:latest" -f ($SiteName.ToLowerInvariant() -replace '[^a-z0-9\-]', '-'))
     $containerName = ($SiteName.ToLowerInvariant() -replace '[^a-z0-9\-]', '-')
@@ -420,14 +402,9 @@ function Invoke-DockerDeployment {
         throw "docker build failed."
     }
 
-    if ($engineOsType -eq "windows") {
-        # Prefer process isolation first when the image matches the host; fall back to Hyper-V
-        # if process isolation is unsupported on the current machine.
-        $runAttempts = @("process", "hyperv")
-    }
-    else {
-        $runAttempts = @($null)
-    }
+    # Prefer process isolation first when the image matches the host; fall back to Hyper-V
+    # if process isolation is unsupported on the current machine.
+    $runAttempts = @("process", "hyperv")
 
     $runSucceeded = $false
     foreach ($isolation in $runAttempts) {
