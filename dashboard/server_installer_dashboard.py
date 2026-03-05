@@ -278,7 +278,9 @@ def page_dashboard(message=""):
 *{{box-sizing:border-box}}
 body{{font-family:"Segoe UI",Arial,sans-serif;background:linear-gradient(180deg,#f3f6fc,#eef3fb);margin:0;color:#0f172a;overflow-x:hidden}}
 .layout{{display:grid;grid-template-columns:280px 1fr;min-height:100vh}}
-.sidebar{{background:linear-gradient(180deg,#0b1f3a,#102b4f);color:#e8eef9;padding:22px 18px;border-right:1px solid rgba(255,255,255,.08);position:relative;z-index:30;transition:transform .2s ease}}
+.layout{{display:block;min-height:100vh}}
+.sidebar{{background:linear-gradient(180deg,#0b1f3a,#102b4f);color:#e8eef9;padding:22px 18px;border-right:1px solid rgba(255,255,255,.08);position:fixed;left:0;top:0;bottom:0;width:280px;z-index:30;transform:translateX(-100%);transition:transform .2s ease}}
+.sidebar.open{{transform:translateX(0)}}
 .brand{{font-size:22px;font-weight:700;margin-bottom:18px;letter-spacing:.2px}}
 .navgroup{{margin-bottom:14px}}
 .navtitle{{font-size:12px;text-transform:uppercase;opacity:.75;margin-bottom:8px}}
@@ -303,9 +305,10 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
 .btn-outline{{background:#fff;color:#1e293b;border:1px solid #cbd5e1}}
 .view{{display:none}}
 .view.active{{display:block}}
-.sidebar-toggle{{display:none}}
-.sidebar-close{{display:none}}
+.sidebar-toggle{{display:inline-block}}
+.sidebar-close{{display:inline-block}}
 .backdrop{{display:none}}
+.backdrop.show{{display:block;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:20}}
 .terminal-panel{{position:fixed;right:22px;bottom:22px;width:620px;max-width:calc(100vw - 32px);z-index:60;border:1px solid #1f2937;background:#0d1117;border-radius:12px;box-shadow:0 20px 40px rgba(2,6,23,.5)}}
 .terminal-header{{cursor:move;user-select:none;padding:10px 12px;border-bottom:1px solid #1f2937;color:#cbd5e1;display:flex;justify-content:space-between;align-items:center;background:#111827;border-radius:12px 12px 0 0}}
 .terminal-title{{font-size:13px;font-weight:600}}
@@ -315,19 +318,14 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
 .terminal-hidden .terminal-body{{display:none}}
 .terminal-hidden{{width:280px}}
 @media (max-width:1100px) {{
-  .layout{{grid-template-columns:1fr}}
   .row{{grid-template-columns:1fr}}
-  .sidebar{{position:fixed;left:0;top:0;bottom:0;width:280px;transform:translateX(-100%)}}
-  .sidebar.open{{transform:translateX(0)}}
-  .sidebar-toggle{{display:inline-block}}
-  .sidebar-close{{display:inline-block}}
-  .backdrop.show{{display:block;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:20}}
+  .main{{padding:16px}}
 }}
 </style></head>
 <body>
 <div id="backdrop" class="backdrop"></div>
 <div class="layout">
-  <aside id="sidebar" class="sidebar">
+  <aside id="sidebar" class="sidebar open">
     <div class="header" style="margin-bottom:12px">
       <div class="brand">DotNet Installer</div>
       <button id="closeSidebarBtn" class="btn-outline sidebar-close" type="button">Close</button>
@@ -486,6 +484,9 @@ function closeSidebar() {{
 if (openSidebarBtn) openSidebarBtn.addEventListener("click", openSidebar);
 if (closeSidebarBtn) closeSidebarBtn.addEventListener("click", closeSidebar);
 backdrop.addEventListener("click", closeSidebar);
+if (sidebar.classList.contains("open")) {{
+  backdrop.classList.add("show");
+}}
 
 function activateView(viewId) {{
   views.forEach(v => v.classList.toggle("active", v.id === viewId));
