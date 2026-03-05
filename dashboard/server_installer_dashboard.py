@@ -4,6 +4,7 @@ import ctypes
 import html
 import ipaddress
 import os
+import platform
 import secrets
 import socket
 import subprocess
@@ -271,29 +272,51 @@ button{{background:#0f766e;color:#fff;border:0;padding:10px 14px;border-radius:8
 
 
 def page_dashboard(message=""):
+    system_name = platform.system().lower()
+    is_windows = system_name == "windows"
+    is_linux = system_name == "linux"
+    is_macos = system_name == "darwin"
+
+    if is_windows:
+        nav_items_html = """
+      <div class="navitem active" data-view="view-home"><a class="navlink" href="#">Dashboard</a></div>
+      <div class="navitem" data-view="view-win-setup"><a class="navlink" href="#">Windows Setup</a></div>
+      <div class="navitem" data-view="view-win-deploy"><a class="navlink" href="#">Windows Deploy</a></div>
+"""
+    elif is_linux:
+        nav_items_html = """
+      <div class="navitem active" data-view="view-home"><a class="navlink" href="#">Dashboard</a></div>
+      <div class="navitem" data-view="view-linux"><a class="navlink" href="#">Linux Deploy</a></div>
+"""
+    else:
+        nav_items_html = """
+      <div class="navitem active" data-view="view-home"><a class="navlink" href="#">Dashboard</a></div>
+      <div class="navitem" data-view="view-macos"><a class="navlink" href="#">macOS</a></div>
+"""
+
     msg = f"<div class='flash'>{html.escape(message)}</div>" if message else ""
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Server Installer Dashboard</title>
 <style>
 *{{box-sizing:border-box}}
-body{{font-family:"Segoe UI",Arial,sans-serif;background:linear-gradient(180deg,#f3f6fc,#eef3fb);margin:0;color:#0f172a;overflow-x:hidden}}
+body{{font-family:"Segoe UI",Arial,sans-serif;background:#f4f7fb;margin:0;color:#0f172a;overflow-x:hidden}}
 .layout{{display:grid;grid-template-columns:280px 1fr;min-height:100vh}}
-.layout{{display:block;min-height:100vh}}
-.sidebar{{background:linear-gradient(180deg,#0b1f3a,#102b4f);color:#e8eef9;padding:22px 18px;border-right:1px solid rgba(255,255,255,.08);position:fixed;left:0;top:0;bottom:0;width:280px;z-index:30;transform:translateX(-100%);transition:transform .2s ease}}
+.sidebar{{background:linear-gradient(180deg,#0b1f3a,#112c4a);color:#e8eef9;padding:22px 18px;border-right:1px solid rgba(255,255,255,.08);position:sticky;top:0;height:100vh;overflow:auto;z-index:30;transition:transform .24s ease}}
 .sidebar.open{{transform:translateX(0)}}
 .brand{{font-size:22px;font-weight:700;margin-bottom:18px;letter-spacing:.2px}}
 .navgroup{{margin-bottom:14px}}
 .navtitle{{font-size:12px;text-transform:uppercase;opacity:.75;margin-bottom:8px}}
-.navitem{{padding:11px 12px;margin:7px 0;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.08);border-radius:10px;font-size:14px;cursor:pointer}}
-.navitem.active{{background:#1d4ed8}}
+.navitem{{padding:11px 12px;margin:7px 0;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);border-radius:10px;font-size:14px;cursor:pointer;transition:all .18s ease}}
+.navitem:hover{{background:rgba(255,255,255,.12)}}
+.navitem.active{{background:#1d4ed8;border-color:#60a5fa}}
 .navlink{{display:block;text-decoration:none;color:#e8eef9}}
-.main{{padding:26px}}
+.main{{padding:28px 30px 24px}}
 .header{{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:16px}}
-.title{{font-size:30px;font-weight:700}}
+.title{{font-size:28px;font-weight:700;letter-spacing:.2px}}
 .subtitle{{font-size:14px;color:#475569}}
 .flash{{padding:12px 14px;background:#ecfdf3;border:1px solid #86efac;border-radius:10px;margin-bottom:16px;color:#14532d}}
 .row{{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}}
-.card{{background:#fff;border-radius:14px;padding:16px 16px 12px;box-shadow:0 10px 30px rgba(2,32,71,.07);border:1px solid #e5eaf4}}
+.card{{background:#fff;border-radius:14px;padding:18px 18px 14px;box-shadow:0 10px 28px rgba(2,32,71,.06);border:1px solid #e5eaf4}}
 .card h3{{margin:0 0 6px 0;font-size:18px}}
 .card p{{margin:0 0 12px 0;font-size:13px;color:#475569}}
 .divider{{height:1px;background:#e2e8f0;margin:12px 0}}
@@ -305,8 +328,8 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
 .btn-outline{{background:#fff;color:#1e293b;border:1px solid #cbd5e1}}
 .view{{display:none}}
 .view.active{{display:block}}
-.sidebar-toggle{{display:inline-block}}
-.sidebar-close{{display:inline-block}}
+.sidebar-toggle{{display:none}}
+.sidebar-close{{display:none}}
 .backdrop{{display:none}}
 .backdrop.show{{display:block;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:20}}
 .terminal-panel{{position:fixed;right:22px;bottom:22px;width:620px;max-width:calc(100vw - 32px);z-index:60;border:1px solid #1f2937;background:#0d1117;border-radius:12px;box-shadow:0 20px 40px rgba(2,6,23,.5)}}
@@ -318,24 +341,26 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
 .terminal-hidden .terminal-body{{display:none}}
 .terminal-hidden{{width:280px}}
 @media (max-width:1100px) {{
+  .layout{{display:block}}
   .row{{grid-template-columns:1fr}}
   .main{{padding:16px}}
+  .sidebar{{position:fixed;left:0;top:0;bottom:0;width:280px;transform:translateX(-100%);height:100vh}}
+  .sidebar.open{{transform:translateX(0)}}
+  .sidebar-toggle{{display:inline-block}}
+  .sidebar-close{{display:inline-block}}
 }}
 </style></head>
 <body>
 <div id="backdrop" class="backdrop"></div>
 <div class="layout">
-  <aside id="sidebar" class="sidebar open">
+  <aside id="sidebar" class="sidebar">
     <div class="header" style="margin-bottom:12px">
       <div class="brand">DotNet Installer</div>
       <button id="closeSidebarBtn" class="btn-outline sidebar-close" type="button">Close</button>
     </div>
     <div class="navgroup">
       <div class="navtitle">Pages</div>
-      <div class="navitem active" data-view="view-home"><a class="navlink" href="#">Dashboard</a></div>
-      <div class="navitem" data-view="view-win-setup"><a class="navlink" href="#">Windows Setup</a></div>
-      <div class="navitem" data-view="view-win-deploy"><a class="navlink" href="#">Windows Deploy</a></div>
-      <div class="navitem" data-view="view-linux"><a class="navlink" href="#">Linux Deploy</a></div>
+{nav_items_html}
     </div>
   </aside>
   <main class="main">
@@ -351,10 +376,11 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
     <section id="view-home" class="view active">
       <div class="card">
         <h3>Dashboard</h3>
-        <p>Use sidebar pages to manage Windows setup/deployment and Linux deployment. Open Web Terminal from the floating panel.</p>
+        <p>Detected OS: {html.escape(platform.system())}. Use sidebar pages for this OS only. Open Web Terminal from the floating panel.</p>
       </div>
     </section>
 
+    {'''
     <section id="view-win-setup" class="view">
       <div class="row">
         <div class="card">
@@ -375,7 +401,9 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
         </div>
       </div>
     </section>
+    ''' if is_windows else ''}
 
+    {'''
     <section id="view-win-deploy" class="view">
       <div class="row">
         <div class="card">
@@ -411,7 +439,9 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
         </div>
       </div>
     </section>
+    ''' if is_windows else ''}
 
+    {'''
     <section id="view-linux" class="view">
       <div class="row">
         <div class="card">
@@ -438,6 +468,16 @@ button{{background:#1249b0;color:white;border:0;padding:10px 14px;border-radius:
         </div>
       </div>
     </section>
+    ''' if is_linux else ''}
+
+    {'''
+    <section id="view-macos" class="view">
+      <div class="card">
+        <h3>macOS Support</h3>
+        <p>This dashboard is running on macOS. macOS installer actions are not configured yet in this repository.</p>
+      </div>
+    </section>
+    ''' if is_macos else ''}
   </main>
 </div>
 
@@ -484,9 +524,18 @@ function closeSidebar() {{
 if (openSidebarBtn) openSidebarBtn.addEventListener("click", openSidebar);
 if (closeSidebarBtn) closeSidebarBtn.addEventListener("click", closeSidebar);
 backdrop.addEventListener("click", closeSidebar);
-if (sidebar.classList.contains("open")) {{
-  backdrop.classList.add("show");
+
+function syncSidebarForViewport() {{
+  if (window.innerWidth <= 1100) {{
+    sidebar.classList.remove("open");
+    backdrop.classList.remove("show");
+  }} else {{
+    sidebar.classList.add("open");
+    backdrop.classList.remove("show");
+  }}
 }}
+syncSidebarForViewport();
+window.addEventListener("resize", syncSidebarForViewport);
 
 function activateView(viewId) {{
   views.forEach(v => v.classList.toggle("active", v.id === viewId));
