@@ -661,6 +661,42 @@ ensure_nginx_running() {
   run_cmd systemctl restart nginx
 }
 
+configure_firewall_ports() {
+  if command -v ufw >/dev/null 2>&1; then
+    local ufw_status
+    ufw_status="$(ufw status 2>/dev/null | head -n 1 || true)"
+    if [[ "${ufw_status}" =~ [Aa]ctive ]]; then
+      run_cmd ufw allow 80/tcp
+      run_cmd ufw allow 443/tcp
+    fi
+  fi
+
+  if command -v firewall-cmd >/dev/null 2>&1; then
+    if systemctl is-active --quiet firewalld; then
+      run_cmd firewall-cmd --permanent --add-service=http
+      run_cmd firewall-cmd --permanent --add-service=https
+      run_cmd firewall-cmd --reload
+    fi
+  fi
+}
+
+ensure_http_https_locally() {
+  local http_status
+  local https_status
+
+  http_status="$(curl -sS -o /dev/null -w "%{http_code}" "http://127.0.0.1:${HTTP_PORT}/" 2>/dev/null || true)"
+  if [[ -z "${http_status}" || "${http_status}" == "000" ]]; then
+    echo "HTTP on port ${HTTP_PORT} is not reachable locally. Check nginx config and local firewall." >&2
+    exit 1
+  fi
+
+  https_status="$(curl -k -sS -o /dev/null -w "%{http_code}" "https://127.0.0.1:${HTTPS_PORT}/" 2>/dev/null || true)"
+  if [[ -z "${https_status}" || "${https_status}" == "000" ]]; then
+    echo "HTTPS on port ${HTTPS_PORT} is not reachable locally. Check nginx config and local firewall." >&2
+    exit 1
+  fi
+}
+
 resolve_application_source() {
   local source_value="$1"
   local target_root="$2"
@@ -773,6 +809,8 @@ main() {
   ensure_backend_healthy
   run_cmd systemctl enable nginx
   ensure_nginx_running
+  configure_firewall_ports
+  ensure_http_https_locally
 
   echo "Deployment complete."
   echo "Preferred host: ${resolved_host}"
