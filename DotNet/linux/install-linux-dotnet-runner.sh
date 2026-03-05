@@ -7,6 +7,8 @@ SCRIPT_VERSION="2026.03.04.1"
 DOTNET_CHANNEL="${DOTNET_CHANNEL:-}"
 DOTNET_INSTALL_SCRIPT_URL="${DOTNET_INSTALL_SCRIPT_URL:-https://dot.net/v1/dotnet-install.sh}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+SOURCE_VALUE="${SOURCE_VALUE:-}"
+DOMAIN_NAME="${DOMAIN_NAME:-}"
 SERVICE_NAME="${SERVICE_NAME:-dotnet-app}"
 SERVICE_PORT="${SERVICE_PORT:-5000}"
 HTTP_PORT="${HTTP_PORT:-80}"
@@ -769,13 +771,19 @@ main() {
   install_dotnet
   ensure_service_user
 
-  read -r -p "Enter a build artifact URL, a local source folder, a local published folder, or a local .zip/.tar.gz package path to deploy (leave blank to skip): " source_value
+  local source_value="${SOURCE_VALUE}"
+  if [[ -z "${source_value}" ]]; then
+    read -r -p "Enter a build artifact URL, a local source folder, a local published folder, or a local .zip/.tar.gz package path to deploy (leave blank to skip): " source_value
+  fi
   if [[ -z "${source_value}" ]]; then
     echo "Setup completed. .NET prerequisites are installed."
     exit 0
   fi
 
-  read -r -p "Enter a domain name for the site (leave blank to auto-detect the best IP address): " domain_name
+  local domain_name="${DOMAIN_NAME}"
+  if [[ -z "${domain_name}" ]]; then
+    read -r -p "Enter a domain name for the site (leave blank to auto-detect the best IP address): " domain_name
+  fi
   local resolved_host
   resolved_host="$(resolve_host_name "${domain_name}")"
 

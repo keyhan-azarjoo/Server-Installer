@@ -4,11 +4,13 @@ This repository includes OS-specific installers under `DotNet`:
 
 - `DotNet/windows/install-windows-dotnet-host.ps1`
 - `DotNet/windows/deploy-windows-over-ssh.ps1`
-- `DotNet/windows/start-installer-dashboard.ps1`
+- `DotNet/windows/start-server-dashboard.ps1`
 - `DotNet/windows/modules/common.ps1`
 - `DotNet/windows/modules/iis-mode.ps1`
 - `DotNet/windows/modules/docker-mode.ps1`
 - `DotNet/linux/install-linux-dotnet-runner.sh`
+- `DotNet/linux/start-server-dashboard.sh`
+- `dashboard/server_installer_dashboard.py`
 
 These installers deploy only from prebuilt published output.
 
@@ -22,13 +24,35 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/Server-
 .\install-windows-dotnet-host.ps1
 ```
 
-Run dashboard mode (single command) from an elevated terminal:
+Run higher-level dashboard mode (single command) from an elevated terminal:
 
 ```powershell
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/DotNet/windows/start-installer-dashboard.ps1" -OutFile ".\start-installer-dashboard.ps1"; .\start-installer-dashboard.ps1
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/DotNet/windows/start-server-dashboard.ps1" -OutFile ".\start-server-dashboard.ps1"; .\start-server-dashboard.ps1
 ```
 
-Then open `http://localhost:8090`, sign in with the username/password you entered in terminal, and run deployment from the dashboard form.
+Then open `http://127.0.0.1:8090`.
+- If opened on the same computer (localhost), no login is required.
+- If opened remotely from another computer, login is required using this computer's OS username/password.
+
+Use the dashboard folders:
+- Dot Net Installer
+- IIS Installer
+- Docker Installer
+- Combined Server Installers
+
+Dashboard now includes:
+- Professional sidebar layout with grouped installer areas.
+- Separate Windows setup actions: `Install IIS Stack Only` and `Install Docker Stack Only`.
+- Separate Windows deployment actions: IIS deployment and Docker deployment.
+- Linux combined deployment and Linux prerequisites-only actions.
+
+Linux dashboard start:
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/DotNet/linux/start-server-dashboard.sh" -o ./start-server-dashboard.sh
+chmod +x ./start-server-dashboard.sh
+./start-server-dashboard.sh
+```
 
 If you download only the main Windows script, it will automatically download its required module files into a local `modules` folder the first time it runs.
 
