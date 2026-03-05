@@ -4,7 +4,7 @@ const {
   ListItemText, MenuItem, Select, Stack, TextField, Toolbar, Typography, Paper
 } = MaterialUI;
 
-const Icons = MaterialUIIcons || {};
+const Icons = (typeof window !== "undefined" && window.MaterialUIIcons) ? window.MaterialUIIcons : {};
 const MenuIcon = Icons.Menu || (() => React.createElement("span", null, "☰"));
 const DashboardIcon = Icons.Dashboard || (() => React.createElement("span", null, "•"));
 const BuildIcon = Icons.Build || (() => React.createElement("span", null, "•"));
@@ -75,6 +75,7 @@ function App() {
   const [termText, setTermText] = React.useState("Ready. Click any installer button to run and stream output here.");
   const [termState, setTermState] = React.useState("Idle");
   const [termMin, setTermMin] = React.useState(false);
+  const [termOpen, setTermOpen] = React.useState(false);
   const [termPos, setTermPos] = React.useState({ x: null, y: null });
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
 
@@ -137,6 +138,7 @@ function App() {
     append("============================================================");
     append(`[${new Date().toLocaleTimeString()}] ${title} started`);
     setTermState(`Running: ${title}`);
+    setTermOpen(true);
     setTermMin(false);
     try {
       const r = await fetch(action, {
@@ -367,51 +369,58 @@ function App() {
         )}
       </Box>
 
-      <Paper
-        elevation={14}
-        sx={{
-          position: "fixed",
-          zIndex: 1500,
-          width: termMin ? 320 : { xs: "calc(100vw - 16px)", sm: 680 },
-          maxWidth: "calc(100vw - 16px)",
-          borderRadius: 2,
-          border: "1px solid #1f2937",
-          overflow: "hidden",
-          ...termStyle,
-        }}
-      >
-        <Box
+      {termOpen && (
+        <Paper
+          elevation={14}
           sx={{
-            px: 1.5, py: 1, cursor: "move", background: "#111827", color: "#dbeafe",
-            borderBottom: "1px solid #1f2937", display: "flex", alignItems: "center", justifyContent: "space-between"
-          }}
-          onMouseDown={(e) => {
-            const rect = e.currentTarget.parentElement.getBoundingClientRect();
-            drag.current.active = true;
-            drag.current.sx = e.clientX;
-            drag.current.sy = e.clientY;
-            drag.current.bx = rect.left;
-            drag.current.by = rect.top;
-            setTermPos({ x: rect.left, y: rect.top });
+            position: "fixed",
+            zIndex: 1500,
+            width: termMin ? 320 : { xs: "calc(100vw - 16px)", sm: 680 },
+            maxWidth: "calc(100vw - 16px)",
+            borderRadius: 2,
+            border: "1px solid #1f2937",
+            overflow: "hidden",
+            ...termStyle,
           }}
         >
-          <Stack direction="row" spacing={1} alignItems="center">
-            <TerminalIcon fontSize="small" />
-            <Box>
-              <Typography variant="subtitle2" fontWeight={700}>Web Terminal</Typography>
-              <Typography variant="caption" sx={{ color: "#93c5fd" }}>{termState}</Typography>
-            </Box>
-          </Stack>
-          <Button size="small" variant="outlined" sx={{ color: "#dbeafe", borderColor: "#334155", minWidth: 80 }} onClick={() => setTermMin((v) => !v)}>
-            {termMin ? "Expand" : "Minimize"}
-          </Button>
-        </Box>
-        {!termMin && (
-          <Box sx={{ height: 330, overflow: "auto", background: "#0d1117", color: "#c9d1d9", p: 1.5 }}>
-            <div className="terminal-log">{termText}</div>
+          <Box
+            sx={{
+              px: 1.5, py: 1, cursor: "move", background: "#111827", color: "#dbeafe",
+              borderBottom: "1px solid #1f2937", display: "flex", alignItems: "center", justifyContent: "space-between"
+            }}
+            onMouseDown={(e) => {
+              const rect = e.currentTarget.parentElement.getBoundingClientRect();
+              drag.current.active = true;
+              drag.current.sx = e.clientX;
+              drag.current.sy = e.clientY;
+              drag.current.bx = rect.left;
+              drag.current.by = rect.top;
+              setTermPos({ x: rect.left, y: rect.top });
+            }}
+          >
+            <Stack direction="row" spacing={1} alignItems="center">
+              <TerminalIcon fontSize="small" />
+              <Box>
+                <Typography variant="subtitle2" fontWeight={700}>Web Terminal</Typography>
+                <Typography variant="caption" sx={{ color: "#93c5fd" }}>{termState}</Typography>
+              </Box>
+            </Stack>
+            <Stack direction="row" spacing={1}>
+              <Button size="small" variant="outlined" sx={{ color: "#dbeafe", borderColor: "#334155", minWidth: 80 }} onClick={() => setTermMin((v) => !v)}>
+                {termMin ? "Expand" : "Minimize"}
+              </Button>
+              <Button size="small" variant="outlined" color="error" sx={{ minWidth: 72 }} onClick={() => setTermOpen(false)}>
+                Close
+              </Button>
+            </Stack>
           </Box>
-        )}
-      </Paper>
+          {!termMin && (
+            <Box sx={{ height: 330, overflow: "auto", background: "#0d1117", color: "#c9d1d9", p: 1.5 }}>
+              <div className="terminal-log">{termText}</div>
+            </Box>
+          )}
+        </Paper>
+      )}
     </Box>
   );
 }
