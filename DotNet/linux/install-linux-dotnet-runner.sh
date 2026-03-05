@@ -592,7 +592,7 @@ write_nginx_config() {
 server {
     listen ${HTTP_PORT};
     server_name ${server_name};
-    return 301 https://\$host:${HTTPS_PORT}\$request_uri;
+    return 308 https://\$host:${HTTPS_PORT}\$request_uri;
 }
 
 server {

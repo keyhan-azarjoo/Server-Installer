@@ -80,23 +80,54 @@ function Get-DockerEngineOsType {
 }
 
 function Switch-DockerEngineToLinux {
-    $dockerCliPath = Join-Path $env:ProgramFiles "Docker\Docker\DockerCli.exe"
-    if (-not (Test-Path -LiteralPath $dockerCliPath)) {
+    $waitForLinuxEngine = {
+        param([int]$TimeoutSeconds = 45)
+
+        $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 2
+            $engineOsType = Get-DockerEngineOsType
+            if ($engineOsType -eq "linux") {
+                return $true
+            }
+        }
+
         return $false
     }
 
-    Write-Host "Switching Docker engine to Linux containers"
-    $switchProcess = Start-Process -FilePath $dockerCliPath -ArgumentList "-SwitchLinuxEngine" -PassThru -WindowStyle Hidden
-    if ($switchProcess) {
-        $switchProcess.WaitForExit()
+    $dockerCliCandidates = @(
+        (Join-Path $env:ProgramFiles "Docker\Docker\DockerCli.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "Docker\Docker\DockerCli.exe")
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    foreach ($dockerCliPath in $dockerCliCandidates) {
+        if (-not (Test-Path -LiteralPath $dockerCliPath)) {
+            continue
+        }
+
+        foreach ($arg in @("-SwitchLinuxEngine", "-SwitchDaemon")) {
+            Write-Host "Switching Docker engine to Linux containers using $arg"
+            $switchProcess = Start-Process -FilePath $dockerCliPath -ArgumentList $arg -PassThru -WindowStyle Hidden -ErrorAction SilentlyContinue
+            if ($switchProcess) {
+                $switchProcess.WaitForExit()
+            }
+
+            if (& $waitForLinuxEngine) {
+                return $true
+            }
+        }
     }
 
-    $deadline = (Get-Date).AddSeconds(45)
-    while ((Get-Date) -lt $deadline) {
-        Start-Sleep -Seconds 2
-        $engineOsType = Get-DockerEngineOsType
-        if ($engineOsType -eq "linux") {
-            return $true
+    $contextNames = & docker context ls --format "{{.Name}}" 2>$null
+    if ($LASTEXITCODE -eq 0 -and $contextNames) {
+        foreach ($contextName in @("desktop-linux", "default")) {
+            if ($contextNames -contains $contextName) {
+                Write-Host "Switching Docker context to '$contextName'"
+                & docker context use $contextName *> $null
+                if ($LASTEXITCODE -eq 0 -and (& $waitForLinuxEngine)) {
+                    return $true
+                }
+            }
         }
     }
 
