@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import argparse
 import ctypes
+import re
 import os
 import platform
 import signal
@@ -78,7 +79,7 @@ def can_bind(host: str, port: int):
         sock.close()
 
 
-def find_listener_pid_linux(port: int):
+def find_listener_pids_linux(port: int):
     try:
         out = subprocess.check_output(
             ["ss", "-ltnp", f"sport = :{port}"],
@@ -86,8 +87,9 @@ def find_listener_pid_linux(port: int):
             text=True,
         )
     except Exception:
-        return None
+        return set()
 
+    pids = set()
     for line in out.splitlines():
         if "users:((" not in line:
             continue
@@ -101,13 +103,55 @@ def find_listener_pid_linux(port: int):
             end += 1
         if end > idx:
             try:
-                return int(line[idx:end])
+                pids.add(int(line[idx:end]))
             except ValueError:
-                return None
-    return None
+                continue
+    return pids
+
+
+def find_listener_pids_windows(port: int):
+    try:
+        out = subprocess.check_output(
+            ["netstat", "-ano", "-p", "tcp"],
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="ignore",
+        )
+    except Exception:
+        return set()
+
+    pids = set()
+    pat = re.compile(r"^\s*TCP\s+\S+:(\d+)\s+\S+\s+LISTENING\s+(\d+)\s*$", re.IGNORECASE)
+    for line in out.splitlines():
+        m = pat.match(line)
+        if not m:
+            continue
+        lp = int(m.group(1))
+        pid = int(m.group(2))
+        if lp == port:
+            pids.add(pid)
+    return pids
 
 
 def process_cmdline(pid: int):
+    if os.name == "nt":
+        try:
+            out = subprocess.check_output(
+                [
+                    "powershell",
+                    "-NoProfile",
+                    "-Command",
+                    f"(Get-CimInstance Win32_Process -Filter \"ProcessId={pid}\").CommandLine",
+                ],
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="ignore",
+            )
+            return out.strip()
+        except Exception:
+            return ""
     try:
         data = Path(f"/proc/{pid}/cmdline").read_bytes()
     except Exception:
@@ -127,6 +171,17 @@ def is_dashboard_process(pid: int):
 
 
 def stop_process(pid: int, timeout_sec: float = 3.0):
+    if os.name == "nt":
+        try:
+            subprocess.check_call(
+                ["taskkill", "/PID", str(pid), "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+        except Exception:
+            return False
+
     try:
         os.kill(pid, signal.SIGTERM)
     except ProcessLookupError:
@@ -160,17 +215,32 @@ def stop_process(pid: int, timeout_sec: float = 3.0):
 
 
 def stop_existing_dashboard_on_port(port: int):
-    if os.name == "nt":
-        return False, "port pre-clean is only implemented on Linux"
-    pid = find_listener_pid_linux(port)
-    if not pid:
+    pids = find_listener_pids_windows(port) if os.name == "nt" else find_listener_pids_linux(port)
+    if not pids:
         return False, "no listener"
-    if not is_dashboard_process(pid):
-        return False, f"port owned by different process (pid {pid})"
-    stopped = stop_process(pid)
-    if stopped:
-        return True, f"stopped previous dashboard process pid {pid}"
-    return False, f"failed to stop previous dashboard process pid {pid}"
+
+    own_pids = [pid for pid in pids if is_dashboard_process(pid)]
+    foreign_pids = [pid for pid in pids if pid not in own_pids]
+
+    stopped_any = False
+    failed = []
+    for pid in own_pids:
+        if stop_process(pid):
+            stopped_any = True
+        else:
+            failed.append(pid)
+
+    parts = []
+    if stopped_any:
+        parts.append(f"stopped previous dashboard process(es): {', '.join(map(str, own_pids))}")
+    if failed:
+        parts.append(f"failed to stop dashboard pid(s): {', '.join(map(str, failed))}")
+    if foreign_pids:
+        parts.append(f"port owned by different process(es): {', '.join(map(str, foreign_pids))}")
+    if not parts:
+        parts.append("no dashboard process found on listener")
+
+    return stopped_any, "; ".join(parts)
 
 
 def choose_port(bind_host: str, preferred_port: int):
