@@ -173,6 +173,79 @@ def get_ip_addresses():
     return sorted(ips)
 
 
+def get_network_totals():
+    if os.name == "nt":
+        rc, out = run_capture(["netstat", "-e"], timeout=15)
+        if rc == 0 and out:
+            rx = None
+            tx = None
+            for line in out.splitlines():
+                s = line.strip()
+                if s.startswith("Bytes"):
+                    parts = [p for p in s.split() if p]
+                    if len(parts) >= 3:
+                        try:
+                            rx = int(parts[1].replace(",", ""))
+                            tx = int(parts[2].replace(",", ""))
+                        except Exception:
+                            pass
+                    break
+            if rx is not None and tx is not None:
+                return {"rx_bytes": rx, "tx_bytes": tx}
+        return {}
+
+    try:
+        rx_total = 0
+        tx_total = 0
+        with open("/proc/net/dev", "r", encoding="utf-8") as f:
+            lines = f.readlines()[2:]
+        for line in lines:
+            if ":" not in line:
+                continue
+            iface, data = line.split(":", 1)
+            iface = iface.strip()
+            if iface == "lo":
+                continue
+            vals = [v for v in data.strip().split() if v]
+            if len(vals) < 16:
+                continue
+            rx_total += int(vals[0])
+            tx_total += int(vals[8])
+        return {"rx_bytes": rx_total, "tx_bytes": tx_total}
+    except Exception:
+        return {}
+
+
+def get_cpu_usage_percent():
+    if os.name == "nt":
+        rc, out = run_capture(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average",
+            ],
+            timeout=15,
+        )
+        if rc == 0 and out:
+            try:
+                return float(out.splitlines()[-1].strip())
+            except Exception:
+                return None
+        return None
+
+    try:
+        if hasattr(os, "getloadavg"):
+            load1 = os.getloadavg()[0]
+            cpus = os.cpu_count() or 1
+            return max(0.0, min(100.0, (load1 / cpus) * 100.0))
+    except Exception:
+        pass
+    return None
+
+
 def get_dotnet_info():
     info = {"installed": False, "version": "", "sdks": [], "runtimes": []}
     rc, out = run_capture(["dotnet", "--version"])
@@ -396,8 +469,10 @@ def get_system_status():
         "python": platform.python_version(),
         "uptime_seconds": get_uptime_seconds(),
         "cpu_count": os.cpu_count(),
+        "cpu_usage_percent": get_cpu_usage_percent(),
         "load": load,
         "memory": get_memory_info(),
+        "network_totals": get_network_totals(),
         "ips": get_ip_addresses(),
         "listening_ports": get_listening_ports(),
         "software": {
@@ -890,38 +965,95 @@ def run_linux_docker_setup(live_cb=None):
         return 1, "Linux Docker setup can only run on Linux hosts."
 
     script = r"""
-set -e
+set -euo pipefail
+
+log() {
+  echo "[$(date '+%H:%M:%S')] $*"
+}
+
+run_with_timeout() {
+  local sec="$1"; shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout "$sec" "$@"
+  else
+    "$@"
+  fi
+}
+
+retry_cmd() {
+  local tries="$1"; shift
+  local n=1
+  while [ "$n" -le "$tries" ]; do
+    if "$@"; then
+      return 0
+    fi
+    if [ "$n" -lt "$tries" ]; then
+      log "Command failed (attempt ${n}/${tries}). Retrying in 8s..."
+      sleep 8
+    fi
+    n=$((n+1))
+  done
+  return 1
+}
+
+wait_apt_locks() {
+  local max_wait=900
+  local waited=0
+  while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1 || fuser /var/lib/dpkg/lock >/dev/null 2>&1; do
+    if [ "$waited" -ge "$max_wait" ]; then
+      log "apt/dpkg locks did not clear after ${max_wait}s."
+      return 1
+    fi
+    log "apt is busy, waiting... (${waited}s elapsed)"
+    sleep 5
+    waited=$((waited+5))
+  done
+  return 0
+}
+
 if ! command -v apt-get >/dev/null 2>&1; then
   echo "Unsupported Linux distribution for automatic Docker install. apt-get is required."
   exit 1
 fi
 
 export DEBIAN_FRONTEND=noninteractive
-echo "Checking apt locks..."
-while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
-  echo "apt is busy, waiting 5s..."
-  sleep 5
-done
-
-echo "Updating apt package index..."
-apt-get -o Dpkg::Use-Pty=0 -o Acquire::Progress=false update
-
-if ! command -v docker >/dev/null 2>&1; then
-  echo "Installing Docker Engine..."
-  apt-get -o Dpkg::Use-Pty=0 install -y docker.io
-else
-  echo "Docker is already installed."
-fi
-
-echo "Enabling Docker service..."
-systemctl enable --now docker || true
+export NEEDRESTART_MODE=a
 
 if command -v docker >/dev/null 2>&1; then
-  echo "Docker version:"
-  docker --version
-  echo "Docker installed and ready."
+  if systemctl is-active --quiet docker 2>/dev/null; then
+    log "Docker is already installed and running."
+    docker --version || true
+    exit 0
+  fi
+  log "Docker binary exists, but daemon is not active. Attempting to start service."
+fi
+
+log "Checking apt locks..."
+wait_apt_locks || exit 1
+
+log "Updating apt package index..."
+retry_cmd 3 run_with_timeout 1800 apt-get -o Dpkg::Use-Pty=0 -o Acquire::Retries=3 -o Acquire::http::Timeout=30 update
+
+if ! command -v docker >/dev/null 2>&1; then
+  log "Installing Docker Engine package..."
+  wait_apt_locks || exit 1
+  retry_cmd 2 run_with_timeout 2400 apt-get -o Dpkg::Use-Pty=0 install -y --no-install-recommends docker.io
 else
-  echo "Docker installation did not complete successfully."
+  log "Docker package is already installed."
+fi
+
+log "Enabling Docker service..."
+systemctl enable --now docker || true
+sleep 1
+
+if command -v docker >/dev/null 2>&1 && systemctl is-active --quiet docker 2>/dev/null; then
+  log "Docker version:"
+  docker --version
+  log "Docker installed and ready."
+  docker info --format '{{.ServerVersion}}' >/dev/null 2>&1 || true
+else
+  log "Docker installation did not complete successfully."
+  systemctl status docker --no-pager || true
   exit 1
 fi
 """
@@ -1015,6 +1147,7 @@ def start_live_job(title, runner):
 
     def heartbeat():
         last_len = -1
+        unchanged_ticks = 0
         while True:
             time.sleep(5)
             with JOBS_LOCK:
@@ -1025,7 +1158,12 @@ def start_live_job(title, runner):
                     return
                 current_len = len(job["output"])
                 if current_len == last_len:
-                    job["output"] += f"[{time.strftime('%H:%M:%S')}] still running...\n"
+                    unchanged_ticks += 1
+                    if unchanged_ticks >= 6:
+                        job["output"] += f"[{time.strftime('%H:%M:%S')}] still running...\n"
+                        unchanged_ticks = 0
+                else:
+                    unchanged_ticks = 0
                 last_len = len(job["output"])
 
     def worker():
@@ -1598,6 +1736,9 @@ class Handler(BaseHTTPRequestHandler):
     def set_cookie(self, sid):
         self.send_header("Set-Cookie", f"sid={sid}; Path=/; HttpOnly")
 
+    def clear_cookie(self):
+        self.send_header("Set-Cookie", "sid=; Path=/; HttpOnly; Max-Age=0")
+
     def get_sid(self):
         cookie = self.headers.get("Cookie", "")
         for part in cookie.split(";"):
@@ -1610,7 +1751,7 @@ class Handler(BaseHTTPRequestHandler):
         sid = self.get_sid()
         return bool(sid and sid in SESSIONS)
 
-    def write_html(self, content, status=HTTPStatus.OK, cookie_sid=None):
+    def write_html(self, content, status=HTTPStatus.OK, cookie_sid=None, clear_sid=False):
         data = content.encode("utf-8")
         try:
             self.send_response(status)
@@ -1621,6 +1762,8 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Expires", "0")
             if cookie_sid:
                 self.set_cookie(cookie_sid)
+            if clear_sid:
+                self.clear_cookie()
             self.end_headers()
             self.wfile.write(data)
         except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
@@ -1700,6 +1843,12 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.write_html(page_login())
             return
+        if self.path == "/logout":
+            sid = self.get_sid()
+            if sid in SESSIONS:
+                SESSIONS.discard(sid)
+            self.write_html(page_login(), clear_sid=True)
+            return
         if self.path.startswith("/job/"):
             if (not self.is_local_client()) and (not self.is_auth()):
                 self.write_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
@@ -1743,7 +1892,7 @@ class Handler(BaseHTTPRequestHandler):
             if ok:
                 sid = secrets.token_hex(16)
                 SESSIONS.add(sid)
-                self.write_html(page_dashboard("Login successful."), cookie_sid=sid)
+                self.write_html(page_dashboard(), cookie_sid=sid)
             else:
                 self.write_html(page_login(error), HTTPStatus.UNAUTHORIZED)
             return

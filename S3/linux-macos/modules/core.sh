@@ -80,8 +80,8 @@ resolve_https_port_unix() {
   local choice custom_port picked
 
   if port_free 443; then
-    read -r -p "Use HTTPS port 443? (Y/n): " choice
-    choice="$(echo "${choice:-y}" | tr '[:upper:]' '[:lower:]')"
+    read -r -p "Use HTTPS port 443? (y/N): " choice
+    choice="$(echo "${choice:-n}" | tr '[:upper:]' '[:lower:]')"
     if [ "$choice" = "y" ] || [ "$choice" = "yes" ]; then
       echo "443"
       return
@@ -124,6 +124,19 @@ resolve_https_port_unix() {
 
   err "No free HTTPS port was found in the default range (8443, 9443, 10443)."
   exit 1
+}
+
+open_firewall_port_linux() {
+  local p="$1"
+  if has_cmd ufw; then
+    ufw allow "${p}/tcp" >/dev/null 2>&1 || true
+    return
+  fi
+  if has_cmd firewall-cmd; then
+    firewall-cmd --permanent --add-port="${p}/tcp" >/dev/null 2>&1 || true
+    firewall-cmd --reload >/dev/null 2>&1 || true
+    return
+  fi
 }
 
 get_lan_ipv4() {
@@ -451,9 +464,7 @@ main() {
 
   if [ "$os" = "linux" ]; then
     configure_nginx_linux "$domain" "$https_port" "$ui_port" "$cert_dir"
-    if [ "$enable_lan" = true ] && has_cmd ufw; then
-      ufw allow "${https_port}/tcp" >/dev/null 2>&1 || true
-    fi
+    open_firewall_port_linux "$https_port"
   else
     configure_nginx_macos "$domain" "$https_port" "$ui_port" "$cert_dir"
   fi
@@ -466,17 +477,9 @@ main() {
   if [ "$proxy_host" = "localhost" ] && [ -n "$lan_ip" ]; then
     proxy_host="$lan_ip"
   fi
-  if [ "$https_port" -eq 443 ]; then
-    echo "Proxy URL:              https://${proxy_host}"
-  else
-    echo "Proxy URL:              https://${proxy_host}:${https_port}"
-  fi
+  echo "Proxy URL:              https://${proxy_host}:${https_port}"
   if [ "$enable_lan" = true ] && [ -n "$lan_ip" ]; then
-    if [ "$https_port" -eq 443 ]; then
-      echo "LAN URL:                https://${lan_ip}"
-    else
-      echo "LAN URL:                https://${lan_ip}:${https_port}"
-    fi
+    echo "LAN URL:                https://${lan_ip}:${https_port}"
     echo "DNS mapping needed:     ${domain} -> ${lan_ip}"
   fi
   echo ""

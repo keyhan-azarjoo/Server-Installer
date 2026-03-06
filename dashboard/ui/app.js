@@ -1,6 +1,6 @@
 const {
   Alert, AppBar, Box, Button, Card, CardContent, Chip, CssBaseline, Drawer,
-  FormControl, Grid, IconButton, InputLabel, MenuItem, Paper, Select, Stack, TextField, Toolbar, Typography
+  FormControl, Grid, IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, TextField, Toolbar, Typography
 } = MaterialUI;
 
 const { ActionCard, NavCard } = (window.ServerInstallerUI && window.ServerInstallerUI.components) || {};
@@ -30,6 +30,33 @@ function formatUptime(v) {
   return `${d}d ${h}h ${m}m`;
 }
 
+function clampPercent(v) {
+  const n = Number(v || 0);
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(100, n));
+}
+
+function MiniMetric({ label, valueText, percent, color }) {
+  return (
+    <Paper variant="outlined" sx={{ p: 1, borderRadius: 2 }}>
+      <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 0.3 }}>
+        <Typography variant="caption" color="text.secondary">{label}</Typography>
+        <Typography variant="caption" fontWeight={700}>{valueText}</Typography>
+      </Stack>
+      <LinearProgress
+        variant="determinate"
+        value={clampPercent(percent)}
+        sx={{
+          height: 5,
+          borderRadius: 3,
+          bgcolor: "rgba(15,23,42,.08)",
+          "& .MuiLinearProgress-bar": { bgcolor: color || "#2563eb" },
+        }}
+      />
+    </Paper>
+  );
+}
+
 function App() {
   const isMobile = MaterialUI.useMediaQuery("(max-width:1100px)");
   const [mobileOpen, setMobileOpen] = React.useState(false);
@@ -47,6 +74,8 @@ function App() {
   const [portValue, setPortValue] = React.useState("8090");
   const [portProtocol, setPortProtocol] = React.useState("tcp");
   const [portBusy, setPortBusy] = React.useState(false);
+  const [netRate, setNetRate] = React.useState({ rxBps: 0, txBps: 0 });
+  const prevNetRef = React.useRef(null);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
 
   React.useEffect(() => {
@@ -75,7 +104,19 @@ function App() {
       const r = await fetch("/api/system/status", { headers: { "X-Requested-With": "fetch" } });
       const j = await r.json();
       if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
-      setSystemInfo(j.status || null);
+      const st = j.status || null;
+      if (st && st.network_totals && Number.isFinite(st.network_totals.rx_bytes) && Number.isFinite(st.network_totals.tx_bytes)) {
+        const now = Date.now();
+        const prev = prevNetRef.current;
+        if (prev) {
+          const dt = Math.max(1, (now - prev.ts) / 1000);
+          const rxBps = Math.max(0, (st.network_totals.rx_bytes - prev.rx) / dt);
+          const txBps = Math.max(0, (st.network_totals.tx_bytes - prev.tx) / dt);
+          setNetRate({ rxBps, txBps });
+        }
+        prevNetRef.current = { rx: st.network_totals.rx_bytes, tx: st.network_totals.tx_bytes, ts: now };
+      }
+      setSystemInfo(st);
     } catch (err) {
       setSystemErr(String(err));
     } finally {
@@ -85,7 +126,7 @@ function App() {
 
   React.useEffect(() => {
     loadSystem.current();
-    const t = setInterval(() => loadSystem.current(), 15000);
+    const t = setInterval(() => loadSystem.current(), 10000);
     return () => clearInterval(t);
   }, []);
 
@@ -113,6 +154,7 @@ function App() {
       if (j.done) {
         append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code})`);
         setTermState("Idle");
+        loadSystem.current();
         return;
       }
       setTimeout(() => poll(jobId, title, next), 300);
@@ -131,16 +173,13 @@ function App() {
     setTermOpen(true);
     setTermMin(false);
     try {
-      const r = await fetch(action, {
-        method: "POST",
-        headers: { "X-Requested-With": "fetch" },
-        body,
-      });
+      const r = await fetch(action, { method: "POST", headers: { "X-Requested-With": "fetch" }, body });
       const j = await r.json();
       if (!j.job_id) {
         append(j.output || "No output.");
         append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code ?? 1})`);
         setTermState("Idle");
+        loadSystem.current();
         return;
       }
       poll(j.job_id, title, 0);
@@ -152,8 +191,7 @@ function App() {
 
   const goBack = () => {
     if (page === "home") return;
-    if (page === "dotnet") setPage("home");
-    else if (page === "s3") setPage("home");
+    if (page === "dotnet" || page === "s3" || page === "sysinfo" || page === "ports") setPage("home");
     else if (page.startsWith("dotnet-")) setPage("dotnet");
     else setPage("home");
   };
@@ -162,6 +200,8 @@ function App() {
     if (page === "home") return "Dashboard";
     if (page === "dotnet") return "DotNet";
     if (page === "s3") return "S3";
+    if (page === "sysinfo") return "SysInfo";
+    if (page === "ports") return "Port Management";
     if (page === "dotnet-iis") return "DotNet > IIS";
     if (page === "dotnet-docker") return "DotNet > Docker";
     if (page === "dotnet-linux") return "DotNet > Linux";
@@ -192,6 +232,28 @@ function App() {
   const dotnet = software.dotnet || {};
   const docker = software.docker || {};
   const iis = software.iis || {};
+  const listeningPorts = systemInfo?.listening_ports || [];
+  const cpuPercent = clampPercent(systemInfo?.cpu_usage_percent ?? ((systemInfo?.load?.["1m"] && systemInfo?.cpu_count) ? (systemInfo.load["1m"] / systemInfo.cpu_count) * 100 : 0));
+  const memoryPercent = clampPercent(systemInfo?.memory?.used_percent);
+  const netBps = (netRate.rxBps || 0) + (netRate.txBps || 0);
+  const netPercent = clampPercent((netBps / (20 * 1024 * 1024)) * 100);
+
+  const apiAddressList = React.useMemo(() => {
+    const ips = systemInfo?.ips || [];
+    const portSet = new Set((listeningPorts || []).map((p) => Number(p.port)));
+    const common = [80, 443, 5000, 5001, 8080, 8090, 8443, 9000];
+    const found = common.filter((p) => portSet.has(p));
+    const urls = [];
+    ips.forEach((ip) => {
+      found.forEach((p) => {
+        if (p === 80) urls.push(`http://${ip}`);
+        else if (p === 443) urls.push(`https://${ip}`);
+        else urls.push(`http://${ip}:${p}`);
+      });
+    });
+    urls.push(`${window.location.origin}/api/system/status`);
+    return Array.from(new Set(urls));
+  }, [systemInfo, listeningPorts]);
 
   const renderPage = () => {
     if (page === "home") {
@@ -201,7 +263,92 @@ function App() {
             <NavCard title="DotNet" text="Open .NET installer/deployment pages." onClick={() => setPage("dotnet")} />
           </Grid>
           <Grid item xs={12} md={6}>
-            <NavCard title="S3" text="Open S3 page (empty)." onClick={() => setPage("s3")} outlined />
+            <NavCard title="S3" text="Open S3 installer pages." onClick={() => setPage("s3")} outlined />
+          </Grid>
+        </Grid>
+      );
+    }
+
+    if (page === "sysinfo") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>System</Typography>
+                <Typography variant="body2">Host: {systemInfo?.hostname || "-"}</Typography>
+                <Typography variant="body2">OS: {systemInfo?.os || "-"} {systemInfo?.os_release || ""}</Typography>
+                <Typography variant="body2">Platform: {systemInfo?.platform || "-"}</Typography>
+                <Typography variant="body2">Machine: {systemInfo?.machine || "-"}</Typography>
+                <Typography variant="body2">Processor: {systemInfo?.processor || "-"}</Typography>
+                <Typography variant="body2">CPU Cores: {systemInfo?.cpu_count || "-"}</Typography>
+                <Typography variant="body2">Memory: {formatBytes(systemInfo?.memory?.used_bytes)} / {formatBytes(systemInfo?.memory?.total_bytes)} ({systemInfo?.memory?.used_percent ?? "-"}%)</Typography>
+                <Typography variant="body2">Uptime: {formatUptime(systemInfo?.uptime_seconds)}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Installed Software</Typography>
+                <Typography variant="body2">.NET: {dotnet.installed ? `Installed (${dotnet.version || "unknown"})` : "Not installed"}</Typography>
+                {!!(dotnet.sdks && dotnet.sdks.length) && <Typography variant="body2">SDKs: {dotnet.sdks.slice(0, 6).join(" | ")}</Typography>}
+                <Typography variant="body2">Docker: {docker.installed ? `Installed (${docker.version || "unknown"})` : "Not installed"}</Typography>
+                {!!docker.server_version && <Typography variant="body2">Docker Engine: {docker.server_version}</Typography>}
+                <Typography variant="body2">IIS: {iis.installed ? `Installed (${iis.service || "unknown"})` : "Not installed"}</Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>API Addresses</Typography>
+                {(apiAddressList.length > 0) ? apiAddressList.map((u) => (
+                  <Typography key={u} variant="body2">{u}</Typography>
+                )) : <Typography variant="body2">No API address detected.</Typography>}
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      );
+    }
+
+    if (page === "ports") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Port Management</Typography>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1}>
+                  <TextField size="small" label="Port" value={portValue} onChange={(e) => setPortValue(e.target.value)} sx={{ width: 140 }} />
+                  <FormControl size="small" sx={{ width: 130 }}>
+                    <InputLabel>Protocol</InputLabel>
+                    <Select label="Protocol" value={portProtocol} onChange={(e) => setPortProtocol(e.target.value)}>
+                      <MenuItem value="tcp">TCP</MenuItem>
+                      <MenuItem value="udp">UDP</MenuItem>
+                    </Select>
+                  </FormControl>
+                  <Button variant="contained" disabled={portBusy} onClick={() => onPortAction("open")} sx={{ textTransform: "none" }}>Open Port</Button>
+                  <Button variant="outlined" disabled={portBusy} onClick={() => onPortAction("close")} sx={{ textTransform: "none" }}>Close Port</Button>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Open/Listening Ports</Typography>
+                <Box sx={{ maxHeight: 340, overflow: "auto" }}>
+                  {listeningPorts.length === 0 && <Typography variant="body2">No listening ports found.</Typography>}
+                  {listeningPorts.slice(0, 500).map((p, idx) => (
+                    <Typography key={`${p.proto}-${p.port}-${idx}`} variant="body2">
+                      {String(p.proto || "").toUpperCase()}:{p.port} {p.pid ? `(pid ${p.pid})` : ""} {p.process ? ` ${p.process}` : ""}
+                    </Typography>
+                  ))}
+                </Box>
+              </CardContent>
+            </Card>
           </Grid>
         </Grid>
       );
@@ -212,24 +359,10 @@ function App() {
         return (
           <Grid container spacing={2}>
             <Grid item xs={12} md={6}>
-              <ActionCard
-                title="Install S3 (IIS)"
-                description="Run Local S3 installer in Windows IIS mode."
-                action="/run/s3_windows_iis"
-                fields={[]}
-                onRun={run}
-                color="#0f766e"
-              />
+              <ActionCard title="Install S3 (IIS)" description="Run Local S3 installer in Windows IIS mode." action="/run/s3_windows_iis" fields={[]} onRun={run} color="#0f766e" />
             </Grid>
             <Grid item xs={12} md={6}>
-              <ActionCard
-                title="Install S3 (Docker)"
-                description="Run Local S3 installer in Windows Docker mode."
-                action="/run/s3_windows_docker"
-                fields={[]}
-                onRun={run}
-                color="#1f2937"
-              />
+              <ActionCard title="Install S3 (Docker)" description="Run Local S3 installer in Windows Docker mode." action="/run/s3_windows_docker" fields={[]} onRun={run} color="#1f2937" />
             </Grid>
           </Grid>
         );
@@ -238,14 +371,7 @@ function App() {
         return (
           <Grid container spacing={2}>
             <Grid item xs={12} md={6}>
-              <ActionCard
-                title="Install S3"
-                description="Run Local S3 installer for Linux/macOS."
-                action="/run/s3_linux"
-                fields={[]}
-                onRun={run}
-                color="#1e40af"
-              />
+              <ActionCard title="Install S3" description="Run Local S3 installer for Linux/macOS." action="/run/s3_linux" fields={[]} onRun={run} color="#1e40af" />
             </Grid>
           </Grid>
         );
@@ -285,27 +411,10 @@ function App() {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <ActionCard
-              title="Install IIS"
-              description="Install IIS features and .NET prerequisites."
-              action="/run/windows_setup_iis"
-              fields={[{ name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]}
-              onRun={run}
-              color="#0f766e"
-            />
+            <ActionCard title="Install IIS" description="Install IIS features and .NET prerequisites." action="/run/windows_setup_iis" fields={[{ name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]} onRun={run} color="#0f766e" />
           </Grid>
           <Grid item xs={12} md={6}>
-            <ActionCard
-              title="Deploy IIS"
-              description="Deploy application to IIS."
-              action="/run/windows_iis"
-              fields={[
-                { name: "SourceValue", label: "Source Path or URL", enableUpload: true },
-                { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" },
-              ]}
-              onRun={run}
-              color="#1e40af"
-            />
+            <ActionCard title="Deploy IIS" description="Deploy application to IIS." action="/run/windows_iis" fields={[{ name: "SourceValue", label: "Source Path or URL", enableUpload: true }, { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]} onRun={run} color="#1e40af" />
           </Grid>
         </Grid>
       );
@@ -315,28 +424,10 @@ function App() {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <ActionCard
-              title="Install Docker"
-              description="Install Docker prerequisites and .NET runtime."
-              action="/run/windows_setup_docker"
-              fields={[{ name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]}
-              onRun={run}
-              color="#1f2937"
-            />
+            <ActionCard title="Install Docker" description="Install Docker prerequisites and .NET runtime." action="/run/windows_setup_docker" fields={[{ name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]} onRun={run} color="#1f2937" />
           </Grid>
           <Grid item xs={12} md={6}>
-            <ActionCard
-              title="Deploy Docker"
-              description="Deploy application to Docker."
-              action="/run/windows_docker"
-              fields={[
-                { name: "SourceValue", label: "Source Path or URL", enableUpload: true },
-                { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" },
-                { name: "DockerHostPort", label: "Docker Host Port", defaultValue: "8080" },
-              ]}
-              onRun={run}
-              color="#334155"
-            />
+            <ActionCard title="Deploy Docker" description="Deploy application to Docker." action="/run/windows_docker" fields={[{ name: "SourceValue", label: "Source Path or URL", enableUpload: true }, { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }, { name: "DockerHostPort", label: "Docker Host Port", defaultValue: "8080" }]} onRun={run} color="#334155" />
           </Grid>
         </Grid>
       );
@@ -346,31 +437,10 @@ function App() {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <ActionCard
-              title="Install Linux"
-              description="Install Linux prerequisites."
-              action="/run/linux_prereq"
-              fields={[{ name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" }]}
-              onRun={run}
-              color="#0f766e"
-            />
+            <ActionCard title="Install Linux" description="Install Linux prerequisites." action="/run/linux_prereq" fields={[{ name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" }]} onRun={run} color="#0f766e" />
           </Grid>
           <Grid item xs={12} md={6}>
-            <ActionCard
-              title="Deploy Linux"
-              description="Deploy application on Linux."
-              action="/run/linux"
-              fields={[
-                { name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" },
-                { name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://...", enableUpload: true },
-                { name: "DOMAIN_NAME", label: "Domain Name" },
-                { name: "SERVICE_NAME", label: "Service Name", defaultValue: "dotnet-app" },
-                { name: "SERVICE_PORT", label: "Service Port", defaultValue: "5000" },
-                { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "80" },
-                { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: "443" },
-              ]}
-              onRun={run}
-            />
+            <ActionCard title="Deploy Linux" description="Deploy application on Linux." action="/run/linux" fields={[{ name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" }, { name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://...", enableUpload: true }, { name: "DOMAIN_NAME", label: "Domain Name" }, { name: "SERVICE_NAME", label: "Service Name", defaultValue: "dotnet-app" }, { name: "SERVICE_PORT", label: "Service Port", defaultValue: "5000" }, { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "80" }, { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: "443" }]} onRun={run} />
           </Grid>
         </Grid>
       );
@@ -380,27 +450,10 @@ function App() {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <ActionCard
-              title="Install Docker"
-              description="Install Docker Engine on Linux."
-              action="/run/linux_setup_docker"
-              fields={[]}
-              onRun={run}
-              color="#1f2937"
-            />
+            <ActionCard title="Install Docker" description="Install Docker Engine on Linux." action="/run/linux_setup_docker" fields={[]} onRun={run} color="#1f2937" />
           </Grid>
           <Grid item xs={12} md={6}>
-            <ActionCard
-              title="Deploy Docker"
-              description="Build and run Docker container for uploaded/published app."
-              action="/run/linux_docker"
-              fields={[
-                { name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://...", enableUpload: true },
-                { name: "DOCKER_HOST_PORT", label: "Docker Host Port", defaultValue: "8080" },
-              ]}
-              onRun={run}
-              color="#334155"
-            />
+            <ActionCard title="Deploy Docker" description="Build and run Docker container for uploaded/published app." action="/run/linux_docker" fields={[{ name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://...", enableUpload: true }, { name: "DOCKER_HOST_PORT", label: "Docker Host Port", defaultValue: "8080" }]} onRun={run} color="#334155" />
           </Grid>
         </Grid>
       );
@@ -415,7 +468,7 @@ function App() {
         {!collapsed && (
           <Box>
             <Typography variant="h6" fontWeight={800}>Server Installer</Typography>
-            <Typography variant="caption" sx={{ opacity: 0.8 }}>Simple Dashboard</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.8 }}>Control Panel</Typography>
           </Box>
         )}
         {!isMobile && (
@@ -424,15 +477,8 @@ function App() {
           </Button>
         )}
       </Stack>
-      {!collapsed && (
-        <Chip label={cfg.os_label} size="small" sx={{ mb: 1.5, ml: 1, bgcolor: "rgba(96,165,250,.2)", color: "#dbeafe", border: "1px solid rgba(147,197,253,.45)" }} />
-      )}
-      <Button
-        fullWidth
-        variant={page === "home" ? "contained" : "outlined"}
-        sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }}
-        onClick={() => { setPage("home"); if (isMobile) setMobileOpen(false); }}
-      >
+      {!collapsed && <Chip label={cfg.os_label} size="small" sx={{ mb: 1.5, ml: 1, bgcolor: "rgba(96,165,250,.2)", color: "#dbeafe", border: "1px solid rgba(147,197,253,.45)" }} />}
+      <Button fullWidth variant={page === "home" ? "contained" : "outlined"} sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }} onClick={() => { setPage("home"); if (isMobile) setMobileOpen(false); }}>
         {collapsed ? "Home" : "Dashboard Home"}
       </Button>
     </Box>
@@ -445,14 +491,26 @@ function App() {
     <Box sx={{ display: "flex", minHeight: "100%" }}>
       <CssBaseline />
       <AppBar position="fixed" sx={{ zIndex: 1300, ml: `${mainMargin}px`, width: `calc(100% - ${mainMargin}px)`, background: "linear-gradient(90deg,#081726,#1a3f66)", transition: "all .2s ease" }}>
-        <Toolbar>
+        <Toolbar sx={{ gap: 1 }}>
           <IconButton color="inherit" onClick={() => isMobile ? setMobileOpen(true) : setCollapsed((v) => !v)}>
             <span style={{ fontSize: 18, fontWeight: 700 }}>|||</span>
           </IconButton>
-          <Box sx={{ ml: 1 }}>
+          <Box sx={{ ml: 0.5 }}>
             <Typography variant="h6" fontWeight={800}>{headerTitle}</Typography>
             <Typography variant="caption" sx={{ opacity: 0.9 }}>Detected OS: {cfg.os_label}</Typography>
           </Box>
+          <Box sx={{ flexGrow: 1 }} />
+          <Stack direction="row" spacing={0.5}>
+            <IconButton size="small" sx={{ border: "1px solid rgba(219,234,254,.35)", color: "#dbeafe" }} onClick={() => setPage("sysinfo")} title="SysInfo">
+              <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700 }}>SI</Typography>
+            </IconButton>
+            <IconButton size="small" sx={{ border: "1px solid rgba(219,234,254,.35)", color: "#dbeafe" }} onClick={() => setPage("ports")} title="Port Management">
+              <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700 }}>PM</Typography>
+            </IconButton>
+            <Button size="small" variant="outlined" sx={{ color: "#dbeafe", borderColor: "rgba(219,234,254,.35)", textTransform: "none" }} onClick={() => { window.location.href = "/logout"; }}>
+              Logout
+            </Button>
+          </Stack>
         </Toolbar>
       </AppBar>
 
@@ -471,67 +529,17 @@ function App() {
         {infoMessage && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setInfoMessage("")}>{infoMessage}</Alert>}
         {systemErr && <Alert severity="error" sx={{ mb: 2 }}>{systemErr}</Alert>}
 
-        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", mb: 2 }}>
-          <CardContent>
-            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
-              <Typography variant="h6" fontWeight={800}>Server Status</Typography>
-              <Button variant="outlined" size="small" sx={{ textTransform: "none" }} onClick={() => loadSystem.current()} disabled={loadingSystem}>
-                {loadingSystem ? "Loading..." : "Refresh"}
-              </Button>
-            </Stack>
-            <Grid container spacing={1.5}>
-              <Grid item xs={12} md={4}>
-                <Paper variant="outlined" sx={{ p: 1.2 }}>
-                  <Typography variant="caption" color="text.secondary">System</Typography>
-                  <Typography variant="body2">Host: {systemInfo?.hostname || "-"}</Typography>
-                  <Typography variant="body2">OS: {systemInfo?.os || "-"} {systemInfo?.os_release || ""}</Typography>
-                  <Typography variant="body2">Machine: {systemInfo?.machine || "-"}</Typography>
-                  <Typography variant="body2">Processor: {systemInfo?.processor || "-"}</Typography>
-                  <Typography variant="body2">CPU: {systemInfo?.cpu_count || "-"}</Typography>
-                  <Typography variant="body2">Memory: {formatBytes(systemInfo?.memory?.used_bytes)} / {formatBytes(systemInfo?.memory?.total_bytes)} ({systemInfo?.memory?.used_percent ?? "-"}%)</Typography>
-                  <Typography variant="body2">Uptime: {formatUptime(systemInfo?.uptime_seconds)}</Typography>
-                </Paper>
-              </Grid>
-              <Grid item xs={12} md={4}>
-                <Paper variant="outlined" sx={{ p: 1.2 }}>
-                  <Typography variant="caption" color="text.secondary">Installed Software</Typography>
-                  <Typography variant="body2">.NET: {dotnet.installed ? `Installed (${dotnet.version || "unknown"})` : "Not installed"}</Typography>
-                  {!!(dotnet.sdks && dotnet.sdks.length) && <Typography variant="body2">SDKs: {dotnet.sdks.slice(0, 3).join(" | ")}</Typography>}
-                  <Typography variant="body2">Docker: {docker.installed ? `Installed (${docker.version || "unknown"})` : "Not installed"}</Typography>
-                  {!!docker.server_version && <Typography variant="body2">Docker Engine: {docker.server_version}</Typography>}
-                  <Typography variant="body2">IIS: {iis.installed ? `Installed (${iis.service || "unknown"})` : "Not installed"}</Typography>
-                </Paper>
-              </Grid>
-              <Grid item xs={12} md={4}>
-                <Paper variant="outlined" sx={{ p: 1.2 }}>
-                  <Typography variant="caption" color="text.secondary">Network</Typography>
-                  <Typography variant="body2">IPs: {(systemInfo?.ips || []).join(", ") || "-"}</Typography>
-                  <Typography variant="body2">Listening Ports: {(systemInfo?.listening_ports || []).length || 0}</Typography>
-                  <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
-                    <TextField size="small" label="Port" value={portValue} onChange={(e) => setPortValue(e.target.value)} sx={{ width: 110 }} />
-                    <FormControl size="small" sx={{ width: 110 }}>
-                      <InputLabel>Proto</InputLabel>
-                      <Select label="Proto" value={portProtocol} onChange={(e) => setPortProtocol(e.target.value)}>
-                        <MenuItem value="tcp">TCP</MenuItem>
-                        <MenuItem value="udp">UDP</MenuItem>
-                      </Select>
-                    </FormControl>
-                    <Button size="small" variant="contained" disabled={portBusy} onClick={() => onPortAction("open")} sx={{ textTransform: "none" }}>Open</Button>
-                    <Button size="small" variant="outlined" disabled={portBusy} onClick={() => onPortAction("close")} sx={{ textTransform: "none" }}>Close</Button>
-                  </Stack>
-                </Paper>
-              </Grid>
-              <Grid item xs={12}>
-                <Paper variant="outlined" sx={{ p: 1.2 }}>
-                  <Typography variant="caption" color="text.secondary">Open Ports</Typography>
-                  <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
-                    {(systemInfo?.listening_ports || []).slice(0, 60).map((p) => `${p.proto?.toUpperCase() || "?"}:${p.port}${p.pid ? ` (pid ${p.pid})` : ""}`).join(", ") || "-"}
-                  </Typography>
-                </Paper>
-              </Grid>
-            </Grid>
-          </CardContent>
-        </Card>
+        <Grid container spacing={1.2} sx={{ mb: 1.5 }}>
+          <Grid item xs={12} md={4}>
+            <MiniMetric label="CPU" valueText={`${cpuPercent.toFixed(1)}%`} percent={cpuPercent} color="#2563eb" />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <MiniMetric label="Memory" valueText={`${memoryPercent.toFixed(1)}%`} percent={memoryPercent} color="#0891b2" />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <MiniMetric label="Network" valueText={`${formatBytes(netRate.rxBps + netRate.txBps)}/s`} percent={netPercent} color="#0f766e" />
+          </Grid>
+        </Grid>
 
         <Stack spacing={2}>
           {page !== "home" && (
@@ -582,3 +590,4 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+
