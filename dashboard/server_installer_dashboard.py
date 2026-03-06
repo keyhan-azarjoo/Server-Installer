@@ -787,6 +787,23 @@ def ensure_repo_files(relative_paths, live_cb=None):
             raise RuntimeError(f"Failed to download required file '{rel_path.as_posix()}': {ex}") from ex
 
 
+def is_local_tcp_port_listening(port):
+    try:
+        p = int(str(port).strip())
+    except Exception:
+        return False
+    if p < 1 or p > 65535:
+        return False
+    listeners = get_listening_ports(limit=5000)
+    for item in listeners:
+        proto = str(item.get("proto", "")).lower()
+        if not proto.startswith("tcp"):
+            continue
+        if int(item.get("port", 0)) == p:
+            return True
+    return False
+
+
 def run_windows_installer(form, live_cb=None):
     if os.name != "nt":
         return 1, "Windows installer can only run on Windows hosts."
@@ -936,6 +953,12 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
     if selected_mode not in ("iis", "docker"):
         selected_mode = "iis"
     mode_choice = "2\n" if selected_mode == "docker" else "1\n"
+    requested_https = (form.get("LOCALS3_HTTPS_PORT", [""])[0] or "").strip()
+    if requested_https:
+        if not requested_https.isdigit():
+            return 1, "LOCALS3_HTTPS_PORT must be numeric."
+        if is_local_tcp_port_listening(requested_https):
+            return 1, f"Requested HTTPS port {requested_https} is already in use. Choose another port."
     # Script is interactive; feed defaults for remaining prompts.
     scripted_input = mode_choice + ("\n" * 200)
     cmd = [
@@ -971,8 +994,32 @@ def run_linux_s3_installer(form=None, live_cb=None):
     cmd = ["bash", str(S3_LINUX_INSTALLER)]
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
         cmd = ["sudo"] + cmd
-    # Script is interactive; feed defaults to proceed.
-    scripted_input = "\n" * 200
+    requested_https = (form.get("LOCALS3_HTTPS_PORT", [""])[0] or "").strip()
+    if requested_https:
+        if not requested_https.isdigit():
+            return 1, "LOCALS3_HTTPS_PORT must be numeric."
+        if is_local_tcp_port_listening(requested_https):
+            return 1, f"Requested HTTPS port {requested_https} is already in use. Choose another port."
+
+    requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
+    requested_lan = (form.get("LOCALS3_ENABLE_LAN", [""])[0] or "").strip().lower()
+    host_line = requested_host if requested_host else ""
+    lan_line = "y" if requested_lan in ("1", "true", "yes", "y", "on") else "n"
+
+    # Keep compatibility with older interactive scripts:
+    # 1) host prompt
+    # 2) LAN prompt
+    # 3) use 443 prompt -> default to No
+    # 4) choose HTTPS option / custom port
+    if requested_https:
+        if requested_https == "443":
+            https_flow = "y"
+        else:
+            https_flow = f"n\n2\n{requested_https}"
+    else:
+        https_flow = "n\n1"
+
+    scripted_input = f"{host_line}\n{lan_line}\n{https_flow}\n" + ("\n" * 200)
     env = os.environ.copy()
     form = form or {}
     for key in [
