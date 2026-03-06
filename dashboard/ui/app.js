@@ -310,15 +310,17 @@ function App() {
   };
 
   const stopServicesBatch = async (items, label) => {
-    const list = (items || []).filter((x) => x && x.name);
+    const isRunning = (svc) => /running|active|up/i.test(String(svc?.status || ""));
+    const list = (items || []).filter((x) => x && x.name && isRunning(x));
     if (list.length === 0) {
-      setInfoMessage(`No ${label} services found to stop.`);
+      setInfoMessage(`No running ${label} services found to stop.`);
       return;
     }
     setServiceBusy(true);
     try {
       let okCount = 0;
       let failCount = 0;
+      const failed = [];
       for (const svc of list) {
         try {
           const fd = new FormData();
@@ -328,12 +330,17 @@ function App() {
           const r = await fetch("/api/system/service", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
           const j = await r.json();
           if (j.ok) okCount += 1;
-          else failCount += 1;
+          else { failCount += 1; failed.push(`${svc.name}: ${j.message || "failed"}`); }
         } catch (_) {
           failCount += 1;
+          failed.push(`${svc.name}: request failed`);
         }
       }
-      setInfoMessage(`Stop ${label}: ${okCount} success, ${failCount} failed.`);
+      if (failed.length > 0) {
+        setInfoMessage(`Stop ${label}: ${okCount} success, ${failCount} failed. ${failed.slice(0, 3).join(" | ")}`);
+      } else {
+        setInfoMessage(`Stop ${label}: ${okCount} success, ${failCount} failed.`);
+      }
       await loadServices.current();
       loadSystem.current();
     } finally {

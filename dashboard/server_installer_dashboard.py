@@ -580,6 +580,9 @@ def manage_service(action, name, kind):
     if kind == "docker":
         if not command_exists("docker"):
             return False, "Docker is not available."
+        rc_state, out_state = run_capture(["docker", "inspect", "-f", "{{.State.Running}}", svc_name], timeout=20)
+        if rc_state == 0 and out_state and out_state.strip().lower() != "true":
+            return True, f"Docker container '{svc_name}' is already stopped."
         rc, out = run_capture(["docker", "stop", svc_name], timeout=60)
         return rc == 0, (out or f"Docker container '{svc_name}' stop attempted.")
 
@@ -599,9 +602,27 @@ def manage_service(action, name, kind):
 
     prefix = _sudo_prefix()
     if command_exists("systemctl"):
-        cmd = prefix + ["systemctl", "stop", svc_name]
-        rc, out = run_capture(cmd, timeout=60)
-        return rc == 0, (out or f"Stop requested for {svc_name}.")
+        candidates = [svc_name]
+        if not svc_name.endswith(".service"):
+            candidates.append(f"{svc_name}.service")
+
+        for unit in candidates:
+            rc_active, out_active = run_capture(prefix + ["systemctl", "is-active", unit], timeout=20)
+            if rc_active == 0 and str(out_active or "").strip().lower() != "active":
+                return True, f"Service '{unit}' is already stopped."
+
+            rc, out = run_capture(prefix + ["systemctl", "stop", unit], timeout=60)
+            if rc == 0:
+                return True, (out or f"Stop requested for {unit}.")
+
+        # Fallback to legacy service command if systemctl stop fails for all candidates.
+        if command_exists("service"):
+            base_name = svc_name[:-8] if svc_name.endswith(".service") else svc_name
+            rc, out = run_capture(prefix + ["service", base_name, "stop"], timeout=60)
+            if rc == 0:
+                return True, (out or f"Stop requested for {base_name}.")
+
+        return False, f"Failed to stop service '{svc_name}'."
 
     return False, "No supported service manager found."
 
