@@ -357,6 +357,12 @@ function App() {
     }
   };
 
+  const actionLabel = (action) => {
+    if (action === "autostart_on") return "Auto-start ON";
+    if (action === "autostart_off") return "Auto-start OFF";
+    return action.charAt(0).toUpperCase() + action.slice(1);
+  };
+
   const software = systemInfo?.software || {};
   const dotnet = software.dotnet || {};
   const docker = software.docker || {};
@@ -518,7 +524,7 @@ function App() {
             <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
               <CardContent>
                 <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                  <Typography variant="h6" fontWeight={800}>Service Manager</Typography>
+                  <Typography variant="h6" fontWeight={800}>Managed Services</Typography>
                   <Box sx={{ flexGrow: 1 }} />
                   <TextField size="small" label="Filter" value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)} sx={{ minWidth: 260 }} />
                   <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>
@@ -531,6 +537,7 @@ function App() {
                   {filteredServices.map((svc) => {
                     const status = String(svc.status || "");
                     const stopDisabled = serviceBusy || /stopped|inactive|exited|dead/i.test(status);
+                    const autostart = !!svc.autostart;
                     return (
                       <Paper key={`${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
                         <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
@@ -540,7 +547,9 @@ function App() {
                           </Box>
                           <Chip size="small" label={svc.kind || "service"} />
                           <Chip size="small" color={/running|active|up/i.test(status) ? "success" : "default"} label={status || "-"} />
+                          <Chip size="small" color={autostart ? "primary" : "default"} label={autostart ? "autostart:on" : "autostart:off"} />
                           <Box sx={{ flexGrow: 1 }} />
+                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("start", svc)} sx={{ textTransform: "none" }}>{actionLabel("start")}</Button>
                           <Button
                             size="small"
                             variant="outlined"
@@ -551,6 +560,10 @@ function App() {
                           >
                             Stop
                           </Button>
+                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>{actionLabel("restart")}</Button>
+                          <Button size="small" variant="outlined" disabled={serviceBusy || autostart} onClick={() => onServiceAction("autostart_on", svc)} sx={{ textTransform: "none" }}>{actionLabel("autostart_on")}</Button>
+                          <Button size="small" variant="outlined" disabled={serviceBusy || !autostart} onClick={() => onServiceAction("autostart_off", svc)} sx={{ textTransform: "none" }}>{actionLabel("autostart_off")}</Button>
+                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>{actionLabel("delete")}</Button>
                         </Stack>
                       </Paper>
                     );

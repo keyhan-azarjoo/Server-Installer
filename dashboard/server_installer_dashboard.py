@@ -481,6 +481,7 @@ def _safe_service_name(name):
 
 def get_service_items():
     items = []
+    managed_patterns = re.compile(r"(locals3|minio|dotnet-app|dotnet|aspnet|kestrel|dotnetapp)", re.IGNORECASE)
 
     if os.name == "nt":
         cmd = [
@@ -500,13 +501,78 @@ def get_service_items():
                     name = str(row.get("Name", "")).strip()
                     if not name:
                         continue
+                    display_name = str(row.get("DisplayName", "")).strip()
+                    if not managed_patterns.search(f"{name} {display_name}"):
+                        continue
                     items.append(
                         {
                             "kind": "service",
                             "name": name,
-                            "display_name": str(row.get("DisplayName", "")).strip(),
+                            "display_name": display_name,
                             "status": str(row.get("Status", "")).strip(),
                             "start_type": str(row.get("StartType", "")).strip(),
+                            "platform": "windows",
+                        }
+                    )
+            except Exception:
+                pass
+        # Include LocalS3 scheduled task as managed daemon.
+        rc_task, out_task = run_capture(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "$t=Get-ScheduledTask -TaskName 'LocalS3-MinIO' -ErrorAction SilentlyContinue; if($t){ $i=Get-ScheduledTaskInfo -TaskName 'LocalS3-MinIO' -ErrorAction SilentlyContinue; [PSCustomObject]@{Name='LocalS3-MinIO';State=($i.State);Enabled=($t.Settings.Enabled)} | ConvertTo-Json -Depth 2 }",
+            ],
+            timeout=30,
+        )
+        if rc_task == 0 and out_task:
+            try:
+                task_obj = json.loads(out_task)
+                items.append(
+                    {
+                        "kind": "task",
+                        "name": str(task_obj.get("Name", "LocalS3-MinIO")),
+                        "display_name": "LocalS3 MinIO Scheduled Task",
+                        "status": str(task_obj.get("State", "") or ""),
+                        "autostart": bool(task_obj.get("Enabled", True)),
+                        "platform": "windows",
+                    }
+                )
+            except Exception:
+                pass
+
+        # Include managed IIS websites.
+        rc_sites, out_sites = run_capture(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "Import-Module WebAdministration -ErrorAction SilentlyContinue; Get-Website | Select-Object Name,State,PhysicalPath,ServerAutoStart | ConvertTo-Json -Depth 3",
+            ],
+            timeout=30,
+        )
+        if rc_sites == 0 and out_sites:
+            try:
+                raw_sites = json.loads(out_sites)
+                site_rows = raw_sites if isinstance(raw_sites, list) else [raw_sites]
+                for s in site_rows:
+                    name = str(s.get("Name", "")).strip()
+                    if not name:
+                        continue
+                    if not managed_patterns.search(name):
+                        continue
+                    items.append(
+                        {
+                            "kind": "iis_site",
+                            "name": name,
+                            "display_name": str(s.get("PhysicalPath", "")).strip(),
+                            "status": str(s.get("State", "")).strip(),
+                            "autostart": bool(s.get("ServerAutoStart", True)),
                             "platform": "windows",
                         }
                     )
@@ -530,6 +596,10 @@ def get_service_items():
                 active = parts[2]
                 sub = parts[3]
                 desc = " ".join(parts[4:]) if len(parts) > 4 else ""
+                if not managed_patterns.search(f"{name} {desc}"):
+                    continue
+                rc_enabled, out_enabled = run_capture(["systemctl", "is-enabled", name], timeout=20)
+                autostart = rc_enabled == 0 and str(out_enabled or "").strip().lower() in ("enabled", "static")
                 items.append(
                     {
                         "kind": "service",
@@ -538,12 +608,13 @@ def get_service_items():
                         "status": active,
                         "sub_status": sub,
                         "load": load,
+                        "autostart": autostart,
                         "platform": "linux",
                     }
                 )
 
     if command_exists("docker"):
-        rc, out = run_capture(["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.Image}}"], timeout=30)
+        rc, out = run_capture(["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.Image}}\t{{.Labels}}"], timeout=30)
         if rc == 0 and out:
             for line in out.splitlines():
                 parts = line.split("\t")
@@ -552,14 +623,23 @@ def get_service_items():
                 name = parts[0].strip()
                 status = parts[1].strip()
                 image = parts[2].strip()
+                labels = parts[3].strip() if len(parts) > 3 else ""
                 if not name:
                     continue
+                managed = ("com.locals3.installer=true" in labels) or managed_patterns.search(f"{name} {image}") is not None
+                if not managed:
+                    continue
+                restart_policy = ""
+                rc_inspect, out_inspect = run_capture(["docker", "inspect", "-f", "{{.HostConfig.RestartPolicy.Name}}", name], timeout=20)
+                if rc_inspect == 0 and out_inspect:
+                    restart_policy = out_inspect.strip()
                 items.append(
                     {
                         "kind": "docker",
                         "name": name,
                         "display_name": image,
                         "status": status,
+                        "autostart": restart_policy in ("always", "unless-stopped"),
                         "platform": "docker",
                     }
                 )
@@ -572,33 +652,87 @@ def manage_service(action, name, kind):
     action = (action or "").strip().lower()
     kind = (kind or "service").strip().lower()
     svc_name = _safe_service_name(name)
-    if action != "stop":
-        return False, "Only 'stop' action is supported."
+    if action not in ("start", "stop", "restart", "delete", "autostart_on", "autostart_off"):
+        return False, "Supported actions: start, stop, restart, delete, autostart_on, autostart_off."
     if not svc_name:
         return False, "Invalid service name."
 
     if kind == "docker":
         if not command_exists("docker"):
             return False, "Docker is not available."
-        rc_state, out_state = run_capture(["docker", "inspect", "-f", "{{.State.Running}}", svc_name], timeout=20)
-        if rc_state == 0 and out_state and out_state.strip().lower() != "true":
-            return True, f"Docker container '{svc_name}' is already stopped."
-        rc, out = run_capture(["docker", "stop", svc_name], timeout=60)
-        return rc == 0, (out or f"Docker container '{svc_name}' stop attempted.")
+        if action == "autostart_on":
+            rc, out = run_capture(["docker", "update", "--restart", "unless-stopped", svc_name], timeout=30)
+            return rc == 0, (out or f"Auto-start enabled for docker container '{svc_name}'.")
+        if action == "autostart_off":
+            rc, out = run_capture(["docker", "update", "--restart", "no", svc_name], timeout=30)
+            return rc == 0, (out or f"Auto-start disabled for docker container '{svc_name}'.")
+        if action == "delete":
+            rc, out = run_capture(["docker", "rm", "-f", svc_name], timeout=60)
+            return rc == 0, (out or f"Docker container '{svc_name}' deleted.")
+        if action in ("start", "stop", "restart"):
+            rc, out = run_capture(["docker", action, svc_name], timeout=60)
+            return rc == 0, (out or f"Docker container '{svc_name}' {action} requested.")
+        return False, "Unsupported docker action."
+
+    if kind == "task" and os.name == "nt":
+        if not is_windows_admin():
+            return False, "Administrator is required."
+        if action == "start":
+            rc, out = run_capture(["schtasks", "/Run", "/TN", svc_name], timeout=30)
+            return rc == 0, (out or f"Task '{svc_name}' started.")
+        if action == "stop":
+            rc, out = run_capture(["schtasks", "/End", "/TN", svc_name], timeout=30)
+            return rc == 0, (out or f"Task '{svc_name}' stopped.")
+        if action == "restart":
+            run_capture(["schtasks", "/End", "/TN", svc_name], timeout=20)
+            rc, out = run_capture(["schtasks", "/Run", "/TN", svc_name], timeout=30)
+            return rc == 0, (out or f"Task '{svc_name}' restarted.")
+        if action == "delete":
+            rc, out = run_capture(["schtasks", "/Delete", "/TN", svc_name, "/F"], timeout=30)
+            return rc == 0, (out or f"Task '{svc_name}' deleted.")
+        if action == "autostart_on":
+            rc, out = run_capture(["schtasks", "/Change", "/TN", svc_name, "/ENABLE"], timeout=30)
+            return rc == 0, (out or f"Task '{svc_name}' auto-start enabled.")
+        if action == "autostart_off":
+            rc, out = run_capture(["schtasks", "/Change", "/TN", svc_name, "/DISABLE"], timeout=30)
+            return rc == 0, (out or f"Task '{svc_name}' auto-start disabled.")
+        return False, "Unsupported task action."
+
+    if kind == "iis_site" and os.name == "nt":
+        if not is_windows_admin():
+            return False, "Administrator is required."
+        if action == "start":
+            rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"Import-Module WebAdministration; Start-Website -Name '{svc_name}'"], timeout=30)
+            return rc == 0, (out or f"IIS site '{svc_name}' started.")
+        if action == "stop":
+            rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"Import-Module WebAdministration; Stop-Website -Name '{svc_name}'"], timeout=30)
+            return rc == 0, (out or f"IIS site '{svc_name}' stopped.")
+        if action == "restart":
+            rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"Import-Module WebAdministration; Stop-Website -Name '{svc_name}' -ErrorAction SilentlyContinue; Start-Website -Name '{svc_name}'"], timeout=30)
+            return rc == 0, (out or f"IIS site '{svc_name}' restarted.")
+        if action == "delete":
+            rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"Import-Module WebAdministration; Remove-Website -Name '{svc_name}'"], timeout=30)
+            return rc == 0, (out or f"IIS site '{svc_name}' deleted.")
+        if action in ("autostart_on", "autostart_off"):
+            val = "$true" if action == "autostart_on" else "$false"
+            rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"Import-Module WebAdministration; Set-ItemProperty \"IIS:\\Sites\\{svc_name}\" -Name serverAutoStart -Value {val}"], timeout=30)
+            return rc == 0, (out or f"IIS site '{svc_name}' auto-start updated.")
+        return False, "Unsupported IIS action."
 
     if os.name == "nt":
         if not is_windows_admin():
             return False, "Stopping services on Windows requires Administrator."
-        cmd = [
-            "powershell.exe",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            f"Stop-Service -Name '{svc_name}' -Force -ErrorAction Stop; Write-Output 'Stopped {svc_name}'",
-        ]
+        ps_map = {
+            "start": f"Start-Service -Name '{svc_name}' -ErrorAction Stop",
+            "stop": f"Stop-Service -Name '{svc_name}' -Force -ErrorAction Stop",
+            "restart": f"Restart-Service -Name '{svc_name}' -Force -ErrorAction Stop",
+            "delete": f"sc.exe delete \"{svc_name}\" | Out-Null",
+            "autostart_on": f"Set-Service -Name '{svc_name}' -StartupType Automatic -ErrorAction Stop",
+            "autostart_off": f"Set-Service -Name '{svc_name}' -StartupType Disabled -ErrorAction Stop",
+        }
+        cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_map[action]]
         rc, out = run_capture(cmd, timeout=60)
-        return rc == 0, (out or f"Stop requested for {svc_name}.")
+        return rc == 0, (out or f"Action '{action}' requested for {svc_name}.")
 
     prefix = _sudo_prefix()
     if command_exists("systemctl"):
@@ -607,22 +741,39 @@ def manage_service(action, name, kind):
             candidates.append(f"{svc_name}.service")
 
         for unit in candidates:
-            rc_active, out_active = run_capture(prefix + ["systemctl", "is-active", unit], timeout=20)
-            if rc_active == 0 and str(out_active or "").strip().lower() != "active":
-                return True, f"Service '{unit}' is already stopped."
-
-            rc, out = run_capture(prefix + ["systemctl", "stop", unit], timeout=60)
+            if action == "autostart_on":
+                rc, out = run_capture(prefix + ["systemctl", "enable", unit], timeout=60)
+                if rc == 0:
+                    return True, (out or f"Auto-start enabled for {unit}.")
+                continue
+            if action == "autostart_off":
+                rc, out = run_capture(prefix + ["systemctl", "disable", unit], timeout=60)
+                if rc == 0:
+                    return True, (out or f"Auto-start disabled for {unit}.")
+                continue
+            if action == "delete":
+                run_capture(prefix + ["systemctl", "stop", unit], timeout=30)
+                run_capture(prefix + ["systemctl", "disable", unit], timeout=30)
+                if unit.startswith("/") or ".." in unit:
+                    return False, "Invalid unit name for delete."
+                unit_file = f"/etc/systemd/system/{unit}"
+                rc, out = run_capture(prefix + ["rm", "-f", unit_file], timeout=30)
+                run_capture(prefix + ["systemctl", "daemon-reload"], timeout=30)
+                if rc == 0:
+                    return True, (out or f"Service unit '{unit}' deleted.")
+                continue
+            rc, out = run_capture(prefix + ["systemctl", action, unit], timeout=60)
             if rc == 0:
-                return True, (out or f"Stop requested for {unit}.")
+                return True, (out or f"Action '{action}' requested for {unit}.")
 
         # Fallback to legacy service command if systemctl stop fails for all candidates.
-        if command_exists("service"):
+        if command_exists("service") and action in ("start", "stop", "restart"):
             base_name = svc_name[:-8] if svc_name.endswith(".service") else svc_name
-            rc, out = run_capture(prefix + ["service", base_name, "stop"], timeout=60)
+            rc, out = run_capture(prefix + ["service", base_name, action], timeout=60)
             if rc == 0:
-                return True, (out or f"Stop requested for {base_name}.")
+                return True, (out or f"Action '{action}' requested for {base_name}.")
 
-        return False, f"Failed to stop service '{svc_name}'."
+        return False, f"Failed to run action '{action}' for service '{svc_name}'."
 
     return False, "No supported service manager found."
 
