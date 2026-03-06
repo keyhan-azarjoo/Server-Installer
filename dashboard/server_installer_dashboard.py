@@ -19,6 +19,7 @@ import zipfile
 import tarfile
 import traceback
 import re
+import getpass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -44,6 +45,349 @@ WINDOWS_SETUP_MODULES = [
 SESSIONS = set()
 JOBS = {}
 JOBS_LOCK = threading.Lock()
+
+
+def command_exists(name):
+    return shutil.which(name) is not None
+
+
+def run_capture(cmd, timeout=20):
+    try:
+        proc = subprocess.run(
+            cmd,
+            cwd=str(ROOT),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            timeout=timeout,
+        )
+        return proc.returncode, (proc.stdout or "").strip()
+    except Exception as ex:
+        return 1, str(ex)
+
+
+def get_uptime_seconds():
+    if os.name == "nt":
+        try:
+            return int(ctypes.windll.kernel32.GetTickCount64() / 1000)
+        except Exception:
+            return None
+    try:
+        with open("/proc/uptime", "r", encoding="utf-8") as f:
+            return int(float(f.read().split()[0]))
+    except Exception:
+        return None
+
+
+def get_memory_info():
+    if os.name == "nt":
+        class MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        try:
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat))
+            used = int(stat.ullTotalPhys - stat.ullAvailPhys)
+            return {
+                "total_bytes": int(stat.ullTotalPhys),
+                "available_bytes": int(stat.ullAvailPhys),
+                "used_bytes": used,
+                "used_percent": int(stat.dwMemoryLoad),
+            }
+        except Exception:
+            return {}
+
+    try:
+        mem = {}
+        with open("/proc/meminfo", "r", encoding="utf-8") as f:
+            for line in f:
+                if ":" not in line:
+                    continue
+                key, rest = line.split(":", 1)
+                value = rest.strip().split()[0]
+                mem[key.strip()] = int(value) * 1024
+        total = mem.get("MemTotal", 0)
+        avail = mem.get("MemAvailable", mem.get("MemFree", 0))
+        used = max(0, total - avail)
+        used_percent = int((used / total) * 100) if total else 0
+        return {
+            "total_bytes": total,
+            "available_bytes": avail,
+            "used_bytes": used,
+            "used_percent": used_percent,
+        }
+    except Exception:
+        return {}
+
+
+def get_ip_addresses():
+    ips = set()
+    try:
+        host = socket.gethostname()
+        for ip in socket.gethostbyname_ex(host)[2]:
+            if ip and (not ip.startswith("127.")):
+                ips.add(ip)
+    except Exception:
+        pass
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 53))
+        ip = s.getsockname()[0]
+        s.close()
+        if ip and (not ip.startswith("127.")):
+            ips.add(ip)
+    except Exception:
+        pass
+    if not ips:
+        ips.add("127.0.0.1")
+    return sorted(ips)
+
+
+def get_dotnet_info():
+    info = {"installed": False, "version": "", "sdks": [], "runtimes": []}
+    rc, out = run_capture(["dotnet", "--version"])
+    if rc == 0 and out:
+        info["installed"] = True
+        info["version"] = out.splitlines()[0].strip()
+        rc_sdks, out_sdks = run_capture(["dotnet", "--list-sdks"])
+        if rc_sdks == 0 and out_sdks:
+            info["sdks"] = [x.strip() for x in out_sdks.splitlines() if x.strip()]
+        rc_rt, out_rt = run_capture(["dotnet", "--list-runtimes"])
+        if rc_rt == 0 and out_rt:
+            info["runtimes"] = [x.strip() for x in out_rt.splitlines() if x.strip()]
+    return info
+
+
+def get_docker_info():
+    info = {"installed": False, "version": "", "server_version": "", "running": False}
+    rc, out = run_capture(["docker", "--version"])
+    if rc == 0 and out:
+        info["installed"] = True
+        info["version"] = out.splitlines()[0].strip()
+        rc2, out2 = run_capture(["docker", "version", "--format", "{{.Server.Version}}"])
+        if rc2 == 0 and out2:
+            info["server_version"] = out2.strip()
+            info["running"] = True
+    return info
+
+
+def get_iis_info():
+    info = {"available": False, "installed": False, "version": "", "service": "unknown"}
+    if os.name != "nt":
+        return info
+
+    rc, out = run_capture(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "(Get-WindowsOptionalFeature -Online -FeatureName IIS-WebServerRole).State",
+        ]
+    )
+    if rc == 0 and out:
+        info["available"] = True
+        info["installed"] = "Enabled" in out
+
+    rc_svc, out_svc = run_capture(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "(Get-Service W3SVC -ErrorAction SilentlyContinue).Status",
+        ]
+    )
+    if rc_svc == 0 and out_svc:
+        info["service"] = out_svc.strip().splitlines()[0]
+
+    rc_ver, out_ver = run_capture(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "[System.Environment]::OSVersion.VersionString",
+        ]
+    )
+    if rc_ver == 0 and out_ver:
+        info["version"] = out_ver.strip().splitlines()[0]
+    return info
+
+
+def parse_port_from_addr(addr):
+    text = (addr or "").strip()
+    if not text:
+        return None
+    if text.startswith("[") and "]:" in text:
+        return text.rsplit("]:", 1)[1]
+    if ":" in text:
+        return text.rsplit(":", 1)[1]
+    return None
+
+
+def get_listening_ports(limit=200):
+    ports = []
+    if os.name == "nt":
+        rc, out = run_capture(["netstat", "-ano", "-p", "tcp"], timeout=30)
+        if rc == 0 and out:
+            for line in out.splitlines():
+                line = line.strip()
+                if not line.startswith("TCP"):
+                    continue
+                parts = [p for p in line.split() if p]
+                if len(parts) < 5:
+                    continue
+                state = parts[3]
+                if state != "LISTENING":
+                    continue
+                port = parse_port_from_addr(parts[1])
+                pid = parts[4]
+                if not (port and port.isdigit()):
+                    continue
+                ports.append({"proto": "tcp", "port": int(port), "pid": pid, "state": state})
+        rc_u, out_u = run_capture(["netstat", "-ano", "-p", "udp"], timeout=30)
+        if rc_u == 0 and out_u:
+            for line in out_u.splitlines():
+                line = line.strip()
+                if not line.startswith("UDP"):
+                    continue
+                parts = [p for p in line.split() if p]
+                if len(parts) < 4:
+                    continue
+                port = parse_port_from_addr(parts[1])
+                pid = parts[3]
+                if not (port and port.isdigit()):
+                    continue
+                ports.append({"proto": "udp", "port": int(port), "pid": pid, "state": "LISTEN"})
+    else:
+        rc, out = run_capture(["ss", "-ltnupH"], timeout=30)
+        if rc == 0 and out:
+            for line in out.splitlines():
+                parts = [p for p in line.split() if p]
+                if len(parts) < 5:
+                    continue
+                proto = parts[0]
+                local_addr = parts[4]
+                proc = parts[6] if len(parts) > 6 else ""
+                port = parse_port_from_addr(local_addr)
+                if not (port and port.isdigit()):
+                    continue
+                ports.append({"proto": proto, "port": int(port), "process": proc, "state": parts[1]})
+
+    ports.sort(key=lambda x: (x.get("port", 0), x.get("proto", "")))
+    return ports[:limit]
+
+
+def _sudo_prefix():
+    if os.name == "nt":
+        return []
+    if os.geteuid() == 0:
+        return []
+    if command_exists("sudo"):
+        return ["sudo"]
+    return []
+
+
+def manage_firewall_port(action, port, protocol):
+    action = (action or "").strip().lower()
+    protocol = (protocol or "").strip().lower()
+    if action not in ("open", "close"):
+        return False, "Action must be open or close."
+    if protocol not in ("tcp", "udp"):
+        return False, "Protocol must be tcp or udp."
+    if not str(port).isdigit():
+        return False, "Port must be numeric."
+    port_num = int(port)
+    if port_num < 1 or port_num > 65535:
+        return False, "Port must be between 1 and 65535."
+
+    if os.name == "nt":
+        if not is_windows_admin():
+            return False, "Port management on Windows requires Administrator."
+        rule_name = f"ServerInstaller-Managed-{protocol.upper()}-{port_num}"
+        if action == "open":
+            cmd = [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                (
+                    f"if (-not (Get-NetFirewallRule -DisplayName '{rule_name}' -ErrorAction SilentlyContinue)) "
+                    f"{{ New-NetFirewallRule -DisplayName '{rule_name}' -Direction Inbound -Action Allow "
+                    f"-Protocol {protocol.upper()} -LocalPort {port_num} | Out-Null }}"
+                ),
+            ]
+        else:
+            cmd = [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                f"Get-NetFirewallRule -DisplayName '{rule_name}' -ErrorAction SilentlyContinue | Remove-NetFirewallRule",
+            ]
+        rc, out = run_capture(cmd, timeout=30)
+        return rc == 0, (out or f"Firewall rule {action} completed.")
+
+    prefix = _sudo_prefix()
+    if command_exists("ufw"):
+        if action == "open":
+            cmd = prefix + ["ufw", "--force", "allow", f"{port_num}/{protocol}"]
+        else:
+            cmd = prefix + ["ufw", "--force", "delete", "allow", f"{port_num}/{protocol}"]
+        rc, out = run_capture(cmd, timeout=30)
+        return rc == 0, (out or f"ufw {action} completed.")
+
+    return False, "No supported firewall manager found (ufw on Linux, Windows Firewall on Windows)."
+
+
+def get_system_status():
+    load = None
+    try:
+        if hasattr(os, "getloadavg"):
+            la = os.getloadavg()
+            load = {"1m": la[0], "5m": la[1], "15m": la[2]}
+    except Exception:
+        load = None
+
+    status = {
+        "hostname": socket.gethostname(),
+        "user": getpass.getuser(),
+        "os": platform.system(),
+        "os_release": platform.release(),
+        "platform": platform.platform(),
+        "machine": platform.machine(),
+        "processor": platform.processor(),
+        "python": platform.python_version(),
+        "uptime_seconds": get_uptime_seconds(),
+        "cpu_count": os.cpu_count(),
+        "load": load,
+        "memory": get_memory_info(),
+        "ips": get_ip_addresses(),
+        "listening_ports": get_listening_ports(),
+        "software": {
+            "dotnet": get_dotnet_info(),
+            "docker": get_docker_info(),
+            "iis": get_iis_info(),
+        },
+    }
+    return status
 
 
 def is_windows_admin():
@@ -211,7 +555,20 @@ def save_uploaded_folder(items):
     with zipfile.ZipFile(zip_path, "r") as zf:
         zf.extractall(extract_dir)
 
-    return str(extract_dir)
+    # If archive expands to a single wrapper directory, use that as source root.
+    children = [p for p in extract_dir.iterdir()]
+    chosen_dir = extract_dir
+    if len(children) == 1 and children[0].is_dir():
+        chosen_dir = children[0]
+
+    # Cleanup transient artifacts created only for transport.
+    shutil.rmtree(source_dir, ignore_errors=True)
+    try:
+        zip_path.unlink(missing_ok=True)
+    except Exception:
+        pass
+
+    return str(chosen_dir)
 
 
 def save_uploaded_archive_or_file(item):
@@ -1259,6 +1616,18 @@ class Handler(BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
                 return
             return
+        if self.path.startswith("/api/system/status"):
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                payload = {"ok": True, "status": get_system_status()}
+                self.write_json(payload, HTTPStatus.OK)
+            except Exception as ex:
+                print(f"System status error: {ex}")
+                traceback.print_exc()
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
         if self.path == "/":
             if self.is_local_client() or self.is_auth():
                 self.write_html(page_dashboard())
@@ -1326,6 +1695,16 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
                 return
             self.write_json({"ok": True, "path": saved_path})
+            return
+
+        if self.path == "/api/system/port":
+            form = self.parse_form()
+            action = (form.get("action", [""])[0] or "").strip()
+            port = (form.get("port", [""])[0] or "").strip()
+            protocol = (form.get("protocol", ["tcp"])[0] or "tcp").strip()
+            ok, message = manage_firewall_port(action, port, protocol)
+            status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
+            self.write_json({"ok": ok, "message": message}, status)
             return
 
         try:

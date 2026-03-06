@@ -76,6 +76,13 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
     }
     setUploading(true);
     setUploadInfo("Uploading...");
+    if (window.ServerInstallerTerminalHook) {
+      window.ServerInstallerTerminalHook({
+        open: true,
+        state: `Uploading for: ${title}`,
+        line: `[${new Date().toLocaleTimeString()}] Upload started for ${title}`,
+      });
+    }
     try {
       const fd = new FormData();
       for (const f of input.files) {
@@ -101,10 +108,24 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
       setUploadedPath(json.path || "");
       setSourcePathInForm(json.path || "");
       setUploadInfo("Uploaded and extracted on server.");
+      if (window.ServerInstallerTerminalHook) {
+        window.ServerInstallerTerminalHook({
+          open: true,
+          state: `Uploading for: ${title}`,
+          line: `[${new Date().toLocaleTimeString()}] Upload completed. Server path: ${json.path || ""}`,
+        });
+      }
       return json.path || "";
     } catch (err) {
       console.error("Upload exception:", err);
       setUploadInfo(`Upload failed: ${err}`);
+      if (window.ServerInstallerTerminalHook) {
+        window.ServerInstallerTerminalHook({
+          open: true,
+          state: "Error",
+          line: `[${new Date().toLocaleTimeString()}] Upload failed: ${err}`,
+        });
+      }
       return "";
     } finally {
       setUploading(false);
@@ -124,11 +145,25 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
     const hasSelectedUpload = !!(input && input.files && input.files.length > 0);
 
     if (!sourcePathValue && hasSelectedUpload && !uploadedPath) {
+      if (window.ServerInstallerTerminalHook) {
+        window.ServerInstallerTerminalHook({
+          open: true,
+          state: `Uploading for: ${title}`,
+          line: "============================================================",
+        });
+      }
       const autoPath = await doUpload();
       if (!autoPath) {
         return;
       }
       sourcePathValue = autoPath;
+      if (window.ServerInstallerTerminalHook) {
+        window.ServerInstallerTerminalHook({
+          open: true,
+          state: `Starting: ${title}`,
+          line: `[${new Date().toLocaleTimeString()}] Upload finished, continuing deployment...`,
+        });
+      }
     }
 
     onRun(e, action, title);

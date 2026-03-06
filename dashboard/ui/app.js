@@ -1,12 +1,34 @@
 const {
   Alert, AppBar, Box, Button, Card, CardContent, Chip, CssBaseline, Drawer,
-  Grid, IconButton, Paper, Stack, Toolbar, Typography
+  FormControl, Grid, IconButton, InputLabel, MenuItem, Paper, Select, Stack, TextField, Toolbar, Typography
 } = MaterialUI;
 
 const { ActionCard, NavCard } = (window.ServerInstallerUI && window.ServerInstallerUI.components) || {};
 const cfg = window.__APP_CONFIG__ || { os: "windows", os_label: "Windows", message: "" };
 const DRAWER_W = 250;
 const DRAWER_MIN = 82;
+
+function formatBytes(v) {
+  const n = Number(v || 0);
+  if (!n || n < 0) return "-";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let idx = 0;
+  let size = n;
+  while (size >= 1024 && idx < units.length - 1) {
+    size /= 1024;
+    idx += 1;
+  }
+  return `${size.toFixed(idx === 0 ? 0 : 1)} ${units[idx]}`;
+}
+
+function formatUptime(v) {
+  const sec = Number(v || 0);
+  if (!sec) return "-";
+  const d = Math.floor(sec / 86400);
+  const h = Math.floor((sec % 86400) / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  return `${d}d ${h}h ${m}m`;
+}
 
 function App() {
   const isMobile = MaterialUI.useMediaQuery("(max-width:1100px)");
@@ -19,6 +41,12 @@ function App() {
   const [termMin, setTermMin] = React.useState(false);
   const [termPos, setTermPos] = React.useState({ x: null, y: null });
   const [infoMessage, setInfoMessage] = React.useState("");
+  const [systemInfo, setSystemInfo] = React.useState(null);
+  const [systemErr, setSystemErr] = React.useState("");
+  const [loadingSystem, setLoadingSystem] = React.useState(true);
+  const [portValue, setPortValue] = React.useState("8090");
+  const [portProtocol, setPortProtocol] = React.useState("tcp");
+  const [portBusy, setPortBusy] = React.useState(false);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
 
   React.useEffect(() => {
@@ -39,6 +67,42 @@ function App() {
   }, []);
 
   const append = (line) => setTermText((prev) => `${prev}\n${line}`);
+
+  const loadSystem = React.useRef(async () => {});
+  loadSystem.current = async () => {
+    try {
+      setSystemErr("");
+      const r = await fetch("/api/system/status", { headers: { "X-Requested-With": "fetch" } });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setSystemInfo(j.status || null);
+    } catch (err) {
+      setSystemErr(String(err));
+    } finally {
+      setLoadingSystem(false);
+    }
+  };
+
+  React.useEffect(() => {
+    loadSystem.current();
+    const t = setInterval(() => loadSystem.current(), 15000);
+    return () => clearInterval(t);
+  }, []);
+
+  React.useEffect(() => {
+    const hook = (payload) => {
+      if (!payload || typeof payload !== "object") return;
+      if (payload.open) setTermOpen(true);
+      if (payload.state) setTermState(payload.state);
+      if (payload.line) append(payload.line);
+    };
+    window.ServerInstallerTerminalHook = hook;
+    return () => {
+      if (window.ServerInstallerTerminalHook === hook) {
+        delete window.ServerInstallerTerminalHook;
+      }
+    };
+  }, []);
 
   const poll = async (jobId, title, offset = 0) => {
     try {
@@ -103,6 +167,31 @@ function App() {
     if (page === "dotnet-linux") return "DotNet > Linux";
     return "Dashboard";
   })();
+
+  const onPortAction = async (action) => {
+    if (!portValue) return;
+    setPortBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("action", action);
+      fd.append("port", String(portValue).trim());
+      fd.append("protocol", portProtocol);
+      const r = await fetch("/api/system/port", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.message || "Port action failed.");
+      setInfoMessage(j.message || `Port ${action} done.`);
+      loadSystem.current();
+    } catch (err) {
+      setInfoMessage(`Port ${action} failed: ${err}`);
+    } finally {
+      setPortBusy(false);
+    }
+  };
+
+  const software = systemInfo?.software || {};
+  const dotnet = software.dotnet || {};
+  const docker = software.docker || {};
+  const iis = software.iis || {};
 
   const renderPage = () => {
     if (page === "home") {
@@ -345,6 +434,69 @@ function App() {
       <Box component="main" sx={{ flexGrow: 1, mt: "64px", p: { xs: 2, md: 3 }, ml: `${mainMargin}px`, transition: "margin .2s ease" }}>
         {cfg.message && <Alert severity="success" sx={{ mb: 2 }}>{cfg.message}</Alert>}
         {infoMessage && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setInfoMessage("")}>{infoMessage}</Alert>}
+        {systemErr && <Alert severity="error" sx={{ mb: 2 }}>{systemErr}</Alert>}
+
+        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", mb: 2 }}>
+          <CardContent>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" sx={{ mb: 1.5 }}>
+              <Typography variant="h6" fontWeight={800}>Server Status</Typography>
+              <Button variant="outlined" size="small" sx={{ textTransform: "none" }} onClick={() => loadSystem.current()} disabled={loadingSystem}>
+                {loadingSystem ? "Loading..." : "Refresh"}
+              </Button>
+            </Stack>
+            <Grid container spacing={1.5}>
+              <Grid item xs={12} md={4}>
+                <Paper variant="outlined" sx={{ p: 1.2 }}>
+                  <Typography variant="caption" color="text.secondary">System</Typography>
+                  <Typography variant="body2">Host: {systemInfo?.hostname || "-"}</Typography>
+                  <Typography variant="body2">OS: {systemInfo?.os || "-"} {systemInfo?.os_release || ""}</Typography>
+                  <Typography variant="body2">Machine: {systemInfo?.machine || "-"}</Typography>
+                  <Typography variant="body2">Processor: {systemInfo?.processor || "-"}</Typography>
+                  <Typography variant="body2">CPU: {systemInfo?.cpu_count || "-"}</Typography>
+                  <Typography variant="body2">Memory: {formatBytes(systemInfo?.memory?.used_bytes)} / {formatBytes(systemInfo?.memory?.total_bytes)} ({systemInfo?.memory?.used_percent ?? "-"}%)</Typography>
+                  <Typography variant="body2">Uptime: {formatUptime(systemInfo?.uptime_seconds)}</Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Paper variant="outlined" sx={{ p: 1.2 }}>
+                  <Typography variant="caption" color="text.secondary">Installed Software</Typography>
+                  <Typography variant="body2">.NET: {dotnet.installed ? `Installed (${dotnet.version || "unknown"})` : "Not installed"}</Typography>
+                  {!!(dotnet.sdks && dotnet.sdks.length) && <Typography variant="body2">SDKs: {dotnet.sdks.slice(0, 3).join(" | ")}</Typography>}
+                  <Typography variant="body2">Docker: {docker.installed ? `Installed (${docker.version || "unknown"})` : "Not installed"}</Typography>
+                  {!!docker.server_version && <Typography variant="body2">Docker Engine: {docker.server_version}</Typography>}
+                  <Typography variant="body2">IIS: {iis.installed ? `Installed (${iis.service || "unknown"})` : "Not installed"}</Typography>
+                </Paper>
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <Paper variant="outlined" sx={{ p: 1.2 }}>
+                  <Typography variant="caption" color="text.secondary">Network</Typography>
+                  <Typography variant="body2">IPs: {(systemInfo?.ips || []).join(", ") || "-"}</Typography>
+                  <Typography variant="body2">Listening Ports: {(systemInfo?.listening_ports || []).length || 0}</Typography>
+                  <Stack direction="row" spacing={1} sx={{ mt: 1 }}>
+                    <TextField size="small" label="Port" value={portValue} onChange={(e) => setPortValue(e.target.value)} sx={{ width: 110 }} />
+                    <FormControl size="small" sx={{ width: 110 }}>
+                      <InputLabel>Proto</InputLabel>
+                      <Select label="Proto" value={portProtocol} onChange={(e) => setPortProtocol(e.target.value)}>
+                        <MenuItem value="tcp">TCP</MenuItem>
+                        <MenuItem value="udp">UDP</MenuItem>
+                      </Select>
+                    </FormControl>
+                    <Button size="small" variant="contained" disabled={portBusy} onClick={() => onPortAction("open")} sx={{ textTransform: "none" }}>Open</Button>
+                    <Button size="small" variant="outlined" disabled={portBusy} onClick={() => onPortAction("close")} sx={{ textTransform: "none" }}>Close</Button>
+                  </Stack>
+                </Paper>
+              </Grid>
+              <Grid item xs={12}>
+                <Paper variant="outlined" sx={{ p: 1.2 }}>
+                  <Typography variant="caption" color="text.secondary">Open Ports</Typography>
+                  <Typography variant="body2" sx={{ mt: 0.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                    {(systemInfo?.listening_ports || []).slice(0, 60).map((p) => `${p.proto?.toUpperCase() || "?"}:${p.port}${p.pid ? ` (pid ${p.pid})` : ""}`).join(", ") || "-"}
+                  </Typography>
+                </Paper>
+              </Grid>
+            </Grid>
+          </CardContent>
+        </Card>
 
         <Stack spacing={2}>
           {page !== "home" && (
