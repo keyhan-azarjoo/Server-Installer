@@ -1241,6 +1241,15 @@ class Handler(BaseHTTPRequestHandler):
                 code, output = run_linux_docker_setup()
                 self.respond_run_result(title, code, output)
             return
+        if self.path == "/run/linux_docker":
+            title = "Linux Docker Deployment"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_linux_docker_deploy(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_linux_docker_deploy(form)
+                self.respond_run_result(title, code, output)
+            return
 
         self.write_html("Not found", HTTPStatus.NOT_FOUND)
 

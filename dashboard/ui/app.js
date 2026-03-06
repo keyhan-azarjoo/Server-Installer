@@ -272,13 +272,19 @@ function App() {
             />
           </Grid>
           <Grid item xs={12} md={6}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-              <CardContent>
-                <Typography variant="h6" fontWeight={800}>Deploy Docker</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Reserved action.</Typography>
-                <Button fullWidth variant="outlined" sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setInfoMessage("Deploy Docker (Linux) is not implemented yet.")}>Start</Button>
-              </CardContent>
-            </Card>
+            <ActionCard
+              title="Deploy Docker"
+              description="Build and run Docker container for uploaded/published app."
+              action="/run/linux_docker"
+              fields={[
+                { name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://..." },
+                { name: "SOURCE_FILE", label: "Or Upload File (.zip/.tar.gz)", type: "file" },
+                { name: "SOURCE_FOLDER", label: "Or Upload Published Folder", type: "folder" },
+                { name: "DOCKER_HOST_PORT", label: "Docker Host Port", defaultValue: "8080" },
+              ]}
+              onRun={run}
+              color="#334155"
+            />
           </Grid>
         </Grid>
       );
