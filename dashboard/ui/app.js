@@ -301,11 +301,15 @@ function App() {
     if (!svc || !svc.name) return;
     setServiceBusy(true);
     try {
-      const fd = new FormData();
-      fd.append("action", action);
-      fd.append("name", svc.name);
-      fd.append("kind", svc.kind || "service");
-      const r = await fetch("/api/system/service", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const body = new URLSearchParams();
+      body.set("action", action);
+      body.set("name", svc.name);
+      body.set("kind", svc.kind || "service");
+      const r = await fetch("/api/system/service", {
+        method: "POST",
+        headers: { "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      });
       const j = await r.json();
       if (!j.ok) throw new Error(j.message || "Service action failed.");
       setInfoMessage(j.message || `${action} completed.`);
@@ -332,11 +336,15 @@ function App() {
       const failed = [];
       for (const svc of list) {
         try {
-          const fd = new FormData();
-          fd.append("action", "stop");
-          fd.append("name", svc.name);
-          fd.append("kind", svc.kind || "service");
-          const r = await fetch("/api/system/service", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+          const body = new URLSearchParams();
+          body.set("action", "stop");
+          body.set("name", svc.name);
+          body.set("kind", svc.kind || "service");
+          const r = await fetch("/api/system/service", {
+            method: "POST",
+            headers: { "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString(),
+          });
           const j = await r.json();
           if (j.ok) okCount += 1;
           else { failCount += 1; failed.push(`${svc.name}: ${j.message || "failed"}`); }
