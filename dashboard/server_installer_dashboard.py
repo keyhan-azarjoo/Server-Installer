@@ -181,6 +181,26 @@ def save_uploaded_folder(items):
     return str(extract_dir)
 
 
+def save_uploaded_archive_or_file(item):
+    saved = save_uploaded_stream(item.filename, item.file)
+    path_obj = Path(saved)
+    lower = path_obj.name.lower()
+    if lower.endswith(".zip"):
+        extract_dir = upload_root_dir() / f"extract-{int(time.time())}-{secrets.token_hex(4)}"
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(path_obj, "r") as zf:
+            zf.extractall(extract_dir)
+        return str(extract_dir)
+    if lower.endswith(".tar.gz") or lower.endswith(".tgz") or lower.endswith(".tar"):
+        extract_dir = upload_root_dir() / f"extract-{int(time.time())}-{secrets.token_hex(4)}"
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        mode = "r:gz" if (lower.endswith(".tar.gz") or lower.endswith(".tgz")) else "r:"
+        with tarfile.open(path_obj, mode) as tf:
+            tf.extractall(extract_dir)
+        return str(extract_dir)
+    return saved
+
+
 def resolve_source_value(form, path_key, file_key, folder_key):
     value = (form.get(path_key, [""])[0] or "").strip()
     if value:
@@ -1008,14 +1028,24 @@ class Handler(BaseHTTPRequestHandler):
                         if it.file:
                             if key in ("SourceFolder", "SOURCE_FOLDER"):
                                 folder_items.append(it)
+                            elif key == "SourceUpload":
+                                folder_items.append(it)
                             else:
-                                saved = save_uploaded_stream(it.filename, it.file)
+                                saved = save_uploaded_archive_or_file(it)
                                 result.setdefault(key, []).append(saved)
                     else:
                         result.setdefault(key, []).append((it.value or "").strip())
                 if folder_items:
-                    saved_folder = save_uploaded_folder(folder_items)
-                    result.setdefault(key, []).append(saved_folder)
+                    if key == "SourceUpload":
+                        if len(folder_items) == 1 and ("/" not in (folder_items[0].filename or "").replace("\\", "/")):
+                            saved_single = save_uploaded_archive_or_file(folder_items[0])
+                            result.setdefault(key, []).append(saved_single)
+                        else:
+                            saved_folder = save_uploaded_folder(folder_items)
+                            result.setdefault(key, []).append(saved_folder)
+                    else:
+                        saved_folder = save_uploaded_folder(folder_items)
+                        result.setdefault(key, []).append(saved_folder)
             return result
         return self.parse_form()
 
@@ -1162,6 +1192,33 @@ class Handler(BaseHTTPRequestHandler):
 
         if (not self.is_local_client()) and (not self.is_auth()):
             self.write_html("Unauthorized", HTTPStatus.UNAUTHORIZED)
+            return
+
+        if self.path == "/upload/source":
+            form = self.parse_request_form()
+            files = form.get("SourceUpload", [])
+            if not files:
+                self.write_json({"ok": False, "error": "No upload selected."}, HTTPStatus.BAD_REQUEST)
+                return
+            try:
+                saved_path = ""
+                if len(files) == 1 and Path(files[0]).exists():
+                    # parse_request_form already stored saved path for plain file uploads
+                    p = Path(files[0])
+                    if p.is_file():
+                        lower = p.name.lower()
+                        if lower.endswith(".zip") or lower.endswith(".tar.gz") or lower.endswith(".tgz") or lower.endswith(".tar"):
+                            saved_path = str(prepare_source_dir(str(p)))
+                        else:
+                            saved_path = str(p)
+                    else:
+                        saved_path = str(p)
+                else:
+                    # multiple uploaded files are treated as folder contents and already extracted
+                    saved_path = files[0]
+                self.write_json({"ok": True, "path": saved_path})
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
             return
 
         form = self.parse_request_form()
