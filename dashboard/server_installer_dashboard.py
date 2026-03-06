@@ -131,12 +131,35 @@ def run_process(cmd, env=None, live_cb=None):
 
 
 def upload_root_dir():
+    candidates = []
     if os.name == "nt":
         d_drive = Path("D:/")
         if d_drive.exists():
-            return d_drive / "Server-Installer" / "uploads"
-        return Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "uploads"
-    return Path("/var/tmp/server-installer/uploads")
+            candidates.append(d_drive / "Server-Installer" / "uploads")
+        local_app = os.environ.get("LOCALAPPDATA")
+        if local_app:
+            candidates.append(Path(local_app) / "Server-Installer" / "uploads")
+        candidates.append(Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "uploads")
+        temp_dir = os.environ.get("TEMP")
+        if temp_dir:
+            candidates.append(Path(temp_dir) / "Server-Installer" / "uploads")
+    else:
+        candidates = [
+            Path("/var/tmp/server-installer/uploads"),
+            Path("/tmp/server-installer/uploads"),
+        ]
+
+    for cand in candidates:
+        try:
+            cand.mkdir(parents=True, exist_ok=True)
+            probe = cand / f".probe-{secrets.token_hex(4)}"
+            probe.write_text("ok", encoding="utf-8")
+            probe.unlink(missing_ok=True)
+            return cand
+        except Exception:
+            continue
+
+    raise RuntimeError("No writable upload directory found.")
 
 
 def save_uploaded_stream(filename, stream):
@@ -1037,7 +1060,10 @@ class Handler(BaseHTTPRequestHandler):
                 "CONTENT_TYPE": self.headers.get("Content-Type", ""),
                 "CONTENT_LENGTH": self.headers.get("Content-Length", "0"),
             }
-            fs = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env, keep_blank_values=True)
+            try:
+                fs = cgi.FieldStorage(fp=self.rfile, headers=self.headers, environ=env, keep_blank_values=True)
+            except Exception as ex:
+                raise RuntimeError(f"Failed to parse multipart upload: {ex}") from ex
             result = {}
             if not fs:
                 return result
@@ -1218,7 +1244,11 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if self.path == "/upload/source":
-            form = self.parse_request_form()
+            try:
+                form = self.parse_request_form()
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
+                return
             files = form.get("SourceUpload", [])
             if not files:
                 self.write_json({"ok": False, "error": "No upload selected."}, HTTPStatus.BAD_REQUEST)
@@ -1244,7 +1274,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
             return
 
-        form = self.parse_request_form()
+        try:
+            form = self.parse_request_form()
+        except Exception as ex:
+            if self.is_fetch():
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.BAD_REQUEST)
+            else:
+                self.write_html(f"Invalid request: {html.escape(str(ex))}", HTTPStatus.BAD_REQUEST)
+            return
 
         if self.path == "/run/windows":
             title = "Windows Combined Installer"
