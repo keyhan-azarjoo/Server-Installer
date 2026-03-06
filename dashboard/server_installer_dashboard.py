@@ -1140,7 +1140,16 @@ def run_linux_s3_installer(form=None, live_cb=None):
         return 1, "Linux S3 installer can only run on Linux/macOS hosts."
     ensure_repo_files(S3_LINUX_FILES, live_cb=live_cb)
 
-    cmd = ["bash", str(S3_LINUX_INSTALLER)]
+    local_core = ROOT / "S3" / "linux-macos" / "modules" / "core.sh"
+    local_cleanup = ROOT / "S3" / "linux-macos" / "modules" / "cleanup.sh"
+    local_platform = ROOT / "S3" / "linux-macos" / "modules" / "platform.sh"
+    launcher = (
+        f"source '{local_core}'; "
+        f"source '{local_cleanup}'; "
+        f"source '{local_platform}'; "
+        "run_linux_macos_install"
+    )
+    cmd = ["bash", "-c", launcher]
     requested_https = (form.get("LOCALS3_HTTPS_PORT", [""])[0] or "").strip()
     if requested_https and (not requested_https.isdigit()):
         return 1, "LOCALS3_HTTPS_PORT must be numeric."
@@ -1192,7 +1201,7 @@ def run_linux_s3_installer(form=None, live_cb=None):
         cmd = ["sudo", "env"]
         for k, v in forwarded_env.items():
             cmd.append(f"{k}={v}")
-        cmd += ["bash", str(S3_LINUX_INSTALLER)]
+        cmd += ["bash", "-c", launcher]
 
     return run_process(cmd, env=env, live_cb=live_cb, input_text=scripted_input)
 
@@ -1224,9 +1233,9 @@ if command -v brew >/dev/null 2>&1; then
 fi
 echo "[INFO] LocalS3 API/Console services stopped."
 """
-    cmd = ["sh", "-c", script]
+    cmd = ["bash", "-c", script]
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-        cmd = ["sudo", "sh", "-c", script]
+        cmd = ["sudo", "bash", "-c", script]
     return run_process(cmd, env=os.environ.copy(), live_cb=live_cb)
 
 
