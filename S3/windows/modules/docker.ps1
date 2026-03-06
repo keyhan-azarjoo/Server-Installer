@@ -339,10 +339,14 @@ function Write-FilesAndUp {
   $browserSessionDuration = Resolve-BrowserSessionDuration
   Info "Web session/share-link max duration: $browserSessionDuration"
 
-  $enableLan = $true
-  Info "LAN access: enabled"
+  $enableLan = Resolve-BoolFromEnv -envName "LOCALS3_ENABLE_LAN" -defaultValue $true
+  Info ("LAN access: " + ($(if ($enableLan) { "enabled" } else { "disabled" })))
   $lanIp = Get-LanIPv4
-  if ($lanIp) { Info "Detected LAN IP: $lanIp" } else { Warn "Could not detect LAN IPv4 automatically. LAN URL will not be shown." }
+  if ($enableLan) {
+    if ($lanIp) { Info "Detected LAN IP: $lanIp" } else { Warn "Could not detect LAN IPv4 automatically. LAN URL will not be shown." }
+  } else {
+    $lanIp = $null
+  }
 
   $prev = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
@@ -352,34 +356,49 @@ function Write-FilesAndUp {
   Info "Using Docker context: $dockerCtx"
   Prompt-CleanupPreviousServers -dockerCtx $dockerCtx
 
-  $httpsPort = 443
-  if (-not (Port-Free $httpsPort)) {
-    Warn "Port 443 is already in use."
-    $listeners = Get-PortListeners 443
-    if ($listeners.Count -gt 0) {
-      Write-Host "Port 443 listeners:"
-      $listeners | Format-Table -AutoSize | Out-String | Write-Host
-    }
-    $httpsPort = Pick-Port @(8443,9443,10443)
-    if (-not $httpsPort) {
-      Err "Port 443 is busy and no free alternate HTTPS port is available (8443/9443/10443)."
+  $requestedHttps = Get-EnvTrim "LOCALS3_HTTPS_PORT"
+  if (-not [string]::IsNullOrWhiteSpace($requestedHttps)) {
+    $httpsPort = 0
+    if (-not [int]::TryParse($requestedHttps, [ref]$httpsPort) -or $httpsPort -lt 1 -or $httpsPort -gt 65535) {
+      Err "Invalid LOCALS3_HTTPS_PORT value: $requestedHttps"
       exit 1
     }
-    Warn "Using alternate HTTPS port: $httpsPort"
+    if (-not (Port-Free $httpsPort)) {
+      Err "Requested HTTPS port $httpsPort from LOCALS3_HTTPS_PORT is already in use."
+      exit 1
+    }
+  } else {
+    $httpsPort = 443
+    if (-not (Port-Free $httpsPort)) {
+      Warn "Port 443 is already in use."
+      $listeners = Get-PortListeners 443
+      if ($listeners.Count -gt 0) {
+        Write-Host "Port 443 listeners:"
+        $listeners | Format-Table -AutoSize | Out-String | Write-Host
+      }
+      $httpsPort = Pick-Port @(8443,9443,10443)
+      if (-not $httpsPort) {
+        Err "Port 443 is busy and no free alternate HTTPS port is available (8443/9443/10443)."
+        exit 1
+      }
+      Warn "Using alternate HTTPS port: $httpsPort"
+    }
   }
 
-  $minioApi = Pick-Port @(9000,19000,29000)
-  $minioUI = Pick-Port @(9001,19001,29001)
+  $minioApi = Resolve-RequiredPort -label "MinIO API" -candidates @(9000,19000,29000) -defaultPort 9000
+  $minioUI = Resolve-RequiredPort -label "MinIO Console UI" -candidates @(9001,19001,29001) -defaultPort 9001
   if (-not $minioApi) { Err "No free port for MinIO API (9000/19000/29000)."; exit 1 }
   if (-not $minioUI) { Err "No free port for MinIO UI (9001/19001/29001)."; exit 1 }
+  if ($minioUI -eq $minioApi) {
+    Err "MinIO Console UI port cannot equal MinIO API port ($minioApi)."
+    exit 1
+  }
 
   $consoleCandidates = @(9443,10443,11443,12443,13443) | Where-Object { $_ -ne $httpsPort }
   $consoleHttpsPort = Resolve-RequiredPort -label "MinIO Console HTTPS" -candidates $consoleCandidates -defaultPort ($httpsPort + 1000)
 
-  if ($enableLan) {
-    Ensure-FirewallPort -port $httpsPort
-    Ensure-FirewallPort -port $consoleHttpsPort
-  }
+  Ensure-FirewallPort -port $httpsPort
+  Ensure-FirewallPort -port $consoleHttpsPort
 
   $displayHost = if ($domain -eq "localhost" -and $lanIp) { $lanIp } else { $domain }
   $publicUrl = if ($httpsPort -eq 443) { "https://$displayHost" } else { "https://${displayHost}:$httpsPort" }

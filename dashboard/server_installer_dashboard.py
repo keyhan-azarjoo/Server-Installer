@@ -932,7 +932,9 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
         return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
     ensure_repo_files(S3_WINDOWS_FILES, live_cb=live_cb)
 
-    selected_mode = (mode or "iis").strip().lower()
+    selected_mode = (form.get("S3_MODE", [mode])[0] or mode or "iis").strip().lower()
+    if selected_mode not in ("iis", "docker"):
+        selected_mode = "iis"
     mode_choice = "2\n" if selected_mode == "docker" else "1\n"
     # Script is interactive; feed defaults for remaining prompts.
     scripted_input = mode_choice + ("\n" * 200)
@@ -944,10 +946,24 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
         "-File",
         str(S3_WINDOWS_INSTALLER),
     ]
-    return run_process(cmd, env=os.environ.copy(), live_cb=live_cb, input_text=scripted_input)
+    env = os.environ.copy()
+    for key in [
+        "LOCALS3_MODE",
+        "LOCALS3_HOST",
+        "LOCALS3_ENABLE_LAN",
+        "LOCALS3_HTTPS_PORT",
+        "LOCALS3_API_PORT",
+        "LOCALS3_UI_PORT",
+        "LOCALS3_CONSOLE_PORT",
+    ]:
+        value = (form.get(key, [""])[0] or "").strip()
+        if value:
+            env[key] = value
+    env["LOCALS3_MODE"] = selected_mode
+    return run_process(cmd, env=env, live_cb=live_cb, input_text=scripted_input)
 
 
-def run_linux_s3_installer(live_cb=None):
+def run_linux_s3_installer(form=None, live_cb=None):
     if os.name == "nt":
         return 1, "Linux S3 installer can only run on Linux/macOS hosts."
     ensure_repo_files(S3_LINUX_FILES, live_cb=live_cb)
@@ -957,7 +973,19 @@ def run_linux_s3_installer(live_cb=None):
         cmd = ["sudo"] + cmd
     # Script is interactive; feed defaults to proceed.
     scripted_input = "\n" * 200
-    return run_process(cmd, env=os.environ.copy(), live_cb=live_cb, input_text=scripted_input)
+    env = os.environ.copy()
+    form = form or {}
+    for key in [
+        "LOCALS3_HOST",
+        "LOCALS3_ENABLE_LAN",
+        "LOCALS3_HTTPS_PORT",
+        "LOCALS3_API_PORT",
+        "LOCALS3_UI_PORT",
+    ]:
+        value = (form.get(key, [""])[0] or "").strip()
+        if value:
+            env[key] = value
+    return run_process(cmd, env=env, live_cb=live_cb, input_text=scripted_input)
 
 
 def run_linux_docker_setup(live_cb=None):
@@ -1933,6 +1961,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_html(f"Invalid request: {html.escape(str(ex))}", HTTPStatus.BAD_REQUEST)
             return
 
+        if self.path == "/run/s3_windows":
+            title = "S3 Installer (Windows)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_s3_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_s3_installer(form)
+                self.respond_run_result(title, code, output)
+            return
         if self.path == "/run/s3_windows_iis":
             title = "S3 Installer (Windows IIS)"
             if self.is_fetch():
@@ -1954,10 +1991,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/run/s3_linux":
             title = "S3 Installer (Linux/macOS)"
             if self.is_fetch():
-                job_id = start_live_job(title, lambda cb: run_linux_s3_installer(live_cb=cb))
+                job_id = start_live_job(title, lambda cb: run_linux_s3_installer(form, live_cb=cb))
                 self.write_json({"job_id": job_id, "title": title})
             else:
-                code, output = run_linux_s3_installer()
+                code, output = run_linux_s3_installer(form)
                 self.respond_run_result(title, code, output)
             return
 

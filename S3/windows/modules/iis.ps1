@@ -307,10 +307,8 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   }
 
   if ($domain -ne "localhost") { Ensure-HostsEntry -domain $domain }
-  if ($lanIp) {
-    Ensure-FirewallPort -port $httpsPort
-    Ensure-FirewallPort -port $consoleHttpsPort
-  }
+  Ensure-FirewallPort -port $httpsPort
+  Ensure-FirewallPort -port $consoleHttpsPort
 
   $proxyUri = if ($httpsPort -eq 443) { "https://$domain/" } else { "https://${domain}:$httpsPort/" }
   $consoleProxyUri = if ($consoleHttpsPort -eq 80) { "http://$domain/" } else { "http://${domain}:$consoleHttpsPort/" }
@@ -334,8 +332,8 @@ function Install-IISMode {
   Info "Using local domain: $domain"
   $browserSessionDuration = Resolve-BrowserSessionDuration
   Info "Web session/share-link max duration: $browserSessionDuration"
-  $enableLan = $true
-  Info "LAN access: enabled"
+  $enableLan = Resolve-BoolFromEnv -envName "LOCALS3_ENABLE_LAN" -defaultValue $true
+  Info ("LAN access: " + ($(if ($enableLan) { "enabled" } else { "disabled" })))
   $lanIp = $null
   if ($enableLan) {
     $lanIp = Get-LanIPv4
@@ -423,6 +421,20 @@ function Install-IISMode {
 
 
 function Resolve-HttpsPortForIIS {
+  $envHttps = Get-EnvTrim "LOCALS3_HTTPS_PORT"
+  if (-not [string]::IsNullOrWhiteSpace($envHttps)) {
+    $forced = 0
+    if (-not [int]::TryParse($envHttps, [ref]$forced) -or $forced -lt 1 -or $forced -gt 65535) {
+      Err "Invalid LOCALS3_HTTPS_PORT value: $envHttps"
+      exit 1
+    }
+    if ((-not (Port-Free $forced)) -or (-not (Test-IISBindingPortAvailable -port $forced -protocol "https" -excludeSite "LocalS3"))) {
+      Err "Requested HTTPS port $forced from LOCALS3_HTTPS_PORT is unavailable."
+      exit 1
+    }
+    return $forced
+  }
+
   if ((Port-Free 443) -and (Test-IISBindingPortAvailable -port 443 -protocol "https" -excludeSite "LocalS3")) {
     return 443
   }

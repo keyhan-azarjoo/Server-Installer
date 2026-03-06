@@ -20,6 +20,12 @@ function Info($m){ Write-Host "[INFO] $m" }
 function Warn($m){ Write-Host "[WARN] $m" -ForegroundColor Yellow }
 function Err ($m){ Write-Host "[ERROR] $m" -ForegroundColor Red }
 
+function Get-EnvTrim([string]$name) {
+  $value = (Get-Item -Path ("Env:" + $name) -ErrorAction SilentlyContinue).Value
+  if ($null -eq $value) { return "" }
+  return "$value".Trim()
+}
+
 # ---------------------------------------------------------------------------
 # Utility: generic retry with optional exponential back-off
 # ---------------------------------------------------------------------------
@@ -363,6 +369,10 @@ function Test-MinIOAdminLogin([int]$uiPort, [string]$accessKey = "admin", [strin
 # ---------------------------------------------------------------------------
 
 function Ask-InstallMode {
+  $modeFromEnv = (Get-EnvTrim "LOCALS3_MODE").ToLowerInvariant()
+  if ($modeFromEnv -in @("iis","1")) { return "iis" }
+  if ($modeFromEnv -in @("docker","2")) { return "docker" }
+
   Write-Host ""
   Write-Host "Choose installation mode:"
   Write-Host "  1) IIS (native MinIO + IIS reverse proxy)"
@@ -403,6 +413,29 @@ function Pick-Port([int[]]$candidates) {
 }
 
 function Resolve-RequiredPort([string]$label, [int[]]$candidates, [int]$defaultPort) {
+  $envPortName = switch ($label) {
+    "MinIO API" { "LOCALS3_API_PORT" }
+    "MinIO Console UI" { "LOCALS3_UI_PORT" }
+    "MinIO Console HTTPS" { "LOCALS3_CONSOLE_PORT" }
+    "MinIO Console" { "LOCALS3_CONSOLE_PORT" }
+    default { "" }
+  }
+  if ($envPortName) {
+    $envValue = Get-EnvTrim $envPortName
+    if (-not [string]::IsNullOrWhiteSpace($envValue)) {
+      $envPort = 0
+      if (-not [int]::TryParse($envValue, [ref]$envPort) -or $envPort -lt 1 -or $envPort -gt 65535) {
+        Err "Invalid $envPortName value: $envValue"
+        exit 1
+      }
+      if (-not (Port-Free $envPort)) {
+        Err "Requested port $envPort from $envPortName is already in use."
+        exit 1
+      }
+      return $envPort
+    }
+  }
+
   $picked = Pick-Port $candidates
   if ($picked) { return [int]$picked }
 
@@ -480,10 +513,15 @@ function Get-PublicIPv4 {
 }
 
 function Resolve-InstallHost([string]$prompt) {
-  $domainInput = Read-Host $prompt
+  $domainInput = Get-EnvTrim "LOCALS3_HOST"
+  if ([string]::IsNullOrWhiteSpace($domainInput)) {
+    $domainInput = Read-Host $prompt
+  } else {
+    Info "Using host from LOCALS3_HOST: $domainInput"
+  }
   $domain = Normalize-HostInput $domainInput
 
-  if ($domain -eq "localhost") {
+  if ($domain -eq "localhost" -and [string]::IsNullOrWhiteSpace((Get-EnvTrim "LOCALS3_HOST"))) {
     $publicIp = Get-PublicIPv4
     if ($publicIp) {
       $usePublicIp = (Read-Host "Detected public/static IP $publicIp. Use it instead of localhost? (Y/n)").Trim().ToLowerInvariant()
@@ -494,6 +532,14 @@ function Resolve-InstallHost([string]$prompt) {
   }
 
   return $domain
+}
+
+function Resolve-BoolFromEnv([string]$envName, [bool]$defaultValue) {
+  $raw = (Get-EnvTrim $envName).ToLowerInvariant()
+  if ([string]::IsNullOrWhiteSpace($raw)) { return $defaultValue }
+  if ($raw -in @("1","true","yes","y","on")) { return $true }
+  if ($raw -in @("0","false","no","n","off")) { return $false }
+  return $defaultValue
 }
 
 function Ensure-FirewallPort([int]$port) {

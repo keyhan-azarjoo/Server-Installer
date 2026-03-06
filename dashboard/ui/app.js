@@ -358,11 +358,23 @@ function App() {
       if (cfg.os === "windows") {
         return (
           <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <ActionCard title="Install S3 (IIS)" description="Run Local S3 installer in Windows IIS mode." action="/run/s3_windows_iis" fields={[]} onRun={run} color="#0f766e" />
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <ActionCard title="Install S3 (Docker)" description="Run Local S3 installer in Windows Docker mode." action="/run/s3_windows_docker" fields={[]} onRun={run} color="#1f2937" />
+            <Grid item xs={12} md={8}>
+              <ActionCard
+                title="Install S3 (Windows)"
+                description="Choose IIS or Docker mode, host type (local/DNS/IP), and ports."
+                action="/run/s3_windows"
+                fields={[
+                  { name: "S3_MODE", label: "Mode", type: "select", options: ["iis", "docker"], defaultValue: "iis" },
+                  { name: "LOCALS3_HOST", label: "Host / Domain / IP", defaultValue: "localhost", placeholder: "localhost, mystorage.local, or 212.227.39.212" },
+                  { name: "LOCALS3_ENABLE_LAN", label: "LAN Access", type: "select", options: ["true", "false"], defaultValue: "true" },
+                  { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", placeholder: "443, 8443, 9443..." },
+                  { name: "LOCALS3_API_PORT", label: "MinIO API Port (optional)", placeholder: "9000" },
+                  { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port (optional)", placeholder: "9001" },
+                  { name: "LOCALS3_CONSOLE_PORT", label: "Console Proxy Port (optional)", placeholder: "9443 or 10443..." },
+                ]}
+                onRun={run}
+                color="#0f766e"
+              />
             </Grid>
           </Grid>
         );
@@ -370,8 +382,21 @@ function App() {
       if (cfg.os === "linux" || cfg.os === "darwin") {
         return (
           <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <ActionCard title="Install S3" description="Run Local S3 installer for Linux/macOS." action="/run/s3_linux" fields={[]} onRun={run} color="#1e40af" />
+            <Grid item xs={12} md={8}>
+              <ActionCard
+                title="Install S3 (Linux/macOS)"
+                description="Run local S3 installer with selectable host and ports."
+                action="/run/s3_linux"
+                fields={[
+                  { name: "LOCALS3_HOST", label: "Host / Domain / IP", defaultValue: "localhost", placeholder: "localhost, mystorage.local, or server IP" },
+                  { name: "LOCALS3_ENABLE_LAN", label: "LAN Access", type: "select", options: ["true", "false"], defaultValue: "true" },
+                  { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", placeholder: "443, 8443, 9443..." },
+                  { name: "LOCALS3_API_PORT", label: "MinIO API Port (optional)", placeholder: "9000" },
+                  { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port (optional)", placeholder: "9001" },
+                ]}
+                onRun={run}
+                color="#1e40af"
+              />
             </Grid>
           </Grid>
         );
@@ -590,4 +615,3 @@ function App() {
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);
-

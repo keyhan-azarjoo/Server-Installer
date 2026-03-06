@@ -76,8 +76,56 @@ pick_port() {
   echo ""
 }
 
+env_trim() {
+  local n="$1"
+  local v="${!n:-}"
+  echo "$(echo "$v" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+}
+
+is_valid_port() {
+  local p="$1"
+  if ! echo "$p" | grep -Eq '^[0-9]+$'; then
+    return 1
+  fi
+  [ "$p" -ge 1 ] && [ "$p" -le 65535 ]
+}
+
+resolve_port_from_env_or_pick() {
+  local env_name="$1"
+  shift
+  local requested picked
+  requested="$(env_trim "$env_name")"
+  if [ -n "$requested" ]; then
+    if ! is_valid_port "$requested"; then
+      err "Invalid port in ${env_name}: ${requested}"
+      exit 1
+    fi
+    if ! port_free "$requested"; then
+      err "Requested port ${requested} from ${env_name} is already in use."
+      exit 1
+    fi
+    echo "$requested"
+    return
+  fi
+  picked="$(pick_port "$@")"
+  echo "$picked"
+}
+
 resolve_https_port_unix() {
-  local choice custom_port picked
+  local choice custom_port picked requested_https
+  requested_https="$(env_trim "LOCALS3_HTTPS_PORT")"
+  if [ -n "$requested_https" ]; then
+    if ! is_valid_port "$requested_https"; then
+      err "Invalid LOCALS3_HTTPS_PORT: $requested_https"
+      exit 1
+    fi
+    if ! port_free "$requested_https"; then
+      err "Requested HTTPS port $requested_https is already in use."
+      exit 1
+    fi
+    echo "$requested_https"
+    return
+  fi
 
   if port_free 443; then
     read -r -p "Use HTTPS port 443? (y/N): " choice
@@ -411,13 +459,20 @@ trust_cert() {
 main() {
   relaunch_elevated "$@"
   local os root cert_dir https_port api_port ui_port domain lan_ans enable_lan lan_ip public_ip use_public_ip proxy_host
+  local env_host env_lan
   os="$(detect_os)"
   [ "$os" = "unknown" ] && { err "Unsupported OS."; exit 1; }
   info "===== Local S3 Storage Installer (${os}) - Native Mode ====="
 
-  read -r -p "Enter local domain/URL for HTTPS (default: localhost): " domain
-  domain="$(normalize_host_input "${domain:-}")"
-  if [ "$domain" = "localhost" ]; then
+  env_host="$(env_trim "LOCALS3_HOST")"
+  if [ -n "$env_host" ]; then
+    domain="$(normalize_host_input "$env_host")"
+    info "Using host from LOCALS3_HOST: $domain"
+  else
+    read -r -p "Enter local domain/URL for HTTPS (default: localhost): " domain
+    domain="$(normalize_host_input "${domain:-}")"
+  fi
+  if [ "$domain" = "localhost" ] && [ -z "$env_host" ]; then
     public_ip="$(get_public_ipv4)"
     if [ -n "$public_ip" ]; then
       read -r -p "Detected public/static IP ${public_ip}. Use it instead of localhost? (Y/n): " use_public_ip
@@ -427,8 +482,13 @@ main() {
       fi
     fi
   fi
-  read -r -p "Allow LAN access from other computers? (y/N): " lan_ans
-  lan_ans="$(echo "${lan_ans:-n}" | tr '[:upper:]' '[:lower:]')"
+  env_lan="$(echo "$(env_trim "LOCALS3_ENABLE_LAN")" | tr '[:upper:]' '[:lower:]')"
+  if [ -n "$env_lan" ]; then
+    lan_ans="$env_lan"
+  else
+    read -r -p "Allow LAN access from other computers? (y/N): " lan_ans
+    lan_ans="$(echo "${lan_ans:-n}" | tr '[:upper:]' '[:lower:]')"
+  fi
   enable_lan=false
   lan_ip=""
   if [ "$lan_ans" = "y" ] || [ "$lan_ans" = "yes" ]; then
@@ -440,10 +500,14 @@ main() {
   if [ "$https_port" != "443" ]; then
     warn "Using HTTPS port: $https_port"
   fi
-  api_port="$(pick_port 9000 19000 29000)"
-  ui_port="$(pick_port 9001 19001 29001)"
+  api_port="$(resolve_port_from_env_or_pick "LOCALS3_API_PORT" 9000 19000 29000)"
+  ui_port="$(resolve_port_from_env_or_pick "LOCALS3_UI_PORT" 9001 19001 29001)"
   [ -z "$api_port" ] && { err "No free API port."; exit 1; }
   [ -z "$ui_port" ] && { err "No free UI port."; exit 1; }
+  if [ "$ui_port" = "$api_port" ]; then
+    err "MinIO UI port cannot equal API port (${api_port})."
+    exit 1
+  fi
 
   root="/opt/locals3"
   [ "$os" = "macos" ] && root="/usr/local/locals3"
