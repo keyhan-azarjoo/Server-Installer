@@ -134,8 +134,8 @@ function Show-MinIODiagnostics([string]$logFile, [int]$apiPort, [int]$uiPort, [s
 
 
 function Ensure-MinIONative([string]$root,[int]$apiPort,[int]$uiPort,[string]$publicUrl,[string]$consoleBrowserUrl="",[string]$browserSessionDuration="3650d") {
-  $Script:ActiveAccessKey = "admin"
-  $Script:ActiveSecretKey = "StrongPassword123"
+  if (-not $Script:ActiveAccessKey) { $Script:ActiveAccessKey = "admin" }
+  if (-not $Script:ActiveSecretKey) { $Script:ActiveSecretKey = "StrongPassword123" }
   $preferredMinIORelease = "RELEASE.2025-04-22T22-12-26Z"
   $binDir = Join-Path $root "minio"
   $dataDir = Join-Path $root "data"
@@ -240,8 +240,8 @@ set MINIO_SERVER_URL=
 set MINIO_BROWSER_REDIRECT_URL=$consoleBrowserUrl
 set MINIO_BROWSER_SESSION_DURATION=$browserSessionDuration
 set MINIO_CONSOLE_REDIRECT_URL=
-set MINIO_ROOT_USER=admin
-set MINIO_ROOT_PASSWORD=StrongPassword123
+set MINIO_ROOT_USER=$Script:ActiveAccessKey
+set MINIO_ROOT_PASSWORD=$Script:ActiveSecretKey
 set MINIO_API_ROOT_ACCESS=on
 "$exe" server "$dataDir" --config-dir "$configDir" --address ":$apiPort" --console-address ":$uiPort" >> "$logFile" 2>&1
 "@
@@ -281,7 +281,7 @@ set MINIO_API_ROOT_ACCESS=on
   }
 
   # Console login probe can vary across MinIO/console versions; try both UI and API ports.
-  $adminLoginOk = (Test-MinIOAdminLogin -uiPort $uiPort -accessKey "admin" -secretKey "StrongPassword123") -or (Test-MinIOAdminLogin -uiPort $apiPort -accessKey "admin" -secretKey "StrongPassword123")
+  $adminLoginOk = (Test-MinIOAdminLogin -uiPort $uiPort -accessKey $Script:ActiveAccessKey -secretKey $Script:ActiveSecretKey) -or (Test-MinIOAdminLogin -uiPort $apiPort -accessKey $Script:ActiveAccessKey -secretKey $Script:ActiveSecretKey)
   if (-not $adminLoginOk) {
     $defaultLoginOk = (Test-MinIOAdminLogin -uiPort $uiPort -accessKey "minioadmin" -secretKey "minioadmin") -or (Test-MinIOAdminLogin -uiPort $apiPort -accessKey "minioadmin" -secretKey "minioadmin")
     if ($defaultLoginOk) {
@@ -317,7 +317,7 @@ set MINIO_API_ROOT_ACCESS=on
       Err "MinIO health check failed after reset."
       exit 1
     }
-    $adminLoginOkAfterReset = (Test-MinIOAdminLogin -uiPort $uiPort -accessKey "admin" -secretKey "StrongPassword123") -or (Test-MinIOAdminLogin -uiPort $apiPort -accessKey "admin" -secretKey "StrongPassword123")
+    $adminLoginOkAfterReset = (Test-MinIOAdminLogin -uiPort $uiPort -accessKey $Script:ActiveAccessKey -secretKey $Script:ActiveSecretKey) -or (Test-MinIOAdminLogin -uiPort $apiPort -accessKey $Script:ActiveAccessKey -secretKey $Script:ActiveSecretKey)
     if (-not $adminLoginOkAfterReset) {
       $defaultLoginOkAfterReset = (Test-MinIOAdminLogin -uiPort $uiPort -accessKey "minioadmin" -secretKey "minioadmin") -or (Test-MinIOAdminLogin -uiPort $apiPort -accessKey "minioadmin" -secretKey "minioadmin")
       if ($defaultLoginOkAfterReset) {
@@ -329,12 +329,12 @@ set MINIO_API_ROOT_ACCESS=on
       Warn "Login probe still failing after automatic reset, but MinIO health is OK."
       Warn "Continuing installation. Check MinIO log and authenticate in console manually."
       Show-MinIODiagnostics -logFile $logFile -apiPort $apiPort -uiPort $uiPort -taskName $taskName
-      $Script:ActiveAccessKey = "admin"
-      $Script:ActiveSecretKey = "StrongPassword123"
+      if (-not $Script:ActiveAccessKey) { $Script:ActiveAccessKey = "admin" }
+      if (-not $Script:ActiveSecretKey) { $Script:ActiveSecretKey = "StrongPassword123" }
       return
     }
-    $Script:ActiveAccessKey = "admin"
-    $Script:ActiveSecretKey = "StrongPassword123"
+    if (-not $Script:ActiveAccessKey) { $Script:ActiveAccessKey = "admin" }
+    if (-not $Script:ActiveSecretKey) { $Script:ActiveSecretKey = "StrongPassword123" }
     Info "MinIO credentials reset succeeded. Admin login is now valid."
   }
 }

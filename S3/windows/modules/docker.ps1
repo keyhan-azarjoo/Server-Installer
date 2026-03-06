@@ -285,8 +285,8 @@ function Start-ContainersFallback([string]$dockerCtx, [string]$ngconf, [string]$
     "--label", $Script:LocalS3Label,
     "--label", "com.locals3.role=minio",
     "--network", $network,
-    "-e", "MINIO_ROOT_USER=admin",
-    "-e", "MINIO_ROOT_PASSWORD=StrongPassword123",
+    "-e", "MINIO_ROOT_USER=$($Script:ActiveAccessKey)",
+    "-e", "MINIO_ROOT_PASSWORD=$($Script:ActiveSecretKey)",
     "-e", "MINIO_API_PORT=9000",
     "-e", "MINIO_CONSOLE_PORT=9001",
     "-e", "MINIO_ADMIN_CONSOLE_PORT=9002",
@@ -424,8 +424,8 @@ services:
       - "com.locals3.installer=true"
       - "com.locals3.role=minio"
     environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: StrongPassword123
+      MINIO_ROOT_USER: $($Script:ActiveAccessKey)
+      MINIO_ROOT_PASSWORD: $($Script:ActiveSecretKey)
       MINIO_API_PORT: "9000"
       MINIO_CONSOLE_PORT: "9001"
       MINIO_ADMIN_CONSOLE_PORT: "9002"
@@ -652,8 +652,8 @@ server {
   }
   Write-Host ""
   Write-Host "Login:"
-  Write-Host "  Username : admin"
-  Write-Host "  Password : StrongPassword123"
+  Write-Host "  Username : $Script:ActiveAccessKey"
+  Write-Host "  Password : $Script:ActiveSecretKey"
   Write-Host ""
   Write-Host "Pre-configured buckets:"
   Write-Host "  images    (public-read + CORS enabled)"

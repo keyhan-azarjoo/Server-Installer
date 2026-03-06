@@ -13,8 +13,8 @@ $Script:RestartRequired = $false
 $Script:RestartReasons = New-Object System.Collections.Generic.List[string]
 $Script:StateDir = Join-Path $env:ProgramData "LocalS3"
 $Script:RestartCountFile = Join-Path $Script:StateDir "restart-count.txt"
-$Script:ActiveAccessKey = "admin"
-$Script:ActiveSecretKey = "StrongPassword123"
+$Script:ActiveAccessKey = if ($env:LOCALS3_ROOT_USER -and $env:LOCALS3_ROOT_USER.Trim()) { $env:LOCALS3_ROOT_USER.Trim() } else { "admin" }
+$Script:ActiveSecretKey = if ($env:LOCALS3_ROOT_PASSWORD -and $env:LOCALS3_ROOT_PASSWORD.Trim()) { $env:LOCALS3_ROOT_PASSWORD.Trim() } else { "StrongPassword123" }
 
 function Info($m){ Write-Host "[INFO] $m" }
 function Warn($m){ Write-Host "[WARN] $m" -ForegroundColor Yellow }

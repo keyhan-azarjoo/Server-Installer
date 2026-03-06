@@ -136,6 +136,12 @@ function App() {
   }, []);
 
   React.useEffect(() => {
+    if (page === "services" || page === "dotnet" || page === "s3") {
+      loadServices.current();
+    }
+  }, [page]);
+
+  React.useEffect(() => {
     const hook = (payload) => {
       if (!payload || typeof payload !== "object") return;
       if (payload.open) setTermOpen(true);
@@ -172,6 +178,33 @@ function App() {
   const run = async (event, action, title) => {
     event.preventDefault();
     const body = new FormData(event.currentTarget);
+    const isS3Install = action === "/run/s3_linux" || action === "/run/s3_windows" || action === "/run/s3_windows_iis" || action === "/run/s3_windows_docker";
+    if (isS3Install) {
+      // If requested HTTPS port is busy, ask user for another port before start.
+      while (true) {
+        const p = String(body.get("LOCALS3_HTTPS_PORT") || "").trim();
+        if (!p) break;
+        const fd = new FormData();
+        fd.append("port", p);
+        fd.append("protocol", "tcp");
+        const chk = await fetch("/api/system/port_check", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+        const pj = await chk.json();
+        if (!pj.ok) break;
+        if (!pj.busy) break;
+        const next = window.prompt(`Port ${p} is busy. Enter another HTTPS port for S3:`, "9443");
+        if (next === null) {
+          append(`[${new Date().toLocaleTimeString()}] ${title} cancelled (port ${p} is busy).`);
+          setTermState("Idle");
+          return;
+        }
+        const trimmed = String(next).trim();
+        if (!/^\d+$/.test(trimmed) || Number(trimmed) < 1 || Number(trimmed) > 65535) {
+          window.alert("Invalid port. Please enter a number between 1 and 65535.");
+          continue;
+        }
+        body.set("LOCALS3_HTTPS_PORT", trimmed);
+      }
+    }
     append("============================================================");
     append(`[${new Date().toLocaleTimeString()}] ${title} started`);
     setTermState(`Running: ${title}`);
@@ -271,6 +304,38 @@ function App() {
     }
   };
 
+  const stopServicesBatch = async (items, label) => {
+    const list = (items || []).filter((x) => x && x.name);
+    if (list.length === 0) {
+      setInfoMessage(`No ${label} services found to stop.`);
+      return;
+    }
+    setServiceBusy(true);
+    try {
+      let okCount = 0;
+      let failCount = 0;
+      for (const svc of list) {
+        try {
+          const fd = new FormData();
+          fd.append("action", "stop");
+          fd.append("name", svc.name);
+          fd.append("kind", svc.kind || "service");
+          const r = await fetch("/api/system/service", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+          const j = await r.json();
+          if (j.ok) okCount += 1;
+          else failCount += 1;
+        } catch (_) {
+          failCount += 1;
+        }
+      }
+      setInfoMessage(`Stop ${label}: ${okCount} success, ${failCount} failed.`);
+      await loadServices.current();
+      loadSystem.current();
+    } finally {
+      setServiceBusy(false);
+    }
+  };
+
   const software = systemInfo?.software || {};
   const dotnet = software.dotnet || {};
   const docker = software.docker || {};
@@ -309,6 +374,22 @@ function App() {
       return n.includes(q) || d.includes(q) || k.includes(q) || st.includes(q);
     });
   }, [services, serviceFilter]);
+
+  const dotnetServices = React.useMemo(() => {
+    const patt = /(dotnet|aspnet|kestrel|w3svc|iis|api)/i;
+    return (services || []).filter((s) => {
+      const text = `${s.name || ""} ${s.display_name || ""} ${s.status || ""}`;
+      return patt.test(text);
+    });
+  }, [services]);
+
+  const s3Services = React.useMemo(() => {
+    const patt = /(locals3|minio|nginx|s3)/i;
+    return (services || []).filter((s) => {
+      const text = `${s.name || ""} ${s.display_name || ""} ${s.status || ""}`;
+      return patt.test(text);
+    });
+  }, [services]);
 
   const renderPage = () => {
     if (page === "home") {
@@ -478,6 +559,8 @@ function App() {
                   { name: "LOCALS3_API_PORT", label: "MinIO API Port (optional)", placeholder: "9000" },
                   { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port (optional)", placeholder: "9001" },
                   { name: "LOCALS3_CONSOLE_PORT", label: "Console Proxy Port (optional)", placeholder: "9443 or 10443..." },
+                  { name: "LOCALS3_ROOT_USER", label: "S3 Username", defaultValue: "admin" },
+                  { name: "LOCALS3_ROOT_PASSWORD", label: "S3 Password", defaultValue: "StrongPassword123" },
                 ]}
                 onRun={run}
                 color="#0f766e"
@@ -492,6 +575,31 @@ function App() {
                 onRun={run}
                 color="#7f1d1d"
               />
+            </Grid>
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+                <CardContent>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                    <Typography variant="h6" fontWeight={800}>S3 Services</Typography>
+                    <Box sx={{ flexGrow: 1 }} />
+                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" color="error" disabled={serviceBusy || s3Services.length === 0} onClick={() => stopServicesBatch(s3Services, "S3")} sx={{ textTransform: "none" }}>Stop All S3</Button>
+                  </Stack>
+                  <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
+                    {s3Services.length === 0 && <Typography variant="body2">No S3-related services found.</Typography>}
+                    {s3Services.map((svc) => (
+                      <Paper key={`s3-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                          <Typography variant="body2" sx={{ minWidth: 250 }}><b>{svc.name}</b> ({svc.kind})</Typography>
+                          <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
+                          <Box sx={{ flexGrow: 1 }} />
+                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Box>
+                </CardContent>
+              </Card>
             </Grid>
           </Grid>
         );
@@ -510,6 +618,8 @@ function App() {
                   { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", placeholder: "443, 8443, 9443..." },
                   { name: "LOCALS3_API_PORT", label: "MinIO API Port (optional)", placeholder: "9000" },
                   { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port (optional)", placeholder: "9001" },
+                  { name: "LOCALS3_ROOT_USER", label: "S3 Username", defaultValue: "admin" },
+                  { name: "LOCALS3_ROOT_PASSWORD", label: "S3 Password", defaultValue: "StrongPassword123" },
                 ]}
                 onRun={run}
                 color="#1e40af"
@@ -524,6 +634,31 @@ function App() {
                 onRun={run}
                 color="#7f1d1d"
               />
+            </Grid>
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+                <CardContent>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                    <Typography variant="h6" fontWeight={800}>S3 Services</Typography>
+                    <Box sx={{ flexGrow: 1 }} />
+                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" color="error" disabled={serviceBusy || s3Services.length === 0} onClick={() => stopServicesBatch(s3Services, "S3")} sx={{ textTransform: "none" }}>Stop All S3</Button>
+                  </Stack>
+                  <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
+                    {s3Services.length === 0 && <Typography variant="body2">No S3-related services found.</Typography>}
+                    {s3Services.map((svc) => (
+                      <Paper key={`s3-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                          <Typography variant="body2" sx={{ minWidth: 250 }}><b>{svc.name}</b> ({svc.kind})</Typography>
+                          <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
+                          <Box sx={{ flexGrow: 1 }} />
+                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Box>
+                </CardContent>
+              </Card>
             </Grid>
           </Grid>
         );
@@ -541,6 +676,31 @@ function App() {
             <Grid item xs={12} md={6}>
               <NavCard title="Docker" text="Install and deploy on Docker." onClick={() => setPage("dotnet-docker")} />
             </Grid>
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+                <CardContent>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                    <Typography variant="h6" fontWeight={800}>DotNet Services</Typography>
+                    <Box sx={{ flexGrow: 1 }} />
+                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" color="error" disabled={serviceBusy || dotnetServices.length === 0} onClick={() => stopServicesBatch(dotnetServices, "DotNet")} sx={{ textTransform: "none" }}>Stop All DotNet</Button>
+                  </Stack>
+                  <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
+                    {dotnetServices.length === 0 && <Typography variant="body2">No DotNet-related services found.</Typography>}
+                    {dotnetServices.map((svc) => (
+                      <Paper key={`dotnet-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                          <Typography variant="body2" sx={{ minWidth: 250 }}><b>{svc.name}</b> ({svc.kind})</Typography>
+                          <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
+                          <Box sx={{ flexGrow: 1 }} />
+                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
           </Grid>
         );
       }
@@ -552,6 +712,31 @@ function App() {
             </Grid>
             <Grid item xs={12} md={6}>
               <NavCard title="Docker" text="Install and deploy on Docker (Linux)." onClick={() => setPage("dotnet-docker")} />
+            </Grid>
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+                <CardContent>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                    <Typography variant="h6" fontWeight={800}>DotNet Services</Typography>
+                    <Box sx={{ flexGrow: 1 }} />
+                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" color="error" disabled={serviceBusy || dotnetServices.length === 0} onClick={() => stopServicesBatch(dotnetServices, "DotNet")} sx={{ textTransform: "none" }}>Stop All DotNet</Button>
+                  </Stack>
+                  <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
+                    {dotnetServices.length === 0 && <Typography variant="body2">No DotNet-related services found.</Typography>}
+                    {dotnetServices.map((svc) => (
+                      <Paper key={`dotnet-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                          <Typography variant="body2" sx={{ minWidth: 250 }}><b>{svc.name}</b> ({svc.kind})</Typography>
+                          <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
+                          <Box sx={{ flexGrow: 1 }} />
+                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Box>
+                </CardContent>
+              </Card>
             </Grid>
           </Grid>
         );

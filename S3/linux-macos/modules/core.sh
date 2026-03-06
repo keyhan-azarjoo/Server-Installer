@@ -299,13 +299,18 @@ configure_minio_linux() {
   local bin="/usr/local/bin/minio"
   local data="${root}/data"
   local envf="/etc/default/locals3-minio"
+  local minio_user minio_pass
+  minio_user="$(env_trim "LOCALS3_ROOT_USER")"
+  minio_pass="$(env_trim "LOCALS3_ROOT_PASSWORD")"
+  [ -z "$minio_user" ] && minio_user="admin"
+  [ -z "$minio_pass" ] && minio_pass="StrongPassword123"
   mkdir -p "$root" "$data"
 
   install_minio_binary "$bin"
 
-  cat > "$envf" <<EOF
-MINIO_ROOT_USER=admin
-MINIO_ROOT_PASSWORD=StrongPassword123
+cat > "$envf" <<EOF
+MINIO_ROOT_USER=${minio_user}
+MINIO_ROOT_PASSWORD=${minio_pass}
 EOF
 
   cat > /etc/systemd/system/locals3-minio.service <<EOF
@@ -332,6 +337,11 @@ configure_minio_macos() {
   [ -d /opt/homebrew/bin ] && bin="/opt/homebrew/bin/minio"
   local data="${root}/data"
   local plist="/Library/LaunchDaemons/com.locals3.minio.plist"
+  local minio_user minio_pass
+  minio_user="$(env_trim "LOCALS3_ROOT_USER")"
+  minio_pass="$(env_trim "LOCALS3_ROOT_PASSWORD")"
+  [ -z "$minio_user" ] && minio_user="admin"
+  [ -z "$minio_pass" ] && minio_pass="StrongPassword123"
   mkdir -p "$root" "$data"
   install_minio_binary "$bin"
 
@@ -346,8 +356,8 @@ configure_minio_macos() {
     <string>--console-address</string><string>:$ui_port</string>
   </array>
   <key>EnvironmentVariables</key><dict>
-    <key>MINIO_ROOT_USER</key><string>admin</string>
-    <key>MINIO_ROOT_PASSWORD</key><string>StrongPassword123</string>
+    <key>MINIO_ROOT_USER</key><string>$minio_user</string>
+    <key>MINIO_ROOT_PASSWORD</key><string>$minio_pass</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -470,6 +480,7 @@ trust_cert() {
 main() {
   relaunch_elevated "$@"
   local os root cert_dir https_port api_port ui_port domain lan_ans enable_lan lan_ip public_ip use_public_ip proxy_host
+  local minio_user minio_pass
   local env_host env_lan
   os="$(detect_os)"
   [ "$os" = "unknown" ] && { err "Unsupported OS."; exit 1; }
@@ -561,8 +572,12 @@ main() {
   fi
   echo ""
   echo "Login:"
-  echo "  Username: admin"
-  echo "  Password: StrongPassword123"
+  minio_user="$(env_trim "LOCALS3_ROOT_USER")"
+  minio_pass="$(env_trim "LOCALS3_ROOT_PASSWORD")"
+  [ -z "$minio_user" ] && minio_user="admin"
+  [ -z "$minio_pass" ] && minio_pass="StrongPassword123"
+  echo "  Username: $minio_user"
+  echo "  Password: $minio_pass"
 }
 
 # The main runner now lives in ../setup-storage.sh. This core file only defines

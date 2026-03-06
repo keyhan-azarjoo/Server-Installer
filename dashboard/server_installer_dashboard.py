@@ -451,6 +451,25 @@ def manage_firewall_port(action, port, protocol):
     return False, "No supported firewall manager found (ufw on Linux, Windows Firewall on Windows)."
 
 
+def get_port_usage(port, protocol="tcp"):
+    if not str(port).isdigit():
+        return {"ok": False, "error": "Port must be numeric."}
+    p = int(port)
+    if p < 1 or p > 65535:
+        return {"ok": False, "error": "Port out of range."}
+    proto = (protocol or "tcp").strip().lower()
+    listeners = []
+    for item in get_listening_ports(limit=5000):
+        item_proto = str(item.get("proto", "")).lower()
+        if proto == "tcp" and (not item_proto.startswith("tcp")):
+            continue
+        if proto == "udp" and (not item_proto.startswith("udp")):
+            continue
+        if int(item.get("port", 0)) == p:
+            listeners.append(item)
+    return {"ok": True, "busy": len(listeners) > 0, "listeners": listeners}
+
+
 def _safe_service_name(name):
     value = (name or "").strip()
     if not value:
@@ -1146,6 +1165,8 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
         "LOCALS3_API_PORT",
         "LOCALS3_UI_PORT",
         "LOCALS3_CONSOLE_PORT",
+        "LOCALS3_ROOT_USER",
+        "LOCALS3_ROOT_PASSWORD",
     ]:
         value = (form.get(key, [""])[0] or "").strip()
         if value:
@@ -1183,14 +1204,7 @@ def run_linux_s3_installer(form=None, live_cb=None):
                 else:
                     return 1, f"Requested HTTPS port {requested_https} is still in use and no fallback port was found."
         else:
-            auto_port = pick_free_local_tcp_port([9443, 10443, 11443, 12443, 13443, 8443, 15443, 16443])
-            if auto_port:
-                if live_cb:
-                    live_cb(f"Requested HTTPS port {requested_https} is busy. Auto-selected free port {auto_port}.\n")
-                form["LOCALS3_HTTPS_PORT"] = [str(auto_port)]
-                requested_https = str(auto_port)
-            else:
-                return 1, f"Requested HTTPS port {requested_https} is already in use and no fallback port was found."
+            return 1, f"Requested HTTPS port {requested_https} is already in use by another app. Choose another port."
 
     requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
     requested_lan = (form.get("LOCALS3_ENABLE_LAN", [""])[0] or "").strip().lower()
@@ -1219,6 +1233,8 @@ def run_linux_s3_installer(form=None, live_cb=None):
         "LOCALS3_HTTPS_PORT",
         "LOCALS3_API_PORT",
         "LOCALS3_UI_PORT",
+        "LOCALS3_ROOT_USER",
+        "LOCALS3_ROOT_PASSWORD",
     ]:
         value = (form.get(key, [""])[0] or "").strip()
         if value:
@@ -1268,6 +1284,12 @@ echo "[DEBUG] Dashboard build: {BUILD_ID}"
 echo "[INFO] Stopping LocalS3 services..."
 if command -v systemctl >/dev/null 2>&1; then
   systemctl stop locals3-minio >/dev/null 2>&1 || true
+  systemctl disable locals3-minio >/dev/null 2>&1 || true
+fi
+pkill -f "minio server .*locals3" >/dev/null 2>&1 || true
+pkill -f "/usr/local/bin/minio server" >/dev/null 2>&1 || true
+if command -v docker >/dev/null 2>&1; then
+  docker rm -f minio nginx console >/dev/null 2>&1 || true
 fi
 if [ -f /etc/nginx/conf.d/locals3.conf ]; then
   rm -f /etc/nginx/conf.d/locals3.conf || true
@@ -2294,6 +2316,14 @@ class Handler(BaseHTTPRequestHandler):
             ok, message = manage_firewall_port(action, port, protocol)
             status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
             self.write_json({"ok": ok, "message": message}, status)
+            return
+        if self.path == "/api/system/port_check":
+            form = self.parse_form()
+            port = (form.get("port", [""])[0] or "").strip()
+            protocol = (form.get("protocol", ["tcp"])[0] or "tcp").strip()
+            result = get_port_usage(port, protocol)
+            status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+            self.write_json(result, status)
             return
         if self.path == "/api/system/service":
             form = self.parse_form()
