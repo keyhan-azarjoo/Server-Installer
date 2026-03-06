@@ -61,6 +61,15 @@ else {
 }
 
 function Ensure-ServerInstallerFiles {
+    $repoRootCandidate = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
+    $localDashboard = Join-Path $repoRootCandidate "dashboard\server_installer_dashboard.py"
+    $localComponents = Join-Path $repoRootCandidate "dashboard\ui\components.js"
+    $localApp = Join-Path $repoRootCandidate "dashboard\ui\app.js"
+    if ((Test-Path -LiteralPath $localDashboard) -and (Test-Path -LiteralPath $localComponents) -and (Test-Path -LiteralPath $localApp)) {
+        Write-Host "Using local repository dashboard files."
+        return $repoRootCandidate
+    }
+
     $installRoot = Join-Path $env:ProgramData "Server-Installer"
     $baseUrl = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
 

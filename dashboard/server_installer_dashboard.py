@@ -1143,10 +1143,20 @@ def run_linux_s3_installer(form=None, live_cb=None):
     local_core = ROOT / "S3" / "linux-macos" / "modules" / "core.sh"
     local_cleanup = ROOT / "S3" / "linux-macos" / "modules" / "cleanup.sh"
     local_platform = ROOT / "S3" / "linux-macos" / "modules" / "platform.sh"
+    # Defensive override: some stale module variants print prompt text to stdout,
+    # which can pollute command substitution for https_port. Force a clean value.
+    force_port_fn = (
+        'resolve_https_port_unix(){ '
+        'local p="${LOCALS3_HTTPS_PORT:-}"; '
+        'if [ -n "$p" ]; then echo "$p"; return; fi; '
+        'echo "8443"; '
+        '}; '
+    )
     launcher = (
         f"source '{local_core}'; "
         f"source '{local_cleanup}'; "
         f"source '{local_platform}'; "
+        f"{force_port_fn}"
         "run_linux_macos_install"
     )
     cmd = ["bash", "-c", launcher]

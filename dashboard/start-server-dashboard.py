@@ -310,7 +310,10 @@ def main() -> int:
         return 0
 
     cwd_root = Path.cwd()
-    if is_repo_layout(cwd_root):
+    script_root = Path(__file__).resolve().parents[1]
+    if is_repo_layout(script_root):
+        root = script_root
+    elif is_repo_layout(cwd_root):
         root = cwd_root
     else:
         root = cache_root()
