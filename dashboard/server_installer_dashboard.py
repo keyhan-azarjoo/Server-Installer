@@ -941,17 +941,24 @@ def main():
     args = parser.parse_args()
 
     server = ThreadingHTTPServer((args.host, args.port), Handler)
+
     urls = [f"http://127.0.0.1:{args.port}"]
-    if args.host not in ("127.0.0.1", "localhost"):
-        try:
-            for addr in socket.gethostbyname_ex(socket.gethostname())[2]:
-                if addr.startswith("127."):
-                    continue
-                candidate = f"http://{addr}:{args.port}"
-                if candidate not in urls:
-                    urls.append(candidate)
-        except Exception:
-            pass
+    if args.host not in ("127.0.0.1", "localhost", "0.0.0.0", ""):
+        explicit = f"http://{args.host}:{args.port}"
+        if explicit not in urls:
+            urls.append(explicit)
+
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 53))
+        primary_ip = s.getsockname()[0]
+        s.close()
+        if primary_ip and (not primary_ip.startswith("127.")):
+            candidate = f"http://{primary_ip}:{args.port}"
+            if candidate not in urls:
+                urls.append(candidate)
+    except Exception:
+        pass
 
     print("Dashboard URLs:")
     for url in urls:
