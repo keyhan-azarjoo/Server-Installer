@@ -15,14 +15,13 @@ import time
 import urllib.request
 import warnings
 import zipfile
+import tarfile
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
 
-warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"crypt")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"spwd")
-warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"cgi")
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -180,6 +179,73 @@ def save_uploaded_folder(items):
         zf.extractall(extract_dir)
 
     return str(extract_dir)
+
+
+def resolve_source_value(form, path_key, file_key, folder_key):
+    value = (form.get(path_key, [""])[0] or "").strip()
+    if value:
+        return value
+    value = (form.get(file_key, [""])[0] or "").strip()
+    if value:
+        form[path_key] = [value]
+        return value
+    value = (form.get(folder_key, [""])[0] or "").strip()
+    if value:
+        form[path_key] = [value]
+        return value
+    return ""
+
+
+def prepare_source_dir(source_value, live_cb=None):
+    src = (source_value or "").strip()
+    if not src:
+        raise RuntimeError("Empty source value.")
+
+    path_obj = Path(src)
+    if src.lower().startswith(("http://", "https://")):
+        base = upload_root_dir()
+        base.mkdir(parents=True, exist_ok=True)
+        download_target = base / f"download-{int(time.time())}-{secrets.token_hex(4)}"
+        if live_cb:
+            live_cb(f"Downloading source artifact: {src}\n")
+        urllib.request.urlretrieve(src, str(download_target))
+        path_obj = download_target
+
+    if path_obj.is_dir():
+        return path_obj
+
+    if path_obj.is_file():
+        extract_dir = upload_root_dir() / f"extract-{int(time.time())}-{secrets.token_hex(4)}"
+        extract_dir.mkdir(parents=True, exist_ok=True)
+        lower = path_obj.name.lower()
+        if lower.endswith(".zip"):
+            with zipfile.ZipFile(path_obj, "r") as zf:
+                zf.extractall(extract_dir)
+            return extract_dir
+        if lower.endswith(".tar.gz") or lower.endswith(".tgz") or lower.endswith(".tar"):
+            mode = "r:gz" if (lower.endswith(".tar.gz") or lower.endswith(".tgz")) else "r:"
+            with tarfile.open(path_obj, mode) as tf:
+                tf.extractall(extract_dir)
+            return extract_dir
+        raise RuntimeError("File source must be a .zip, .tar.gz, .tgz, or .tar archive.")
+
+    raise RuntimeError(f"Source does not exist: {src}")
+
+
+def find_app_dll_dir(root_dir: Path):
+    root_dir = root_dir.resolve()
+
+    runtime_configs = list(root_dir.rglob("*.runtimeconfig.json"))
+    for rc in runtime_configs:
+        dll = rc.with_suffix("").with_suffix(".dll")
+        if dll.exists():
+            return dll.parent, dll.name
+
+    dlls = [p for p in root_dir.rglob("*.dll") if p.is_file()]
+    if not dlls:
+        return None, None
+    dlls.sort(key=lambda p: len(str(p)))
+    return dlls[0].parent, dlls[0].name
 
 
 def ensure_repo_files(relative_paths, live_cb=None):
@@ -388,6 +454,71 @@ fi
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
         cmd = ["sudo"] + cmd
     return run_process(cmd, env=os.environ.copy(), live_cb=live_cb)
+
+
+def run_linux_docker_deploy(form, live_cb=None):
+    if os.name == "nt":
+        return 1, "Linux Docker deploy can only run on Linux hosts."
+
+    source_value = resolve_source_value(form, "SOURCE_VALUE", "SOURCE_FILE", "SOURCE_FOLDER")
+    if not source_value:
+        return 1, "Source path/URL, uploaded file, or uploaded folder is required."
+
+    host_port = (form.get("DOCKER_HOST_PORT", ["8080"])[0] or "8080").strip()
+    if not host_port.isdigit():
+        return 1, "Docker host port must be numeric."
+
+    source_dir = prepare_source_dir(source_value, live_cb=live_cb)
+    app_dir, dll_name = find_app_dll_dir(source_dir)
+    if not app_dir or not dll_name:
+        return 1, "No published .NET dll found in the provided source."
+
+    base = upload_root_dir()
+    context_dir = base / f"docker-context-{int(time.time())}-{secrets.token_hex(4)}"
+    app_target = context_dir / "app"
+    context_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(app_dir, app_target, dirs_exist_ok=True)
+
+    dockerfile = context_dir / "Dockerfile"
+    dockerfile.write_text(
+        "\n".join([
+            "FROM mcr.microsoft.com/dotnet/aspnet:8.0",
+            "WORKDIR /app",
+            "COPY app/ .",
+            "ENV ASPNETCORE_URLS=http://+:8080",
+            "EXPOSE 8080",
+            f'ENTRYPOINT ["dotnet", "{dll_name}"]',
+            "",
+        ]),
+        encoding="utf-8",
+    )
+
+    docker_prefix = []
+    if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        docker_prefix = ["sudo"]
+
+    image_name = "dotnetapp"
+    container_name = "dotnetapp"
+
+    if live_cb:
+        live_cb(f"Building Docker image from: {context_dir}\n")
+    code, output = run_process(docker_prefix + ["docker", "build", "-t", image_name, str(context_dir)], live_cb=live_cb)
+    if code != 0:
+        return code, output or "docker build failed."
+
+    run_process(docker_prefix + ["docker", "rm", "-f", container_name], live_cb=live_cb)
+
+    if live_cb:
+        live_cb(f"Starting container '{container_name}' on host port {host_port}\n")
+    code, output = run_process(
+        docker_prefix + ["docker", "run", "-d", "--restart", "unless-stopped", "--name", container_name, "-p", f"{host_port}:8080", image_name],
+        live_cb=live_cb,
+    )
+    if code != 0:
+        return code, output or "docker run failed."
+
+    extra = f"\nDocker deploy complete.\nContainer: {container_name}\nHost port: {host_port}\n"
+    return 0, (output or "") + extra
 
 
 def start_live_job(title, runner):
