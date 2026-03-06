@@ -176,7 +176,7 @@ function App() {
               description="Deploy application to IIS."
               action="/run/windows_iis"
               fields={[
-                { name: "SourceValue", label: "Source Path or URL", enableUpload: true, uploadTargetKey: "SourceFolder" },
+                { name: "SourceValue", label: "Source Path or URL", enableUpload: true },
                 { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" },
               ]}
               onRun={run}
@@ -206,7 +206,7 @@ function App() {
               description="Deploy application to Docker."
               action="/run/windows_docker"
               fields={[
-                { name: "SourceValue", label: "Source Path or URL", enableUpload: true, uploadTargetKey: "SourceFolder" },
+                { name: "SourceValue", label: "Source Path or URL", enableUpload: true },
                 { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" },
                 { name: "DockerHostPort", label: "Docker Host Port", defaultValue: "8080" },
               ]}
@@ -238,7 +238,7 @@ function App() {
               action="/run/linux"
               fields={[
                 { name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" },
-                { name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://...", enableUpload: true, uploadTargetKey: "SOURCE_FOLDER" },
+                { name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://...", enableUpload: true },
                 { name: "DOMAIN_NAME", label: "Domain Name" },
                 { name: "SERVICE_NAME", label: "Service Name", defaultValue: "dotnet-app" },
                 { name: "SERVICE_PORT", label: "Service Port", defaultValue: "5000" },
@@ -271,7 +271,7 @@ function App() {
               description="Build and run Docker container for uploaded/published app."
               action="/run/linux_docker"
               fields={[
-                { name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://...", enableUpload: true, uploadTargetKey: "SOURCE_FOLDER" },
+                { name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://...", enableUpload: true },
                 { name: "DOCKER_HOST_PORT", label: "Docker Host Port", defaultValue: "8080" },
               ]}
               onRun={run}

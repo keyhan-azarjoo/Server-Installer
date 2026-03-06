@@ -54,12 +54,25 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
   const [uploadInfo, setUploadInfo] = React.useState("");
   const [uploadedPath, setUploadedPath] = React.useState("");
   const uploadInputRef = React.useRef(null);
+  const formRef = React.useRef(null);
+  const sourcePathField = (fields || []).find((f) => f.name === "SourceValue" || f.name === "SOURCE_VALUE");
+  const sourcePathKey = sourcePathField ? sourcePathField.name : "";
+
+  const setSourcePathInForm = (pathValue) => {
+    if (!formRef.current || !sourcePathKey) return;
+    const pathInput = formRef.current.querySelector(`[name="${sourcePathKey}"]`);
+    if (pathInput) {
+      pathInput.value = pathValue || "";
+      pathInput.dispatchEvent(new Event("input", { bubbles: true }));
+      pathInput.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  };
 
   const doUpload = async () => {
     const input = uploadInputRef.current;
     if (!input || !input.files || input.files.length === 0) {
       setUploadInfo("Select a folder or archive first.");
-      return;
+      return "";
     }
     setUploading(true);
     setUploadInfo("Uploading...");
@@ -79,12 +92,38 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
         throw new Error(json.error || "Upload failed");
       }
       setUploadedPath(json.path || "");
+      setSourcePathInForm(json.path || "");
       setUploadInfo("Uploaded and extracted on server.");
+      return json.path || "";
     } catch (err) {
       setUploadInfo(`Upload failed: ${err}`);
+      return "";
     } finally {
       setUploading(false);
     }
+  };
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    const formEl = formRef.current || e.currentTarget;
+    let sourcePathValue = "";
+    if (sourcePathKey) {
+      const sourcePathInput = formEl.querySelector(`[name="${sourcePathKey}"]`);
+      sourcePathValue = (sourcePathInput && sourcePathInput.value ? sourcePathInput.value : "").trim();
+    }
+
+    const input = uploadInputRef.current;
+    const hasSelectedUpload = !!(input && input.files && input.files.length > 0);
+
+    if (!sourcePathValue && hasSelectedUpload && !uploadedPath) {
+      const autoPath = await doUpload();
+      if (!autoPath) {
+        return;
+      }
+      sourcePathValue = autoPath;
+    }
+
+    onRun(e, action, title);
   };
 
   return (
@@ -92,7 +131,7 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
       <CardContent>
         <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5 }}>{title}</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{description}</Typography>
-        <Box component="form" onSubmit={(e) => onRun(e, action, title)}>
+        <Box ref={formRef} component="form" onSubmit={handleSubmit}>
           {(fields || []).map((f) => <Field key={f.name} field={f} />)}
           {(fields || []).some((f) => f.enableUpload) && (
             <Box sx={{ mb: 1.5 }}>
@@ -106,14 +145,7 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
                 </Button>
               </Box>
               {!!uploadInfo && <Typography variant="caption" sx={{ color: "text.secondary" }}>{uploadInfo}</Typography>}
-              {!!uploadedPath && (
-                <input
-                  type="hidden"
-                  name={(fields.find((f) => f.enableUpload) || {}).uploadTargetKey || "SourceFolder"}
-                  value={uploadedPath}
-                  readOnly
-                />
-              )}
+              {!!uploadedPath && <Typography variant="caption" sx={{ display: "block", color: "success.main" }}>Server path: {uploadedPath}</Typography>}
             </Box>
           )}
           <Button type="submit" variant="contained" fullWidth sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, bgcolor: color || "#1d4ed8" }}>
