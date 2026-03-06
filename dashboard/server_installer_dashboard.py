@@ -1042,6 +1042,69 @@ def run_linux_s3_installer(form=None, live_cb=None):
     return run_process(cmd, env=env, live_cb=live_cb, input_text=scripted_input)
 
 
+def run_linux_s3_stop(live_cb=None):
+    if os.name == "nt":
+        return 1, "Linux S3 stop can only run on Linux/macOS hosts."
+
+    script = r"""
+set -euo pipefail
+echo "[INFO] Stopping LocalS3 services..."
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl stop locals3-minio >/dev/null 2>&1 || true
+fi
+if [ -f /etc/nginx/conf.d/locals3.conf ]; then
+  rm -f /etc/nginx/conf.d/locals3.conf || true
+  nginx -t >/dev/null 2>&1 || true
+  if command -v systemctl >/dev/null 2>&1; then
+    systemctl reload nginx >/dev/null 2>&1 || systemctl restart nginx >/dev/null 2>&1 || true
+  elif command -v service >/dev/null 2>&1; then
+    service nginx reload >/dev/null 2>&1 || service nginx restart >/dev/null 2>&1 || true
+  fi
+fi
+if [ -f /Library/LaunchDaemons/com.locals3.minio.plist ]; then
+  launchctl bootout system /Library/LaunchDaemons/com.locals3.minio.plist >/dev/null 2>&1 || true
+fi
+if command -v brew >/dev/null 2>&1; then
+  brew services stop nginx >/dev/null 2>&1 || true
+fi
+echo "[INFO] LocalS3 API/Console services stopped."
+"""
+    cmd = ["bash", "-lc", script]
+    if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        cmd = ["sudo", "bash", "-lc", script]
+    return run_process(cmd, env=os.environ.copy(), live_cb=live_cb)
+
+
+def run_windows_s3_stop(live_cb=None):
+    if os.name != "nt":
+        return 1, "Windows S3 stop can only run on Windows hosts."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+
+    ps = r"""
+$ErrorActionPreference = 'Continue'
+Write-Host '[INFO] Stopping LocalS3 services...'
+schtasks /End /TN 'LocalS3-MinIO' 1>$null 2>$null | Out-Null
+Import-Module WebAdministration -ErrorAction SilentlyContinue
+if (Test-Path 'IIS:\Sites\LocalS3') {
+  Stop-Website -Name 'LocalS3' -ErrorAction SilentlyContinue | Out-Null
+}
+if (Get-Command docker -ErrorAction SilentlyContinue) {
+  docker rm -f minio nginx console 1>$null 2>$null | Out-Null
+}
+Write-Host '[INFO] LocalS3 API/Console services stopped.'
+"""
+    cmd = [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        ps,
+    ]
+    return run_process(cmd, env=os.environ.copy(), live_cb=live_cb)
+
+
 def run_linux_docker_setup(live_cb=None):
     if os.name == "nt":
         return 1, "Linux Docker setup can only run on Linux hosts."
@@ -2024,6 +2087,15 @@ class Handler(BaseHTTPRequestHandler):
                 code, output = run_windows_s3_installer(form)
                 self.respond_run_result(title, code, output)
             return
+        if self.path == "/run/s3_windows_stop":
+            title = "S3 Stop (Windows)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_s3_stop(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_s3_stop()
+                self.respond_run_result(title, code, output)
+            return
         if self.path == "/run/s3_windows_iis":
             title = "S3 Installer (Windows IIS)"
             if self.is_fetch():
@@ -2049,6 +2121,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_linux_s3_installer(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/s3_linux_stop":
+            title = "S3 Stop (Linux/macOS)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_linux_s3_stop(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_linux_s3_stop()
                 self.respond_run_result(title, code, output)
             return
 

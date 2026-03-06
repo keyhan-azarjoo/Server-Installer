@@ -376,6 +376,16 @@ function App() {
                 color="#0f766e"
               />
             </Grid>
+            <Grid item xs={12} md={4}>
+              <ActionCard
+                title="Stop S3 APIs (Windows)"
+                description="Stop LocalS3 API/Console services (IIS site, task, and Docker containers)."
+                action="/run/s3_windows_stop"
+                fields={[]}
+                onRun={run}
+                color="#7f1d1d"
+              />
+            </Grid>
           </Grid>
         );
       }
@@ -396,6 +406,16 @@ function App() {
                 ]}
                 onRun={run}
                 color="#1e40af"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <ActionCard
+                title="Stop S3 APIs (Linux/macOS)"
+                description="Stop LocalS3 MinIO and disable LocalS3 nginx endpoint."
+                action="/run/s3_linux_stop"
+                fields={[]}
+                onRun={run}
+                color="#7f1d1d"
               />
             </Grid>
           </Grid>
