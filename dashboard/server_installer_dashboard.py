@@ -449,6 +449,142 @@ def manage_firewall_port(action, port, protocol):
     return False, "No supported firewall manager found (ufw on Linux, Windows Firewall on Windows)."
 
 
+def _safe_service_name(name):
+    value = (name or "").strip()
+    if not value:
+        return ""
+    if not re.match(r"^[A-Za-z0-9_.@-]+$", value):
+        return ""
+    return value
+
+
+def get_service_items():
+    items = []
+
+    if os.name == "nt":
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            "Get-Service | Select-Object Name,DisplayName,Status,StartType | ConvertTo-Json -Depth 2",
+        ]
+        rc, out = run_capture(cmd, timeout=60)
+        if rc == 0 and out:
+            try:
+                raw = json.loads(out)
+                rows = raw if isinstance(raw, list) else [raw]
+                for row in rows:
+                    name = str(row.get("Name", "")).strip()
+                    if not name:
+                        continue
+                    items.append(
+                        {
+                            "kind": "service",
+                            "name": name,
+                            "display_name": str(row.get("DisplayName", "")).strip(),
+                            "status": str(row.get("Status", "")).strip(),
+                            "start_type": str(row.get("StartType", "")).strip(),
+                            "platform": "windows",
+                        }
+                    )
+            except Exception:
+                pass
+    elif command_exists("systemctl"):
+        rc, out = run_capture(
+            ["systemctl", "list-units", "--type=service", "--all", "--no-pager", "--no-legend"],
+            timeout=60,
+        )
+        if rc == 0 and out:
+            for line in out.splitlines():
+                text = line.rstrip()
+                if not text:
+                    continue
+                parts = [p for p in text.split() if p]
+                if len(parts) < 4:
+                    continue
+                name = parts[0]
+                load = parts[1]
+                active = parts[2]
+                sub = parts[3]
+                desc = " ".join(parts[4:]) if len(parts) > 4 else ""
+                items.append(
+                    {
+                        "kind": "service",
+                        "name": name,
+                        "display_name": desc,
+                        "status": active,
+                        "sub_status": sub,
+                        "load": load,
+                        "platform": "linux",
+                    }
+                )
+
+    if command_exists("docker"):
+        rc, out = run_capture(["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.Image}}"], timeout=30)
+        if rc == 0 and out:
+            for line in out.splitlines():
+                parts = line.split("\t")
+                if len(parts) < 3:
+                    continue
+                name = parts[0].strip()
+                status = parts[1].strip()
+                image = parts[2].strip()
+                if not name:
+                    continue
+                items.append(
+                    {
+                        "kind": "docker",
+                        "name": name,
+                        "display_name": image,
+                        "status": status,
+                        "platform": "docker",
+                    }
+                )
+
+    items.sort(key=lambda x: (x.get("kind", ""), x.get("name", "").lower()))
+    return items
+
+
+def manage_service(action, name, kind):
+    action = (action or "").strip().lower()
+    kind = (kind or "service").strip().lower()
+    svc_name = _safe_service_name(name)
+    if action != "stop":
+        return False, "Only 'stop' action is supported."
+    if not svc_name:
+        return False, "Invalid service name."
+
+    if kind == "docker":
+        if not command_exists("docker"):
+            return False, "Docker is not available."
+        rc, out = run_capture(["docker", "stop", svc_name], timeout=60)
+        return rc == 0, (out or f"Docker container '{svc_name}' stop attempted.")
+
+    if os.name == "nt":
+        if not is_windows_admin():
+            return False, "Stopping services on Windows requires Administrator."
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            f"Stop-Service -Name '{svc_name}' -Force -ErrorAction Stop; Write-Output 'Stopped {svc_name}'",
+        ]
+        rc, out = run_capture(cmd, timeout=60)
+        return rc == 0, (out or f"Stop requested for {svc_name}.")
+
+    prefix = _sudo_prefix()
+    if command_exists("systemctl"):
+        cmd = prefix + ["systemctl", "stop", svc_name]
+        rc, out = run_capture(cmd, timeout=60)
+        return rc == 0, (out or f"Stop requested for {svc_name}.")
+
+    return False, "No supported service manager found."
+
+
 def get_system_status():
     load = None
     try:
@@ -804,6 +940,19 @@ def is_local_tcp_port_listening(port):
     return False
 
 
+def pick_free_local_tcp_port(candidates):
+    for p in candidates:
+        try:
+            port = int(str(p).strip())
+        except Exception:
+            continue
+        if port < 1 or port > 65535:
+            continue
+        if not is_local_tcp_port_listening(port):
+            return port
+    return None
+
+
 def run_windows_installer(form, live_cb=None):
     if os.name != "nt":
         return 1, "Windows installer can only run on Windows hosts."
@@ -993,11 +1142,17 @@ def run_linux_s3_installer(form=None, live_cb=None):
 
     cmd = ["bash", str(S3_LINUX_INSTALLER)]
     requested_https = (form.get("LOCALS3_HTTPS_PORT", [""])[0] or "").strip()
-    if requested_https:
-        if not requested_https.isdigit():
-            return 1, "LOCALS3_HTTPS_PORT must be numeric."
-        if is_local_tcp_port_listening(requested_https):
-            return 1, f"Requested HTTPS port {requested_https} is already in use. Choose another port."
+    if requested_https and (not requested_https.isdigit()):
+        return 1, "LOCALS3_HTTPS_PORT must be numeric."
+    if requested_https and is_local_tcp_port_listening(requested_https):
+        auto_port = pick_free_local_tcp_port([9443, 10443, 11443, 12443, 13443, 8443, 15443, 16443])
+        if auto_port:
+            if live_cb:
+                live_cb(f"Requested HTTPS port {requested_https} is busy. Auto-selected free port {auto_port}.\n")
+            form["LOCALS3_HTTPS_PORT"] = [str(auto_port)]
+            requested_https = str(auto_port)
+        else:
+            return 1, f"Requested HTTPS port {requested_https} is already in use and no fallback port was found."
 
     requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
     requested_lan = (form.get("LOCALS3_ENABLE_LAN", [""])[0] or "").strip().lower()
@@ -1069,9 +1224,9 @@ if command -v brew >/dev/null 2>&1; then
 fi
 echo "[INFO] LocalS3 API/Console services stopped."
 """
-    cmd = ["bash", "-lc", script]
+    cmd = ["sh", "-c", script]
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-        cmd = ["sudo", "bash", "-lc", script]
+        cmd = ["sudo", "sh", "-c", script]
     return run_process(cmd, env=os.environ.copy(), live_cb=live_cb)
 
 
@@ -1982,6 +2137,18 @@ class Handler(BaseHTTPRequestHandler):
                 traceback.print_exc()
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
             return
+        if self.path.startswith("/api/system/services"):
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                payload = {"ok": True, "services": get_service_items()}
+                self.write_json(payload, HTTPStatus.OK)
+            except Exception as ex:
+                print(f"Service list error: {ex}")
+                traceback.print_exc()
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
         if self.path == "/":
             if self.is_local_client() or self.is_auth():
                 self.write_html(page_dashboard())
@@ -2063,6 +2230,15 @@ class Handler(BaseHTTPRequestHandler):
             port = (form.get("port", [""])[0] or "").strip()
             protocol = (form.get("protocol", ["tcp"])[0] or "tcp").strip()
             ok, message = manage_firewall_port(action, port, protocol)
+            status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
+            self.write_json({"ok": ok, "message": message}, status)
+            return
+        if self.path == "/api/system/service":
+            form = self.parse_form()
+            action = (form.get("action", [""])[0] or "").strip()
+            name = (form.get("name", [""])[0] or "").strip()
+            kind = (form.get("kind", ["service"])[0] or "service").strip()
+            ok, message = manage_service(action, name, kind)
             status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
             self.write_json({"ok": ok, "message": message}, status)
             return

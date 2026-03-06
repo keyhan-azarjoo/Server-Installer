@@ -174,6 +174,17 @@ resolve_https_port_unix() {
   exit 1
 }
 
+sanitize_port_value() {
+  local raw="$1"
+  local cleaned
+  cleaned="$(echo "$raw" | tr -cd '0-9\n' | tail -n 1)"
+  if echo "$cleaned" | grep -Eq '^[0-9]+$' && [ "$cleaned" -ge 1 ] && [ "$cleaned" -le 65535 ]; then
+    echo "$cleaned"
+    return
+  fi
+  echo ""
+}
+
 open_firewall_port_linux() {
   local p="$1"
   if has_cmd ufw; then
@@ -497,6 +508,8 @@ main() {
   fi
 
   https_port="$(resolve_https_port_unix)"
+  https_port="$(sanitize_port_value "$https_port")"
+  [ -z "$https_port" ] && { err "Could not determine a valid HTTPS port."; exit 1; }
   if [ "$https_port" != "443" ]; then
     warn "Using HTTPS port: $https_port"
   fi

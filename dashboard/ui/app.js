@@ -74,6 +74,11 @@ function App() {
   const [portValue, setPortValue] = React.useState("8090");
   const [portProtocol, setPortProtocol] = React.useState("tcp");
   const [portBusy, setPortBusy] = React.useState(false);
+  const [serviceBusy, setServiceBusy] = React.useState(false);
+  const [servicesLoading, setServicesLoading] = React.useState(false);
+  const [servicesErr, setServicesErr] = React.useState("");
+  const [serviceFilter, setServiceFilter] = React.useState("");
+  const [services, setServices] = React.useState([]);
   const [netRate, setNetRate] = React.useState({ rxBps: 0, txBps: 0 });
   const prevNetRef = React.useRef(null);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
@@ -191,7 +196,7 @@ function App() {
 
   const goBack = () => {
     if (page === "home") return;
-    if (page === "dotnet" || page === "s3" || page === "sysinfo" || page === "ports") setPage("home");
+    if (page === "dotnet" || page === "s3" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
     else if (page.startsWith("dotnet-")) setPage("dotnet");
     else setPage("home");
   };
@@ -202,6 +207,7 @@ function App() {
     if (page === "s3") return "S3";
     if (page === "sysinfo") return "SysInfo";
     if (page === "ports") return "Port Management";
+    if (page === "services") return "Service Manager";
     if (page === "dotnet-iis") return "DotNet > IIS";
     if (page === "dotnet-docker") return "DotNet > Docker";
     if (page === "dotnet-linux") return "DotNet > Linux";
@@ -225,6 +231,43 @@ function App() {
       setInfoMessage(`Port ${action} failed: ${err}`);
     } finally {
       setPortBusy(false);
+    }
+  };
+
+  const loadServices = React.useRef(async () => {});
+  loadServices.current = async () => {
+    setServicesLoading(true);
+    setServicesErr("");
+    try {
+      const r = await fetch("/api/system/services", { headers: { "X-Requested-With": "fetch" } });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      setServices(Array.isArray(j.services) ? j.services : []);
+    } catch (err) {
+      setServicesErr(String(err));
+    } finally {
+      setServicesLoading(false);
+    }
+  };
+
+  const onServiceAction = async (action, svc) => {
+    if (!svc || !svc.name) return;
+    setServiceBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("action", action);
+      fd.append("name", svc.name);
+      fd.append("kind", svc.kind || "service");
+      const r = await fetch("/api/system/service", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.message || "Service action failed.");
+      setInfoMessage(j.message || `${action} completed.`);
+      await loadServices.current();
+      loadSystem.current();
+    } catch (err) {
+      setInfoMessage(`Service ${action} failed: ${err}`);
+    } finally {
+      setServiceBusy(false);
     }
   };
 
@@ -254,6 +297,18 @@ function App() {
     urls.push(`${window.location.origin}/api/system/status`);
     return Array.from(new Set(urls));
   }, [systemInfo, listeningPorts]);
+
+  const filteredServices = React.useMemo(() => {
+    const q = (serviceFilter || "").trim().toLowerCase();
+    if (!q) return services;
+    return services.filter((s) => {
+      const n = String(s.name || "").toLowerCase();
+      const d = String(s.display_name || "").toLowerCase();
+      const k = String(s.kind || "").toLowerCase();
+      const st = String(s.status || "").toLowerCase();
+      return n.includes(q) || d.includes(q) || k.includes(q) || st.includes(q);
+    });
+  }, [services, serviceFilter]);
 
   const renderPage = () => {
     if (page === "home") {
@@ -346,6 +401,58 @@ function App() {
                       {String(p.proto || "").toUpperCase()}:{p.port} {p.pid ? `(pid ${p.pid})` : ""} {p.process ? ` ${p.process}` : ""}
                     </Typography>
                   ))}
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      );
+    }
+
+    if (page === "services") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                  <Typography variant="h6" fontWeight={800}>Service Manager</Typography>
+                  <Box sx={{ flexGrow: 1 }} />
+                  <TextField size="small" label="Filter" value={serviceFilter} onChange={(e) => setServiceFilter(e.target.value)} sx={{ minWidth: 260 }} />
+                  <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>
+                    {servicesLoading ? "Refreshing..." : "Refresh"}
+                  </Button>
+                </Stack>
+                {servicesErr && <Alert severity="error" sx={{ mt: 1 }}>{servicesErr}</Alert>}
+                <Box sx={{ mt: 1.5, maxHeight: 520, overflow: "auto" }}>
+                  {filteredServices.length === 0 && <Typography variant="body2">No services found.</Typography>}
+                  {filteredServices.map((svc) => {
+                    const status = String(svc.status || "");
+                    const stopDisabled = serviceBusy || /stopped|inactive|exited|dead/i.test(status);
+                    return (
+                      <Paper key={`${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                          <Box sx={{ minWidth: 280 }}>
+                            <Typography variant="body2" fontWeight={700}>{svc.name}</Typography>
+                            <Typography variant="caption" color="text.secondary">{svc.display_name || "-"}</Typography>
+                          </Box>
+                          <Chip size="small" label={svc.kind || "service"} />
+                          <Chip size="small" color={/running|active|up/i.test(status) ? "success" : "default"} label={status || "-"} />
+                          <Box sx={{ flexGrow: 1 }} />
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color="error"
+                            disabled={stopDisabled}
+                            onClick={() => onServiceAction("stop", svc)}
+                            sx={{ textTransform: "none" }}
+                          >
+                            Stop
+                          </Button>
+                        </Stack>
+                      </Paper>
+                    );
+                  })}
                 </Box>
               </CardContent>
             </Card>
@@ -551,6 +658,9 @@ function App() {
             </IconButton>
             <IconButton size="small" sx={{ border: "1px solid rgba(219,234,254,.35)", color: "#dbeafe" }} onClick={() => setPage("ports")} title="Port Management">
               <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700 }}>PM</Typography>
+            </IconButton>
+            <IconButton size="small" sx={{ border: "1px solid rgba(219,234,254,.35)", color: "#dbeafe" }} onClick={() => { setPage("services"); loadServices.current(); }} title="Service Manager">
+              <Typography variant="caption" sx={{ fontSize: 10, fontWeight: 700 }}>SV</Typography>
             </IconButton>
             <Button size="small" variant="outlined" sx={{ color: "#dbeafe", borderColor: "rgba(219,234,254,.35)", textTransform: "none" }} onClick={() => { window.location.href = "/logout"; }}>
               Logout
