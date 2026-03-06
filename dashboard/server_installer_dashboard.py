@@ -564,6 +564,21 @@ def start_live_job(title, runner):
             if job_id in JOBS:
                 JOBS[job_id]["output"] += text
 
+    def heartbeat():
+        last_len = -1
+        while True:
+            time.sleep(5)
+            with JOBS_LOCK:
+                job = JOBS.get(job_id)
+                if not job:
+                    return
+                if job["done"]:
+                    return
+                current_len = len(job["output"])
+                if current_len == last_len:
+                    job["output"] += f"[{time.strftime('%H:%M:%S')}] still running...\n"
+                last_len = len(job["output"])
+
     def worker():
         try:
             code, output = runner(append_out)
@@ -580,6 +595,7 @@ def start_live_job(title, runner):
                     JOBS[job_id]["exit_code"] = 1
                     JOBS[job_id]["done"] = True
 
+    threading.Thread(target=heartbeat, daemon=True).start()
     threading.Thread(target=worker, daemon=True).start()
     return job_id
 
