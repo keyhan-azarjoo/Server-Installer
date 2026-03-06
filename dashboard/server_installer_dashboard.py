@@ -13,10 +13,15 @@ import subprocess
 import threading
 import time
 import urllib.request
+import warnings
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs
+
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"crypt")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"spwd")
+warnings.filterwarnings("ignore", category=DeprecationWarning, module=r"cgi")
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -302,12 +307,18 @@ if ! command -v apt-get >/dev/null 2>&1; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+echo "Checking apt locks..."
+while fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1 || fuser /var/lib/apt/lists/lock >/dev/null 2>&1; do
+  echo "apt is busy, waiting 5s..."
+  sleep 5
+done
+
 echo "Updating apt package index..."
-apt-get update
+apt-get -o Dpkg::Use-Pty=0 -o Acquire::Progress=false update
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "Installing Docker Engine..."
-  apt-get install -y docker.io
+  apt-get -o Dpkg::Use-Pty=0 install -y docker.io
 else
   echo "Docker is already installed."
 fi
