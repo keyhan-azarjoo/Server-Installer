@@ -201,6 +201,12 @@ function App() {
         const pj = await chk.json();
         if (!pj.ok) break;
         if (!pj.busy) break;
+        if (pj.managed_owner) {
+          const ownMsg = `Port ${p} is used by existing S3 (${pj.owner_hint || "managed service"}). Proceeding to update/reclaim on the same port.`;
+          setInfoMessage(ownMsg);
+          append(ownMsg);
+          break;
+        }
         const busyMsg = `S3 HTTPS port ${p} is already in use. Please choose another port.`;
         setInfoMessage(busyMsg);
         append(busyMsg);

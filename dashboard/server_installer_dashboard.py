@@ -467,7 +467,16 @@ def get_port_usage(port, protocol="tcp"):
             continue
         if int(item.get("port", 0)) == p:
             listeners.append(item)
-    return {"ok": True, "busy": len(listeners) > 0, "listeners": listeners}
+    managed_owner = False
+    owner_hint = ""
+    if proto == "tcp" and len(listeners) > 0:
+        try:
+            if _linux_locals3_nginx_owns_port(p):
+                managed_owner = True
+                owner_hint = "locals3-nginx"
+        except Exception:
+            pass
+    return {"ok": True, "busy": len(listeners) > 0, "listeners": listeners, "managed_owner": managed_owner, "owner_hint": owner_hint}
 
 
 def _safe_service_name(name):
