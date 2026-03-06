@@ -28,7 +28,7 @@ from urllib.parse import parse_qs
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-BUILD_ID = "s3-fix-2026-03-06-1609"
+BUILD_ID = "s3-fix-2026-03-06-1658"
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
@@ -471,9 +471,9 @@ def get_port_usage(port, protocol="tcp"):
     owner_hint = ""
     if proto == "tcp" and len(listeners) > 0:
         try:
-            if _linux_locals3_nginx_owns_port(p):
+            if _linux_locals3_owns_port(p):
                 managed_owner = True
-                owner_hint = "locals3-nginx"
+                owner_hint = "locals3-managed"
         except Exception:
             pass
     return {"ok": True, "busy": len(listeners) > 0, "listeners": listeners, "managed_owner": managed_owner, "owner_hint": owner_hint}
@@ -1172,6 +1172,44 @@ def _linux_locals3_nginx_owns_port(port):
     return re.search(rf"\blisten\s+{p}\b", text) is not None
 
 
+def _docker_locals3_owns_port(port):
+    if os.name == "nt":
+        return False
+    if not command_exists("docker"):
+        return False
+    try:
+        p = int(str(port).strip())
+    except Exception:
+        return False
+    if p < 1 or p > 65535:
+        return False
+    rc, out = run_capture(
+        [
+            "docker",
+            "ps",
+            "-a",
+            "--filter",
+            "label=com.locals3.installer=true",
+            "--format",
+            "{{.Names}}\t{{.Ports}}",
+        ],
+        timeout=15,
+    )
+    if rc != 0 or not out:
+        return False
+    marker = f":{p}->"
+    for line in out.splitlines():
+        parts = line.split("\t", 1)
+        ports = parts[1] if len(parts) > 1 else ""
+        if marker in ports:
+            return True
+    return False
+
+
+def _linux_locals3_owns_port(port):
+    return _linux_locals3_nginx_owns_port(port) or _docker_locals3_owns_port(port)
+
+
 def run_windows_installer(form, live_cb=None):
     if os.name != "nt":
         return 1, "Windows installer can only run on Windows hosts."
@@ -1369,7 +1407,7 @@ def run_linux_s3_installer(form=None, live_cb=None):
     if requested_https and (not requested_https.isdigit()):
         return 1, "LOCALS3_HTTPS_PORT must be numeric."
     if requested_https and is_local_tcp_port_listening(requested_https):
-        if _linux_locals3_nginx_owns_port(requested_https):
+        if _linux_locals3_owns_port(requested_https):
             if live_cb:
                 live_cb(f"Requested HTTPS port {requested_https} is currently owned by LocalS3. Reclaiming it...\n")
             stop_code, stop_out = run_linux_s3_stop(live_cb=live_cb)
