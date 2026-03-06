@@ -295,7 +295,7 @@ install_minio_binary() {
 }
 
 configure_minio_linux() {
-  local root="$1" api_port="$2" ui_port="$3"
+  local root="$1" api_port="$2" ui_port="$3" public_url="$4"
   local bin="/usr/local/bin/minio"
   local data="${root}/data"
   local envf="/etc/default/locals3-minio"
@@ -311,6 +311,8 @@ configure_minio_linux() {
 cat > "$envf" <<EOF
 MINIO_ROOT_USER=${minio_user}
 MINIO_ROOT_PASSWORD=${minio_pass}
+MINIO_SERVER_URL=${public_url}
+MINIO_BROWSER_REDIRECT_URL=${public_url}
 EOF
 
   cat > /etc/systemd/system/locals3-minio.service <<EOF
@@ -332,7 +334,7 @@ EOF
 }
 
 configure_minio_macos() {
-  local root="$1" api_port="$2" ui_port="$3"
+  local root="$1" api_port="$2" ui_port="$3" public_url="$4"
   local bin="/usr/local/bin/minio"
   [ -d /opt/homebrew/bin ] && bin="/opt/homebrew/bin/minio"
   local data="${root}/data"
@@ -358,6 +360,8 @@ configure_minio_macos() {
   <key>EnvironmentVariables</key><dict>
     <key>MINIO_ROOT_USER</key><string>$minio_user</string>
     <key>MINIO_ROOT_PASSWORD</key><string>$minio_pass</string>
+    <key>MINIO_SERVER_URL</key><string>$public_url</string>
+    <key>MINIO_BROWSER_REDIRECT_URL</key><string>$public_url</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -537,13 +541,18 @@ main() {
   [ "$os" = "macos" ] && root="/usr/local/locals3"
   cert_dir="${root}/certs"
   mkdir -p "$root" "$cert_dir"
+  proxy_host="$domain"
+  if [ "$proxy_host" = "localhost" ] && [ -n "$lan_ip" ]; then
+    proxy_host="$lan_ip"
+  fi
+  local public_url="https://${proxy_host}:${https_port}"
 
   if [ "$os" = "linux" ]; then
     ensure_prereqs_linux
-    configure_minio_linux "$root" "$api_port" "$ui_port"
+    configure_minio_linux "$root" "$api_port" "$ui_port" "$public_url"
   else
     ensure_prereqs_macos
-    configure_minio_macos "$root" "$api_port" "$ui_port"
+    configure_minio_macos "$root" "$api_port" "$ui_port" "$public_url"
   fi
 
   ensure_hosts_entry "$domain" "127.0.0.1"
@@ -561,10 +570,6 @@ main() {
   echo "===== INSTALLATION COMPLETE ====="
   echo "MinIO Console (direct): http://localhost:${ui_port}"
   echo "MinIO API (direct):     http://localhost:${api_port}"
-  proxy_host="$domain"
-  if [ "$proxy_host" = "localhost" ] && [ -n "$lan_ip" ]; then
-    proxy_host="$lan_ip"
-  fi
   echo "Proxy URL:              https://${proxy_host}:${https_port}"
   if [ "$enable_lan" = true ] && [ -n "$lan_ip" ]; then
     echo "LAN URL:                https://${lan_ip}:${https_port}"
