@@ -6,8 +6,7 @@ const {
 
 const cfg = window.__APP_CONFIG__ || { os: "windows", os_label: "Windows", message: "" };
 const DRAWER_W = 270;
-const DRAWER_MIN = 78;
-const APP_TITLE = "Server Installer Panel";
+const DRAWER_MIN = 84;
 
 function Field({ field }) {
   if (field.type === "select") {
@@ -36,23 +35,32 @@ function Field({ field }) {
   );
 }
 
-function ActionFormCard({ title, description, action, fields, buttonText, onRun, color }) {
+function ActionFormCard({ title, description, action, fields, onRun, color }) {
   return (
     <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", boxShadow: "0 10px 28px rgba(15,23,42,.08)" }}>
       <CardContent>
         <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5 }}>{title}</Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{description}</Typography>
         <Box component="form" onSubmit={(e) => onRun(e, action, title)}>
-          {fields.map((f) => <Field key={f.name} field={f} />)}
-          <Button
-            type="submit"
-            variant="contained"
-            fullWidth
-            sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, bgcolor: color || "#1d4ed8" }}
-          >
-            {buttonText || "Start"}
+          {(fields || []).map((f) => <Field key={f.name} field={f} />)}
+          <Button type="submit" variant="contained" fullWidth sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, bgcolor: color || "#1d4ed8" }}>
+            Start
           </Button>
         </Box>
+      </CardContent>
+    </Card>
+  );
+}
+
+function PlaceholderCard({ title, description, onClick }) {
+  return (
+    <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+      <CardContent>
+        <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5 }}>{title}</Typography>
+        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>{description}</Typography>
+        <Button variant="outlined" fullWidth sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }} onClick={onClick}>
+          Start
+        </Button>
       </CardContent>
     </Card>
   );
@@ -62,14 +70,21 @@ function App() {
   const isMobile = MaterialUI.useMediaQuery("(max-width:1100px)");
   const [mobileOpen, setMobileOpen] = React.useState(false);
   const [collapsed, setCollapsed] = React.useState(false);
-  const [view, setView] = React.useState("home");
-  const [termText, setTermText] = React.useState("Ready. Click Start on any action page to run and stream output.");
+  const [moduleTab, setModuleTab] = React.useState("dotnet");
+  const [stackTab, setStackTab] = React.useState("iis");
+  const [termText, setTermText] = React.useState("Ready. Click Start to run and stream output.");
   const [termState, setTermState] = React.useState("Idle");
-  const [termMin, setTermMin] = React.useState(false);
   const [termOpen, setTermOpen] = React.useState(false);
+  const [termMin, setTermMin] = React.useState(false);
   const [termPos, setTermPos] = React.useState({ x: null, y: null });
   const [infoMessage, setInfoMessage] = React.useState("");
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
+
+  React.useEffect(() => {
+    if (cfg.os === "windows") setStackTab("iis");
+    else if (cfg.os === "linux") setStackTab("linux");
+    else setStackTab("macos");
+  }, []);
 
   React.useEffect(() => {
     const onMove = (e) => {
@@ -136,58 +151,193 @@ function App() {
     }
   };
 
-  const openAction = (action) => {
-    if (action === "install-iis" && cfg.os !== "windows") {
-      setInfoMessage("Install IIS is available on Windows only.");
-      return;
+  const moduleCards = (
+    <Grid container spacing={2}>
+      <Grid item xs={12} md={6}>
+        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+          <CardContent>
+            <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>DotNet</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Open .NET installation/deployment operations.</Typography>
+            <Button fullWidth variant="contained" sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setModuleTab("dotnet")}>Open DotNet</Button>
+          </CardContent>
+        </Card>
+      </Grid>
+      <Grid item xs={12} md={6}>
+        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+          <CardContent>
+            <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>S3</Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Open S3 section (empty page).</Typography>
+            <Button fullWidth variant="outlined" sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setModuleTab("s3")}>Open S3</Button>
+          </CardContent>
+        </Card>
+      </Grid>
+    </Grid>
+  );
+
+  const dotnetStacks = (() => {
+    if (cfg.os === "windows") {
+      return (
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+          <Button variant={stackTab === "iis" ? "contained" : "outlined"} sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setStackTab("iis")}>IIS</Button>
+          <Button variant={stackTab === "docker" ? "contained" : "outlined"} sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setStackTab("docker")}>Docker</Button>
+        </Stack>
+      );
     }
-    if (action === "install-docker-only" && cfg.os !== "windows") {
-      setInfoMessage("Install Docker Only is available on Windows only.");
-      return;
+    if (cfg.os === "linux") {
+      return (
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1.5}>
+          <Button variant={stackTab === "linux" ? "contained" : "outlined"} sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setStackTab("linux")}>Linux</Button>
+          <Button variant={stackTab === "docker" ? "contained" : "outlined"} sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => setStackTab("docker")}>Docker</Button>
+        </Stack>
+      );
     }
-    setView(action);
-    if (isMobile) setMobileOpen(false);
-  };
+    return (
+      <Alert severity="info">macOS installer actions are not configured yet.</Alert>
+    );
+  })();
+
+  const dotnetActions = (() => {
+    if (cfg.os === "windows" && stackTab === "iis") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <ActionFormCard
+              title="Install IIS"
+              description="Install IIS features and .NET prerequisites."
+              action="/run/windows_setup_iis"
+              fields={[{ name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]}
+              onRun={run}
+              color="#0f766e"
+            />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <ActionFormCard
+              title="Deploy IIS"
+              description="Deploy app directly to IIS."
+              action="/run/windows_iis"
+              fields={[
+                { name: "SourceValue", label: "Source Path or URL", required: true },
+                { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" },
+              ]}
+              onRun={run}
+              color="#1e40af"
+            />
+          </Grid>
+        </Grid>
+      );
+    }
+    if (cfg.os === "windows" && stackTab === "docker") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <ActionFormCard
+              title="Install Docker"
+              description="Install Docker prerequisites and .NET runtime."
+              action="/run/windows_setup_docker"
+              fields={[{ name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]}
+              onRun={run}
+              color="#1f2937"
+            />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <ActionFormCard
+              title="Deploy Docker"
+              description="Deploy app directly to Docker."
+              action="/run/windows_docker"
+              fields={[
+                { name: "SourceValue", label: "Source Path or URL", required: true },
+                { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" },
+                { name: "DockerHostPort", label: "Docker Host Port", defaultValue: "8080" },
+              ]}
+              onRun={run}
+              color="#334155"
+            />
+          </Grid>
+        </Grid>
+      );
+    }
+    if (cfg.os === "linux" && stackTab === "linux") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <ActionFormCard
+              title="Install Linux"
+              description="Install runtime and Linux prerequisites."
+              action="/run/linux_prereq"
+              fields={[{ name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" }]}
+              onRun={run}
+              color="#0f766e"
+            />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <ActionFormCard
+              title="Deploy Linux"
+              description="Deploy .NET application on Linux."
+              action="/run/linux"
+              fields={[
+                { name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" },
+                { name: "SOURCE_VALUE", label: "Source Path or URL", required: true, placeholder: "/srv/app or https://..." },
+                { name: "DOMAIN_NAME", label: "Domain Name" },
+                { name: "SERVICE_NAME", label: "Service Name", defaultValue: "dotnet-app" },
+                { name: "SERVICE_PORT", label: "Service Port", defaultValue: "5000" },
+                { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "80" },
+                { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: "443" },
+              ]}
+              onRun={run}
+            />
+          </Grid>
+        </Grid>
+      );
+    }
+    if (cfg.os === "linux" && stackTab === "docker") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            <PlaceholderCard
+              title="Install Docker (Linux)"
+              description="Reserved action. Backend endpoint is not implemented yet."
+              onClick={() => setInfoMessage("Install Docker (Linux) is not implemented yet.")}
+            />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <PlaceholderCard
+              title="Deploy Docker (Linux)"
+              description="Reserved action. Backend endpoint is not implemented yet."
+              onClick={() => setInfoMessage("Deploy Docker (Linux) is not implemented yet.")}
+            />
+          </Grid>
+        </Grid>
+      );
+    }
+    return <Alert severity="info">No actions available for this platform.</Alert>;
+  })();
 
   const sidebar = (
     <Box sx={{ height: "100%", background: "linear-gradient(180deg,#081726,#132d4b)", color: "#deebff", p: 1.5 }}>
       <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 1, pb: 1.5, pt: 1 }}>
         {!collapsed && (
           <Box>
-            <Typography variant="h6" fontWeight={800}>{APP_TITLE}</Typography>
-            <Typography variant="caption" sx={{ opacity: 0.8 }}>Operations Center</Typography>
+            <Typography variant="h6" fontWeight={800}>Server Installer</Typography>
+            <Typography variant="caption" sx={{ opacity: 0.8 }}>Control Panel</Typography>
           </Box>
         )}
         {!isMobile && (
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => setCollapsed((v) => !v)}
-            sx={{ color: "#deebff", borderColor: "rgba(219,234,254,.35)", textTransform: "none", minWidth: 74 }}
-          >
+          <Button size="small" variant="outlined" onClick={() => setCollapsed((v) => !v)} sx={{ color: "#deebff", borderColor: "rgba(219,234,254,.35)", textTransform: "none", minWidth: 74 }}>
             {collapsed ? "Expand" : "Collapse"}
           </Button>
         )}
       </Stack>
       {!collapsed && (
-        <Chip
-          label={cfg.os_label}
-          size="small"
-          sx={{ mb: 1.5, ml: 1, bgcolor: "rgba(96,165,250,.2)", color: "#dbeafe", border: "1px solid rgba(147,197,253,.45)" }}
-        />
+        <Chip label={cfg.os_label} size="small" sx={{ mb: 1.5, ml: 1, bgcolor: "rgba(96,165,250,.2)", color: "#dbeafe", border: "1px solid rgba(147,197,253,.45)" }} />
       )}
       <List sx={{ pt: 0 }}>
-        <ListItemButton
-          selected={view === "home"}
-          onClick={() => { setView("home"); if (isMobile) setMobileOpen(false); }}
-          sx={{
-            mb: 0.5, borderRadius: 2, color: "#e5edff",
-            "&.Mui-selected": { backgroundColor: "#1d4ed8", color: "#fff" },
-            "&:hover": { backgroundColor: "rgba(255,255,255,.12)" }
-          }}
-        >
-          {!collapsed && <ListItemText primary="Dashboard" primaryTypographyProps={{ fontSize: 14, fontWeight: 700 }} />}
-          {collapsed && <Typography sx={{ fontSize: 12, fontWeight: 700 }}>Home</Typography>}
+        <ListItemButton selected={moduleTab === "dotnet"} onClick={() => { setModuleTab("dotnet"); if (isMobile) setMobileOpen(false); }} sx={{ mb: 0.5, borderRadius: 2, color: "#e5edff", "&.Mui-selected": { backgroundColor: "#1d4ed8", color: "#fff" }, "&:hover": { backgroundColor: "rgba(255,255,255,.12)" } }}>
+          {!collapsed && <ListItemText primary="DotNet" primaryTypographyProps={{ fontSize: 14, fontWeight: 700 }} />}
+          {collapsed && <Typography sx={{ fontSize: 12, fontWeight: 700 }}>NET</Typography>}
+        </ListItemButton>
+        <ListItemButton selected={moduleTab === "s3"} onClick={() => { setModuleTab("s3"); if (isMobile) setMobileOpen(false); }} sx={{ mb: 0.5, borderRadius: 2, color: "#e5edff", "&.Mui-selected": { backgroundColor: "#1d4ed8", color: "#fff" }, "&:hover": { backgroundColor: "rgba(255,255,255,.12)" } }}>
+          {!collapsed && <ListItemText primary="S3" primaryTypographyProps={{ fontSize: 14, fontWeight: 700 }} />}
+          {collapsed && <Typography sx={{ fontSize: 12, fontWeight: 700 }}>S3</Typography>}
         </ListItemButton>
       </List>
     </Box>
@@ -199,41 +349,19 @@ function App() {
   return (
     <Box sx={{ display: "flex", minHeight: "100%" }}>
       <CssBaseline />
-      <AppBar
-        position="fixed"
-        sx={{
-          zIndex: 1300,
-          ml: `${mainMargin}px`,
-          width: `calc(100% - ${mainMargin}px)`,
-          background: "linear-gradient(90deg,#081726,#1a3f66)",
-          transition: "all .2s ease",
-        }}
-      >
+      <AppBar position="fixed" sx={{ zIndex: 1300, ml: `${mainMargin}px`, width: `calc(100% - ${mainMargin}px)`, background: "linear-gradient(90deg,#081726,#1a3f66)", transition: "all .2s ease" }}>
         <Toolbar>
           <IconButton color="inherit" onClick={() => isMobile ? setMobileOpen(true) : setCollapsed((v) => !v)}>
             <span style={{ fontSize: 18, fontWeight: 700 }}>|||</span>
           </IconButton>
           <Box sx={{ ml: 1 }}>
-            <Typography variant="h6" fontWeight={800}>{APP_TITLE}</Typography>
+            <Typography variant="h6" fontWeight={800}>Server Installer Panel</Typography>
             <Typography variant="caption" sx={{ opacity: 0.9 }}>Detected OS: {cfg.os_label}</Typography>
           </Box>
         </Toolbar>
       </AppBar>
 
-      <Drawer
-        variant={isMobile ? "temporary" : "permanent"}
-        open={isMobile ? mobileOpen : true}
-        onClose={() => setMobileOpen(false)}
-        ModalProps={{ keepMounted: true }}
-        PaperProps={{
-          sx: {
-            width: isMobile ? DRAWER_W : (collapsed ? DRAWER_MIN : DRAWER_W),
-            transition: "width .2s ease",
-            borderRight: "1px solid rgba(15,23,42,.15)",
-            overflowX: "hidden",
-          }
-        }}
-      >
+      <Drawer variant={isMobile ? "temporary" : "permanent"} open={isMobile ? mobileOpen : true} onClose={() => setMobileOpen(false)} ModalProps={{ keepMounted: true }} PaperProps={{ sx: { width: isMobile ? DRAWER_W : (collapsed ? DRAWER_MIN : DRAWER_W), transition: "width .2s ease", borderRight: "1px solid rgba(15,23,42,.15)", overflowX: "hidden" } }}>
         {sidebar}
       </Drawer>
 
@@ -241,229 +369,43 @@ function App() {
         {cfg.message && <Alert severity="success" sx={{ mb: 2 }}>{cfg.message}</Alert>}
         {infoMessage && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setInfoMessage("")}>{infoMessage}</Alert>}
 
-        {view === "home" && (
-          <Stack spacing={2}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", boxShadow: "0 10px 30px rgba(15,23,42,.07)" }}>
+        <Stack spacing={2}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent>
+              <Typography variant="h5" fontWeight={800}>Modules</Typography>
+              <Typography variant="body2" color="text.secondary">DotNet | S3</Typography>
+            </CardContent>
+          </Card>
+
+          {moduleCards}
+
+          {moduleTab === "dotnet" && (
+            <Stack spacing={2}>
+              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+                <CardContent>
+                  <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>DotNet</Typography>
+                  {dotnetStacks}
+                </CardContent>
+              </Card>
+              {dotnetActions}
+            </Stack>
+          )}
+
+          {moduleTab === "s3" && (
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
               <CardContent>
-                <Typography variant="h5" fontWeight={800} sx={{ mb: 1 }}>Operations</Typography>
-                <Typography color="text.secondary">Choose one function. This opens a dedicated page with details and a Start button.</Typography>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>S3</Typography>
+                <Typography variant="body2" color="text.secondary">Empty page.</Typography>
               </CardContent>
             </Card>
-            <Grid container spacing={2}>
-              <Grid item xs={12} md={3}>
-                <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
-                  <CardContent>
-                    <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>Install IIS</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Open IIS setup page.</Typography>
-                    <Button fullWidth variant="contained" sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => openAction("install-iis")}>
-                      Open
-                    </Button>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
-                  <CardContent>
-                    <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>Install Docker Only</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Open Docker setup page.</Typography>
-                    <Button fullWidth variant="contained" sx={{ textTransform: "none", fontWeight: 700, bgcolor: "#0f766e" }} onClick={() => openAction("install-docker-only")}>
-                      Open
-                    </Button>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
-                  <CardContent>
-                    <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>Deploy .NET</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Open deployment page.</Typography>
-                    <Button fullWidth variant="contained" sx={{ textTransform: "none", fontWeight: 700, bgcolor: "#1e40af" }} onClick={() => openAction("deploy-dotnet")}>
-                      Open
-                    </Button>
-                  </CardContent>
-                </Card>
-              </Grid>
-              <Grid item xs={12} md={3}>
-                <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
-                  <CardContent>
-                    <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 1 }}>Deploy S3</Typography>
-                    <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>Placeholder.</Typography>
-                    <Button fullWidth variant="outlined" sx={{ textTransform: "none", fontWeight: 700 }} onClick={() => openAction("deploy-s3")}>
-                      Open
-                    </Button>
-                  </CardContent>
-                </Card>
-              </Grid>
-            </Grid>
-          </Stack>
-        )}
-
-        {view === "install-iis" && (
-          <Stack spacing={2}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="h5" fontWeight={800}>Install IIS</Typography>
-              <Button variant="outlined" onClick={() => setView("home")} sx={{ textTransform: "none" }}>Back</Button>
-            </Stack>
-            <ActionFormCard
-              title="Windows IIS Stack Setup"
-              description="Install IIS features and .NET prerequisites."
-              action="/run/windows_setup_iis"
-              fields={[{ name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]}
-              buttonText="Start"
-              onRun={run}
-              color="#0f766e"
-            />
-          </Stack>
-        )}
-
-        {view === "install-docker-only" && (
-          <Stack spacing={2}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="h5" fontWeight={800}>Install Docker Only</Typography>
-              <Button variant="outlined" onClick={() => setView("home")} sx={{ textTransform: "none" }}>Back</Button>
-            </Stack>
-            <ActionFormCard
-              title="Windows Docker Stack Setup"
-              description="Install Docker prerequisites and .NET runtime."
-              action="/run/windows_setup_docker"
-              fields={[{ name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]}
-              buttonText="Start"
-              onRun={run}
-              color="#1f2937"
-            />
-          </Stack>
-        )}
-
-        {view === "deploy-dotnet" && (
-          <Stack spacing={2}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="h5" fontWeight={800}>Deploy .NET</Typography>
-              <Button variant="outlined" onClick={() => setView("home")} sx={{ textTransform: "none" }}>Back</Button>
-            </Stack>
-
-            {cfg.os === "windows" && (
-              <Grid container spacing={2}>
-                <Grid item xs={12} md={4}>
-                  <ActionFormCard
-                    title="Windows Combined Deploy"
-                    description="Deploy to IIS or Docker from one form."
-                    action="/run/windows"
-                    buttonText="Start"
-                    onRun={run}
-                    fields={[
-                      { name: "DeploymentMode", label: "Deployment Mode", type: "select", defaultValue: "IIS", options: ["IIS", "Docker"] },
-                      { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" },
-                      { name: "SourceValue", label: "Source Path or URL", required: true, placeholder: "D:\\app\\published or https://..." },
-                      { name: "DomainName", label: "Domain Name" },
-                      { name: "SiteName", label: "Site Name", defaultValue: "DotNetApp" },
-                      { name: "SitePort", label: "HTTP Port", defaultValue: "80" },
-                      { name: "HttpsPort", label: "HTTPS Port", defaultValue: "443" },
-                      { name: "DockerHostPort", label: "Docker Host Port", defaultValue: "8080" },
-                    ]}
-                  />
-                </Grid>
-                <Grid item xs={12} md={4}>
-                  <ActionFormCard
-                    title="Windows IIS Deploy"
-                    description="Deploy directly to IIS."
-                    action="/run/windows_iis"
-                    buttonText="Start"
-                    onRun={run}
-                    color="#1e40af"
-                    fields={[
-                      { name: "SourceValue", label: "Source Path or URL", required: true },
-                      { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" },
-                    ]}
-                  />
-                </Grid>
-                <Grid item xs={12} md={4}>
-                  <ActionFormCard
-                    title="Windows Docker Deploy"
-                    description="Deploy directly to Docker."
-                    action="/run/windows_docker"
-                    buttonText="Start"
-                    onRun={run}
-                    color="#334155"
-                    fields={[
-                      { name: "SourceValue", label: "Source Path or URL", required: true },
-                      { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" },
-                      { name: "DockerHostPort", label: "Docker Host Port", defaultValue: "8080" },
-                    ]}
-                  />
-                </Grid>
-              </Grid>
-            )}
-
-            {cfg.os === "linux" && (
-              <Grid container spacing={2}>
-                <Grid item xs={12} md={6}>
-                  <ActionFormCard
-                    title="Linux Combined Deploy"
-                    description="Deploy app and configure service."
-                    action="/run/linux"
-                    buttonText="Start"
-                    onRun={run}
-                    fields={[
-                      { name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" },
-                      { name: "SOURCE_VALUE", label: "Source Path or URL", required: true, placeholder: "/srv/app or https://..." },
-                      { name: "DOMAIN_NAME", label: "Domain Name" },
-                      { name: "SERVICE_NAME", label: "Service Name", defaultValue: "dotnet-app" },
-                      { name: "SERVICE_PORT", label: "Service Port", defaultValue: "5000" },
-                      { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "80" },
-                      { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: "443" },
-                    ]}
-                  />
-                </Grid>
-                <Grid item xs={12} md={6}>
-                  <ActionFormCard
-                    title="Linux Prerequisites"
-                    description="Install runtime and required packages."
-                    action="/run/linux_prereq"
-                    buttonText="Start"
-                    onRun={run}
-                    color="#0f766e"
-                    fields={[{ name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" }]}
-                  />
-                </Grid>
-              </Grid>
-            )}
-
-            {cfg.os === "darwin" && (
-              <Alert severity="info">macOS installer actions are not configured yet.</Alert>
-            )}
-          </Stack>
-        )}
-
-        {view === "deploy-s3" && (
-          <Stack spacing={2}>
-            <Stack direction="row" justifyContent="space-between" alignItems="center">
-              <Typography variant="h5" fontWeight={800}>Deploy S3</Typography>
-              <Button variant="outlined" onClick={() => setView("home")} sx={{ textTransform: "none" }}>Back</Button>
-            </Stack>
-            <Alert severity="info">Deploy S3 is reserved and not implemented yet.</Alert>
-          </Stack>
-        )}
+          )}
+        </Stack>
       </Box>
 
       {termOpen && (
-        <Paper
-          elevation={14}
-          sx={{
-            position: "fixed",
-            zIndex: 1500,
-            width: termMin ? 320 : { xs: "calc(100vw - 16px)", sm: 700 },
-            maxWidth: "calc(100vw - 16px)",
-            borderRadius: 2,
-            border: "1px solid #1f2937",
-            overflow: "hidden",
-            ...termStyle,
-          }}
-        >
+        <Paper elevation={14} sx={{ position: "fixed", zIndex: 1500, width: termMin ? 320 : { xs: "calc(100vw - 16px)", sm: 700 }, maxWidth: "calc(100vw - 16px)", borderRadius: 2, border: "1px solid #1f2937", overflow: "hidden", ...termStyle }}>
           <Box
-            sx={{
-              px: 1.5, py: 1, cursor: "move", background: "#111827", color: "#dbeafe",
-              borderBottom: "1px solid #1f2937", display: "flex", alignItems: "center", justifyContent: "space-between"
-            }}
+            sx={{ px: 1.5, py: 1, cursor: "move", background: "#111827", color: "#dbeafe", borderBottom: "1px solid #1f2937", display: "flex", alignItems: "center", justifyContent: "space-between" }}
             onMouseDown={(e) => {
               const rect = e.currentTarget.parentElement.getBoundingClientRect();
               drag.current.active = true;
