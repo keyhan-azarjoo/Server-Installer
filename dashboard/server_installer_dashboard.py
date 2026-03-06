@@ -112,10 +112,17 @@ def run_process(cmd, env=None, live_cb=None):
     chunks = []
     try:
         if proc.stdout is not None:
-            for line in proc.stdout:
-                chunks.append(line)
+            # Stream character-level output so long-running commands are visible live
+            # even when underlying tools do not flush newline-delimited lines.
+            while True:
+                ch = proc.stdout.read(1)
+                if ch == "":
+                    if proc.poll() is not None:
+                        break
+                    continue
+                chunks.append(ch)
                 if live_cb:
-                    live_cb(line)
+                    live_cb(ch)
         proc.wait()
     finally:
         if proc.stdout is not None:
