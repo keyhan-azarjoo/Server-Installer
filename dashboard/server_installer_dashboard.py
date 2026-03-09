@@ -2084,20 +2084,20 @@ echo "[INFO] LocalS3 API/Console services stopped."
 
 def run_dashboard_update(live_cb=None):
     script_url = f"{REPO_RAW_BASE}/dashboard/start-server-dashboard.py"
-    work_dir = ROOT / "dashboard"
     if os.name == "nt":
         ps = (
             "$ProgressPreference='SilentlyContinue'; "
+            f"Set-Location -Path '{(ROOT / 'dashboard')}' ; "
             f"Invoke-WebRequest -Uri '{script_url}' -OutFile './start-server-dashboard.py'; "
             "python .\\start-server-dashboard.py"
         )
         cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]
-        return run_process(cmd, env=os.environ.copy(), live_cb=live_cb, cwd=str(work_dir))
+        return run_process(cmd, env=os.environ.copy(), live_cb=live_cb)
 
     python_bin = "python3" if command_exists("python3") else "python"
-    shell_cmd = f"curl -fsSL '{script_url}' -o ./start-server-dashboard.py && {python_bin} ./start-server-dashboard.py"
+    shell_cmd = f"cd '{(ROOT / 'dashboard')}' && curl -fsSL '{script_url}' -o ./start-server-dashboard.py && {python_bin} ./start-server-dashboard.py"
     cmd = ["bash", "-lc", shell_cmd]
-    return run_process(cmd, env=os.environ.copy(), live_cb=live_cb, cwd=str(work_dir))
+    return run_process(cmd, env=os.environ.copy(), live_cb=live_cb)
 
 def run_windows_s3_stop(live_cb=None):
     if os.name != "nt":
