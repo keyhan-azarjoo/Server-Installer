@@ -107,7 +107,8 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   <system.webServer>
     <security>
       <requestFiltering>
-        <requestLimits maxAllowedContentLength="4294967295" />
+        <requestLimits maxAllowedContentLength="4294967295" maxUrl="32768" maxQueryString="32768" />
+        <allowDoubleEscaping>true</allowDoubleEscaping>
       </requestFiltering>
     </security>
     <rewrite>

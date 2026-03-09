@@ -1774,37 +1774,6 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
     if code != 0:
         return code, output
 
-    # Post-install health check to avoid 502s on the proxy.
-    https_port = forwarded_env.get("LOCALS3_HTTPS_PORT") or requested_https or "8443"
-    ui_port = forwarded_env.get("LOCALS3_UI_PORT") or "9001"
-    host_for_url = forwarded_env.get("LOCALS3_HOST") or choose_s3_host("")
-    prefix = _sudo_prefix()
-
-    def log(line):
-        if live_cb:
-            live_cb(line + "\n")
-
-    status_ui = _curl_status(f"http://127.0.0.1:{ui_port}/")
-    if not status_ui or status_ui == "000":
-        log(f"[WARN] MinIO console did not respond on http://127.0.0.1:{ui_port} (status {status_ui}). Restarting locals3-minio...")
-        if command_exists("systemctl"):
-            run_capture(prefix + ["systemctl", "restart", "locals3-minio"], timeout=30)
-        time.sleep(2)
-        status_ui = _curl_status(f"http://127.0.0.1:{ui_port}/")
-
-    status_proxy = _curl_status(f"https://{host_for_url}:{https_port}/", insecure=True)
-    if status_proxy in (None, "000", "502", "503"):
-        log(f"[WARN] Proxy HTTPS check returned {status_proxy}. Reloading nginx...")
-        if command_exists("systemctl"):
-            run_capture(prefix + ["systemctl", "reload", "nginx"], timeout=20)
-        time.sleep(1)
-        status_proxy = _curl_status(f"https://{host_for_url}:{https_port}/", insecure=True)
-
-    if status_ui in (None, "000"):
-        return 1, (output or "") + f"\n[ERROR] MinIO console not responding on port {ui_port}."
-    if status_proxy in (None, "000", "502", "503"):
-        return 1, (output or "") + f"\n[ERROR] Proxy HTTPS returned {status_proxy} for https://{host_for_url}:{https_port}/"
-
     return code, output
 
 
