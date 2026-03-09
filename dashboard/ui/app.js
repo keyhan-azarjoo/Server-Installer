@@ -274,6 +274,53 @@ function App() {
     }
   };
 
+  const onServicePortAction = async (svc, portItem, action) => {
+    if (!portItem || !portItem.port) return;
+    setServiceBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("action", action);
+      fd.append("port", String(portItem.port));
+      fd.append("protocol", portItem.protocol || "tcp");
+      const r = await fetch("/api/system/port", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.message || "Port action failed.");
+      setInfoMessage(j.message || `Port ${action} completed.`);
+    } catch (err) {
+      setInfoMessage(`Port ${action} failed: ${err}`);
+    } finally {
+      setServiceBusy(false);
+    }
+  };
+
+  const renderServiceUrls = (svc) => {
+    const urls = Array.isArray(svc?.urls) ? svc.urls : [];
+    if (urls.length === 0) return null;
+    return (
+      <Box sx={{ mt: 0.6 }}>
+        {urls.map((u) => (
+          <Typography key={`${svc.name}-${u}`} variant="caption" sx={{ display: "block", color: "text.secondary" }}>{u}</Typography>
+        ))}
+      </Box>
+    );
+  };
+
+  const renderServicePorts = (svc) => {
+    const ports = Array.isArray(svc?.ports) ? svc.ports : [];
+    if (ports.length === 0) return null;
+    return (
+      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }} sx={{ mt: 0.6 }}>
+        {ports.map((p) => (
+          <Stack key={`${svc.name}-${p.port}-${p.protocol}`} direction="row" spacing={0.5} alignItems="center">
+            <Chip size="small" label={`${p.protocol || "tcp"}:${p.port}`} />
+            <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServicePortAction(svc, p, "open")} sx={{ textTransform: "none" }}>Open</Button>
+            <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServicePortAction(svc, p, "close")} sx={{ textTransform: "none" }}>Close</Button>
+          </Stack>
+        ))}
+      </Stack>
+    );
+  };
+
   const loadServices = React.useRef(async () => {});
   loadServices.current = async () => {
     setServicesLoading(true);
@@ -588,7 +635,7 @@ function App() {
                 action="/run/s3_windows"
                 fields={[
                   { name: "S3_MODE", label: "Mode", type: "select", options: ["iis", "docker"], defaultValue: "iis" },
-                  { name: "LOCALS3_HOST", label: "Host / Domain / IP", defaultValue: "localhost", placeholder: "localhost, mystorage.local, or 212.227.39.212" },
+                  { name: "LOCALS3_HOST", label: "Host / Domain / IP", defaultValue: "", placeholder: "auto (public IP > local IP > localhost) or enter custom" },
                   { name: "LOCALS3_ENABLE_LAN", label: "LAN Access", type: "select", options: ["true", "false"], defaultValue: "true" },
                   { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", placeholder: "443, 8443, 9443..." },
                   { name: "LOCALS3_API_PORT", label: "MinIO API Port (optional)", placeholder: "9000" },
@@ -625,10 +672,15 @@ function App() {
                     {s3Services.map((svc) => (
                       <Paper key={`s3-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
                         <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                          <Typography variant="body2" sx={{ minWidth: 250 }}><b>{svc.name}</b> ({svc.kind})</Typography>
+                          <Box sx={{ minWidth: 250 }}>
+                            <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
+                            {renderServiceUrls(svc)}
+                            {renderServicePorts(svc)}
+                          </Box>
                           <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
                           <Box sx={{ flexGrow: 1 }} />
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
                         </Stack>
                       </Paper>
                     ))}
@@ -648,7 +700,7 @@ function App() {
                 description="Run local S3 installer with selectable host and ports."
                 action="/run/s3_linux"
                 fields={[
-                  { name: "LOCALS3_HOST", label: "Host / Domain / IP", defaultValue: "localhost", placeholder: "localhost, mystorage.local, or server IP" },
+                  { name: "LOCALS3_HOST", label: "Host / Domain / IP", defaultValue: "", placeholder: "auto (public IP > local IP > localhost) or enter custom" },
                   { name: "LOCALS3_ENABLE_LAN", label: "LAN Access", type: "select", options: ["true", "false"], defaultValue: "true" },
                   { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", placeholder: "443, 8443, 9443..." },
                   { name: "LOCALS3_API_PORT", label: "MinIO API Port (optional)", placeholder: "9000" },
@@ -684,10 +736,15 @@ function App() {
                     {s3Services.map((svc) => (
                       <Paper key={`s3-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
                         <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                          <Typography variant="body2" sx={{ minWidth: 250 }}><b>{svc.name}</b> ({svc.kind})</Typography>
+                          <Box sx={{ minWidth: 250 }}>
+                            <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
+                            {renderServiceUrls(svc)}
+                            {renderServicePorts(svc)}
+                          </Box>
                           <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
                           <Box sx={{ flexGrow: 1 }} />
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
                         </Stack>
                       </Paper>
                     ))}
@@ -725,10 +782,15 @@ function App() {
                     {dotnetServices.map((svc) => (
                       <Paper key={`dotnet-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
                         <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                          <Typography variant="body2" sx={{ minWidth: 250 }}><b>{svc.name}</b> ({svc.kind})</Typography>
+                          <Box sx={{ minWidth: 250 }}>
+                            <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
+                            {renderServiceUrls(svc)}
+                            {renderServicePorts(svc)}
+                          </Box>
                           <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
                           <Box sx={{ flexGrow: 1 }} />
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
                         </Stack>
                       </Paper>
                     ))}
@@ -762,10 +824,15 @@ function App() {
                     {dotnetServices.map((svc) => (
                       <Paper key={`dotnet-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
                         <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                          <Typography variant="body2" sx={{ minWidth: 250 }}><b>{svc.name}</b> ({svc.kind})</Typography>
+                          <Box sx={{ minWidth: 250 }}>
+                            <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
+                            {renderServiceUrls(svc)}
+                            {renderServicePorts(svc)}
+                          </Box>
                           <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
                           <Box sx={{ flexGrow: 1 }} />
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
                         </Stack>
                       </Paper>
                     ))}

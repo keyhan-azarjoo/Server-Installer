@@ -28,7 +28,7 @@ from urllib.parse import parse_qs
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-BUILD_ID = "s3-fix-2026-03-09-1209"
+BUILD_ID = "s3-fix-2026-03-09-1237"
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
@@ -173,6 +173,115 @@ def get_ip_addresses():
     if not ips:
         ips.add("127.0.0.1")
     return sorted(ips)
+
+
+def get_public_ipv4(timeout_sec=3):
+    urls = [
+        "https://api.ipify.org",
+        "https://ifconfig.me/ip",
+        "https://ipv4.icanhazip.com",
+    ]
+    for url in urls:
+        try:
+            with urllib.request.urlopen(url, timeout=timeout_sec) as resp:
+                raw = resp.read().decode("utf-8", errors="ignore").strip()
+                if raw:
+                    ip = raw.splitlines()[0].strip()
+                    try:
+                        ipaddress.ip_address(ip)
+                        if not ip.startswith("127."):
+                            return ip
+                    except Exception:
+                        continue
+        except Exception:
+            continue
+    return ""
+
+
+def choose_s3_host(preferred=""):
+    preferred = (preferred or "").strip()
+    if preferred and preferred not in ("localhost", "127.0.0.1"):
+        return preferred
+    public_ip = get_public_ipv4()
+    if public_ip:
+        return public_ip
+    for ip in get_ip_addresses():
+        if ip and not ip.startswith("127."):
+            return ip
+    return "localhost"
+
+
+def choose_service_host():
+    return choose_s3_host("")
+
+
+def _parse_nginx_listen_and_server(conf_text):
+    listens = []
+    server_names = []
+    for line in conf_text.splitlines():
+        s = line.strip()
+        if s.startswith("#"):
+            continue
+        if s.startswith("listen "):
+            parts = s.replace(";", "").split()
+            if len(parts) >= 2:
+                listen_val = parts[1]
+                ssl = ("ssl" in parts[2:]) or ("ssl" in s)
+                try:
+                    port = int(listen_val.split(":")[-1])
+                    listens.append({"port": port, "ssl": ssl})
+                except Exception:
+                    continue
+        if s.startswith("server_name "):
+            names = s.replace(";", "").split()[1:]
+            server_names.extend([n for n in names if n])
+    return listens, server_names
+
+
+def _urls_from_nginx_conf(conf_path, preferred_host=""):
+    conf = Path(conf_path)
+    if not conf.exists():
+        return [], []
+    try:
+        text = conf.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return [], []
+    listens, server_names = _parse_nginx_listen_and_server(text)
+    if not server_names:
+        server_names = [preferred_host or choose_service_host()]
+    urls = []
+    ports = []
+    for listen in listens:
+        port = listen.get("port")
+        ssl = listen.get("ssl", False)
+        scheme = "https" if ssl or port == 443 else "http"
+        for name in server_names:
+            host = name if name not in ("_", "localhost", "127.0.0.1") else (preferred_host or choose_service_host())
+            if port in (80, 443):
+                urls.append(f"{scheme}://{host}")
+            else:
+                urls.append(f"{scheme}://{host}:{port}")
+        if port:
+            ports.append({"port": port, "protocol": "tcp"})
+    return sorted(set(urls)), ports
+
+
+def _parse_docker_ports(ports_text):
+    ports = []
+    if not ports_text:
+        return ports
+    for chunk in ports_text.split(","):
+        s = chunk.strip()
+        if "->" not in s:
+            continue
+        left, right = s.split("->", 1)
+        proto = "tcp"
+        if "/" in right:
+            proto = right.split("/")[-1].strip()
+        host_part = left.split(":")[-1].strip()
+        if host_part.isdigit():
+            ports.append({"port": int(host_part), "protocol": proto})
+    return ports
 
 
 def get_network_totals():
@@ -491,6 +600,7 @@ def _safe_service_name(name):
 def get_service_items():
     items = []
     managed_patterns = re.compile(r"(locals3|minio|dotnet-app|dotnet|aspnet|kestrel|dotnetapp)", re.IGNORECASE)
+    preferred_host = choose_service_host()
 
     if os.name == "nt":
         cmd = [
@@ -521,6 +631,8 @@ def get_service_items():
                             "status": str(row.get("Status", "")).strip(),
                             "start_type": str(row.get("StartType", "")).strip(),
                             "platform": "windows",
+                            "urls": [],
+                            "ports": [],
                         }
                     )
             except Exception:
@@ -548,6 +660,8 @@ def get_service_items():
                         "status": str(task_obj.get("State", "") or ""),
                         "autostart": bool(task_obj.get("Enabled", True)),
                         "platform": "windows",
+                        "urls": [],
+                        "ports": [],
                     }
                 )
             except Exception:
@@ -575,6 +689,37 @@ def get_service_items():
                         continue
                     if not managed_patterns.search(name):
                         continue
+                    urls = []
+                    ports = []
+                    rc_bind, out_bind = run_capture(
+                        [
+                            "powershell.exe",
+                            "-NoProfile",
+                            "-ExecutionPolicy",
+                            "Bypass",
+                            "-Command",
+                            f"Import-Module WebAdministration -ErrorAction SilentlyContinue; Get-WebBinding -Name '{name}' | Select-Object protocol,bindingInformation | ConvertTo-Json -Depth 2",
+                        ],
+                        timeout=20,
+                    )
+                    if rc_bind == 0 and out_bind:
+                        try:
+                            raw_bind = json.loads(out_bind)
+                            binds = raw_bind if isinstance(raw_bind, list) else [raw_bind]
+                            for b in binds:
+                                proto = str(b.get("protocol", "http") or "http").lower()
+                                bind = str(b.get("bindingInformation", "") or "")
+                                port = parse_port_from_addr(bind)
+                                if port and str(port).isdigit():
+                                    ports.append({"port": int(port), "protocol": "tcp"})
+                                    scheme = "https" if proto == "https" else "http"
+                                    host = preferred_host
+                                    if int(port) in (80, 443):
+                                        urls.append(f"{scheme}://{host}")
+                                    else:
+                                        urls.append(f"{scheme}://{host}:{port}")
+                        except Exception:
+                            pass
                     items.append(
                         {
                             "kind": "iis_site",
@@ -583,6 +728,8 @@ def get_service_items():
                             "status": str(s.get("State", "")).strip(),
                             "autostart": bool(s.get("ServerAutoStart", True)),
                             "platform": "windows",
+                            "urls": sorted(set(urls)),
+                            "ports": ports,
                         }
                     )
             except Exception:
@@ -609,6 +756,15 @@ def get_service_items():
                     continue
                 rc_enabled, out_enabled = run_capture(["systemctl", "is-enabled", name], timeout=20)
                 autostart = rc_enabled == 0 and str(out_enabled or "").strip().lower() in ("enabled", "static")
+                urls = []
+                ports = []
+                base_name = name.replace(".service", "")
+                if _is_locals3_name(base_name):
+                    urls, ports = _urls_from_nginx_conf("/etc/nginx/conf.d/locals3.conf", preferred_host=preferred_host)
+                    if not urls:
+                        urls, ports = _urls_from_nginx_conf("/opt/locals3/nginx/nginx-standalone.conf", preferred_host=preferred_host)
+                else:
+                    urls, ports = _urls_from_nginx_conf(f"/etc/nginx/conf.d/{base_name}.conf", preferred_host=preferred_host)
                 items.append(
                     {
                         "kind": "service",
@@ -619,6 +775,8 @@ def get_service_items():
                         "load": load,
                         "autostart": autostart,
                         "platform": "linux",
+                        "urls": urls,
+                        "ports": ports,
                     }
                 )
 
@@ -642,6 +800,15 @@ def get_service_items():
                 rc_inspect, out_inspect = run_capture(["docker", "inspect", "-f", "{{.HostConfig.RestartPolicy.Name}}", name], timeout=20)
                 if rc_inspect == 0 and out_inspect:
                     restart_policy = out_inspect.strip()
+                ports = _parse_docker_ports(parts[1] if len(parts) > 1 else "")
+                urls = []
+                for p in ports:
+                    scheme = "https" if p.get("port") == 443 else "http"
+                    host = preferred_host
+                    if p.get("port") in (80, 443):
+                        urls.append(f"{scheme}://{host}")
+                    else:
+                        urls.append(f"{scheme}://{host}:{p.get('port')}")
                 items.append(
                     {
                         "kind": "docker",
@@ -650,11 +817,160 @@ def get_service_items():
                         "status": status,
                         "autostart": restart_policy in ("always", "unless-stopped"),
                         "platform": "docker",
+                        "urls": sorted(set(urls)),
+                        "ports": ports,
                     }
                 )
 
     items.sort(key=lambda x: (x.get("kind", ""), x.get("name", "").lower()))
     return items
+
+
+def _is_locals3_name(name):
+    return bool(re.search(r"locals3|minio", str(name or ""), re.IGNORECASE))
+
+
+def _is_dotnet_name(name):
+    return bool(re.search(r"dotnet|aspnet|kestrel|dotnetapp", str(name or ""), re.IGNORECASE))
+
+
+def _safe_linux_app_path(path_value, svc_name=""):
+    if not path_value:
+        return ""
+    p = str(path_value).strip()
+    if not p.startswith("/"):
+        return ""
+    safe_bases = ("/opt/", "/srv/", "/var/www/", "/usr/local/", "/home/", "/root/")
+    if not any(p.startswith(base) for base in safe_bases):
+        return ""
+    if p in ("/opt", "/srv", "/var/www", "/usr/local", "/home", "/root"):
+        return ""
+    low = p.lower()
+    svc_low = str(svc_name or "").lower().replace(".service", "")
+    if _is_dotnet_name(svc_name) and (("dotnet" in low) or ("aspnet" in low) or (svc_low and svc_low in low)):
+        return p
+    if _is_locals3_name(svc_name) and ("locals3" in low):
+        return p
+    return ""
+
+
+def _linux_cleanup_locals3(prefix):
+    cmds = [
+        ["systemctl", "stop", "locals3-minio"],
+        ["systemctl", "disable", "locals3-minio"],
+        ["rm", "-f", "/etc/systemd/system/locals3-minio.service"],
+        ["rm", "-f", "/etc/default/locals3-minio"],
+        ["rm", "-f", "/etc/nginx/conf.d/locals3.conf"],
+        ["rm", "-f", "/usr/local/share/ca-certificates/locals3.crt"],
+        ["rm", "-rf", "/opt/locals3"],
+        ["pkill", "-f", "nginx -c /opt/locals3/nginx/nginx-standalone.conf"],
+    ]
+    for cmd in cmds:
+        run_capture(prefix + cmd, timeout=60)
+    if command_exists("docker"):
+        run_capture(prefix + ["docker", "rm", "-f", "minio", "nginx", "console"], timeout=60)
+        run_capture(prefix + ["docker", "ps", "-aq", "--filter", "label=com.locals3.installer=true"], timeout=30)
+        rc_ids, out_ids = run_capture(prefix + ["docker", "ps", "-aq", "--filter", "label=com.locals3.installer=true"], timeout=30)
+        if rc_ids == 0 and out_ids.strip():
+            ids = [x.strip() for x in out_ids.splitlines() if x.strip()]
+            if ids:
+                run_capture(prefix + ["docker", "rm", "-f"] + ids, timeout=60)
+        run_capture(prefix + ["docker", "volume", "rm", "-f", "locals3-minio-data"], timeout=30)
+    run_capture(prefix + ["systemctl", "daemon-reload"], timeout=30)
+    run_capture(prefix + ["systemctl", "reload", "nginx"], timeout=30)
+    run_capture(prefix + ["update-ca-certificates"], timeout=60)
+    return True, "LocalS3 service and managed files removed."
+
+
+def _linux_cleanup_dotnet_service(prefix, unit_name):
+    unit = unit_name if unit_name.endswith(".service") else f"{unit_name}.service"
+    run_capture(prefix + ["systemctl", "stop", unit], timeout=30)
+    run_capture(prefix + ["systemctl", "disable", unit], timeout=30)
+
+    fragment = ""
+    working_dir = ""
+    rc_show, out_show = run_capture(prefix + ["systemctl", "show", unit, "-p", "FragmentPath", "-p", "WorkingDirectory"], timeout=30)
+    if rc_show == 0 and out_show:
+        for line in out_show.splitlines():
+            if line.startswith("FragmentPath="):
+                fragment = line.split("=", 1)[1].strip()
+            elif line.startswith("WorkingDirectory="):
+                working_dir = line.split("=", 1)[1].strip()
+
+    if fragment and fragment.startswith("/etc/systemd/system/"):
+        run_capture(prefix + ["rm", "-f", fragment], timeout=30)
+    else:
+        run_capture(prefix + ["rm", "-f", f"/etc/systemd/system/{unit}"], timeout=30)
+
+    base = unit.replace(".service", "")
+    run_capture(prefix + ["rm", "-f", f"/etc/nginx/conf.d/{base}.conf"], timeout=30)
+    run_capture(prefix + ["rm", "-rf", f"/etc/nginx/ssl/{base}"], timeout=30)
+
+    safe_work = _safe_linux_app_path(working_dir, svc_name=unit)
+    if safe_work:
+        run_capture(prefix + ["rm", "-rf", safe_work], timeout=60)
+
+    run_capture(prefix + ["systemctl", "daemon-reload"], timeout=30)
+    run_capture(prefix + ["systemctl", "reload", "nginx"], timeout=30)
+    return True, f"Service '{unit}' and managed files removed."
+
+
+def _windows_cleanup_locals3():
+    if not is_windows_admin():
+        return False, "Administrator is required."
+    ps = r"""
+$ErrorActionPreference='SilentlyContinue'
+Import-Module WebAdministration -ErrorAction SilentlyContinue
+foreach($site in @('LocalS3','LocalS3-IIS','LocalS3-Console')){
+  if(Test-Path "IIS:\Sites\$site"){ Stop-Website -Name $site | Out-Null; Remove-Website -Name $site | Out-Null }
+}
+schtasks /End /TN "LocalS3-MinIO" 1>$null 2>$null | Out-Null
+schtasks /Delete /TN "LocalS3-MinIO" /F 1>$null 2>$null | Out-Null
+if(Get-Command docker -ErrorAction SilentlyContinue){
+  $ids = docker ps -aq --filter "label=com.locals3.installer=true" 2>$null
+  if($ids){ docker rm -f $ids 1>$null 2>$null | Out-Null }
+  docker rm -f minio nginx console 1>$null 2>$null | Out-Null
+  docker volume rm -f locals3-minio-data 1>$null 2>$null | Out-Null
+}
+foreach($p in @("$env:ProgramData\LocalS3","$env:ProgramData\LocalS3\storage-server","$env:TEMP\locals3-root-ca.cer")){
+  if(Test-Path $p){ Remove-Item -Recurse -Force -Path $p -ErrorAction SilentlyContinue }
+}
+"""
+    rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=120)
+    return rc == 0, (out or "LocalS3 managed files cleaned.")
+
+
+def _windows_remove_iis_site_and_path(site_name):
+    if not is_windows_admin():
+        return False, "Administrator is required."
+    ps = (
+        "Import-Module WebAdministration -ErrorAction SilentlyContinue; "
+        f"$s=Get-Website -Name '{site_name}' -ErrorAction SilentlyContinue; "
+        "if($s){ $p=$s.physicalPath; Stop-Website -Name $s.Name -ErrorAction SilentlyContinue | Out-Null; "
+        "Remove-Website -Name $s.Name -ErrorAction SilentlyContinue | Out-Null; "
+        "if($p -and (Test-Path $p)){ Remove-Item -Recurse -Force -Path $p -ErrorAction SilentlyContinue } }"
+    )
+    rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=60)
+    return rc == 0, (out or f"IIS site '{site_name}' and files removed.")
+
+
+def _windows_remove_service_and_files(svc_name):
+    if not is_windows_admin():
+        return False, "Administrator is required."
+    ps = (
+        f"$s=Get-CimInstance Win32_Service -Filter \"Name='{svc_name}'\" -ErrorAction SilentlyContinue; "
+        "$bin=''; if($s){$bin=$s.PathName}; "
+        f"Stop-Service -Name '{svc_name}' -Force -ErrorAction SilentlyContinue; "
+        f"sc.exe delete \"{svc_name}\" | Out-Null; "
+        "$exe=''; if($bin){ if($bin.StartsWith('\"')){$exe=($bin -split '\"')[1]} else {$exe=($bin -split ' ')[0]} }; "
+        "$dir=''; if($exe){$dir=Split-Path -Parent $exe}; "
+        "if($dir -and (Test-Path $dir)){ "
+        "$d=$dir.ToLowerInvariant(); "
+        "if($d.Contains('locals3') -or $d.Contains('dotnet') -or $d.Contains('aspnet') -or $d.Contains('kestrel')){ "
+        "Remove-Item -Recurse -Force -Path $dir -ErrorAction SilentlyContinue } }"
+    )
+    rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=90)
+    return rc == 0, (out or f"Service '{svc_name}' and managed files removed.")
 
 
 def manage_service(action, name, kind):
@@ -677,6 +993,11 @@ def manage_service(action, name, kind):
             return rc == 0, (out or f"Auto-start disabled for docker container '{svc_name}'.")
         if action == "delete":
             rc, out = run_capture(["docker", "rm", "-f", svc_name], timeout=60)
+            if _is_locals3_name(svc_name):
+                if os.name == "nt":
+                    _windows_cleanup_locals3()
+                else:
+                    _linux_cleanup_locals3(_sudo_prefix())
             return rc == 0, (out or f"Docker container '{svc_name}' deleted.")
         if action in ("start", "stop", "restart"):
             rc, out = run_capture(["docker", action, svc_name], timeout=60)
@@ -698,6 +1019,8 @@ def manage_service(action, name, kind):
             return rc == 0, (out or f"Task '{svc_name}' restarted.")
         if action == "delete":
             rc, out = run_capture(["schtasks", "/Delete", "/TN", svc_name, "/F"], timeout=30)
+            if rc == 0 and _is_locals3_name(svc_name):
+                _windows_cleanup_locals3()
             return rc == 0, (out or f"Task '{svc_name}' deleted.")
         if action == "autostart_on":
             rc, out = run_capture(["schtasks", "/Change", "/TN", svc_name, "/ENABLE"], timeout=30)
@@ -720,8 +1043,9 @@ def manage_service(action, name, kind):
             rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"Import-Module WebAdministration; Stop-Website -Name '{svc_name}' -ErrorAction SilentlyContinue; Start-Website -Name '{svc_name}'"], timeout=30)
             return rc == 0, (out or f"IIS site '{svc_name}' restarted.")
         if action == "delete":
-            rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"Import-Module WebAdministration; Remove-Website -Name '{svc_name}'"], timeout=30)
-            return rc == 0, (out or f"IIS site '{svc_name}' deleted.")
+            if _is_locals3_name(svc_name):
+                return _windows_cleanup_locals3()
+            return _windows_remove_iis_site_and_path(svc_name)
         if action in ("autostart_on", "autostart_off"):
             val = "$true" if action == "autostart_on" else "$false"
             rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"Import-Module WebAdministration; Set-ItemProperty \"IIS:\\Sites\\{svc_name}\" -Name serverAutoStart -Value {val}"], timeout=30)
@@ -731,11 +1055,14 @@ def manage_service(action, name, kind):
     if os.name == "nt":
         if not is_windows_admin():
             return False, "Stopping services on Windows requires Administrator."
+        if action == "delete":
+            if _is_locals3_name(svc_name):
+                return _windows_cleanup_locals3()
+            return _windows_remove_service_and_files(svc_name)
         ps_map = {
             "start": f"Start-Service -Name '{svc_name}' -ErrorAction Stop",
             "stop": f"Stop-Service -Name '{svc_name}' -Force -ErrorAction Stop",
             "restart": f"Restart-Service -Name '{svc_name}' -Force -ErrorAction Stop",
-            "delete": f"sc.exe delete \"{svc_name}\" | Out-Null",
             "autostart_on": f"Set-Service -Name '{svc_name}' -StartupType Automatic -ErrorAction Stop",
             "autostart_off": f"Set-Service -Name '{svc_name}' -StartupType Disabled -ErrorAction Stop",
         }
@@ -761,10 +1088,14 @@ def manage_service(action, name, kind):
                     return True, (out or f"Auto-start disabled for {unit}.")
                 continue
             if action == "delete":
-                run_capture(prefix + ["systemctl", "stop", unit], timeout=30)
-                run_capture(prefix + ["systemctl", "disable", unit], timeout=30)
                 if unit.startswith("/") or ".." in unit:
                     return False, "Invalid unit name for delete."
+                if _is_locals3_name(unit):
+                    return _linux_cleanup_locals3(prefix)
+                if _is_dotnet_name(unit):
+                    return _linux_cleanup_dotnet_service(prefix, unit)
+                run_capture(prefix + ["systemctl", "stop", unit], timeout=30)
+                run_capture(prefix + ["systemctl", "disable", unit], timeout=30)
                 unit_file = f"/etc/systemd/system/{unit}"
                 rc, out = run_capture(prefix + ["rm", "-f", unit_file], timeout=30)
                 run_capture(prefix + ["systemctl", "daemon-reload"], timeout=30)
@@ -1388,6 +1719,10 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
     if selected_mode not in ("iis", "docker"):
         selected_mode = "iis"
     mode_choice = "2\n" if selected_mode == "docker" else "1\n"
+    requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
+    if not requested_host or requested_host in ("localhost", "127.0.0.1"):
+        resolved_host = choose_s3_host(requested_host)
+        form["LOCALS3_HOST"] = [resolved_host]
     requested_https = (form.get("LOCALS3_HTTPS_PORT", [""])[0] or "").strip()
     if requested_https:
         if not requested_https.isdigit():
@@ -1447,14 +1782,19 @@ def run_linux_s3_installer(form=None, live_cb=None):
             # Selected HTTPS port is strict: never auto-switch to another port.
             # Give the OS a short moment to release sockets after stop/reload.
             still_busy = False
-            for _ in range(6):
+            for attempt in range(10):
                 if is_local_tcp_port_listening(requested_https):
                     still_busy = True
+                    if live_cb and attempt in (0, 4, 8):
+                        live_cb(f"[WARN] Port {requested_https} still busy after reclaim attempt {attempt + 1}/10.\n")
                     time.sleep(1)
                     continue
                 still_busy = False
                 break
             if still_busy:
+                if live_cb:
+                    listeners = get_port_usage(requested_https, "tcp")
+                    live_cb(f"[ERROR] Port {requested_https} remains in use after reclaim. Listeners: {listeners.get('listeners')}\n")
                 return 1, (
                     f"Requested HTTPS port {requested_https} is still busy after LocalS3 reclaim attempt. "
                     "Please stop the process using this port or choose another port."
@@ -1463,6 +1803,10 @@ def run_linux_s3_installer(form=None, live_cb=None):
             return 1, f"Requested HTTPS port {requested_https} is already in use by another app. Choose another port."
 
     requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
+    if not requested_host or requested_host in ("localhost", "127.0.0.1"):
+        resolved_host = choose_s3_host(requested_host)
+        form["LOCALS3_HOST"] = [resolved_host]
+        requested_host = resolved_host
     requested_lan = (form.get("LOCALS3_ENABLE_LAN", [""])[0] or "").strip().lower()
     host_line = requested_host if requested_host else ""
     lan_line = "y" if requested_lan in ("1", "true", "yes", "y", "on") else "n"
@@ -1929,8 +2273,8 @@ def start_live_job(title, runner):
             code, output = runner(append_out)
             with JOBS_LOCK:
                 if job_id in JOBS:
-                    if output and not JOBS[job_id]["output"]:
-                        JOBS[job_id]["output"] = output
+                    if output:
+                        JOBS[job_id]["output"] += output
                     JOBS[job_id]["exit_code"] = code
                     JOBS[job_id]["done"] = True
         except Exception as ex:
