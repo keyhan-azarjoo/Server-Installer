@@ -15,6 +15,7 @@ from pathlib import Path
 
 
 REPO = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
+DASHBOARD_LOCAL_ROOT = os.environ.get("SERVER_INSTALLER_LOCAL_ROOT", "").strip()
 DASHBOARD_FILES = [
     "dashboard/start-server-dashboard.py",
     "dashboard/server_installer_dashboard.py",
@@ -292,6 +293,10 @@ def run_capture(cmd, timeout=30):
 
 
 def resolve_root() -> Path:
+    if DASHBOARD_LOCAL_ROOT:
+        local_root = Path(DASHBOARD_LOCAL_ROOT)
+        if is_repo_layout(local_root):
+            return local_root
     cwd_root = Path.cwd()
     script_root = Path(__file__).resolve().parents[1]
     if is_repo_layout(script_root):

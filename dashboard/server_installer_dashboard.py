@@ -39,6 +39,8 @@ REPO_RAW_BASE = os.environ.get(
     "SERVER_INSTALLER_REPO_BASE",
     "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main",
 )
+LOCAL_REPO_ROOT = os.environ.get("SERVER_INSTALLER_LOCAL_ROOT", "").strip()
+LOCAL_REPO_REQUIRED = os.environ.get("SERVER_INSTALLER_USE_LOCAL", "").strip() in ("1", "true", "yes", "on")
 
 WINDOWS_SETUP_MODULES = [
     "DotNet/windows/modules/common.ps1",
@@ -1489,12 +1491,31 @@ def _download_file_with_timeout(url, target_path, timeout_sec=30):
 
 
 def ensure_repo_files(relative_paths, live_cb=None, refresh=True, retries=2):
+    local_root = Path(LOCAL_REPO_ROOT) if LOCAL_REPO_ROOT else None
+    local_root_ok = bool(local_root and local_root.exists())
     for rel in relative_paths:
         rel_path = Path(rel)
         target = ROOT / rel_path
+        local_source = None
+        if local_root_ok:
+            candidate = (local_root / rel_path).resolve()
+            if candidate.exists():
+                local_source = candidate
         exists_before = target.exists()
+        if local_source is not None:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if live_cb:
+                live_cb(f"Using local file: {rel_path.as_posix()}\n")
+            else:
+                print(f"Using local file: {rel_path.as_posix()}")
+            shutil.copy2(local_source, target)
+            continue
         if exists_before and (not refresh):
             continue
+        if LOCAL_REPO_REQUIRED and (local_source is None):
+            raise RuntimeError(
+                f"Local repo required but missing file: {rel_path.as_posix()} (SERVER_INSTALLER_LOCAL_ROOT={LOCAL_REPO_ROOT})"
+            )
         target.parent.mkdir(parents=True, exist_ok=True)
         tmp_target = target.with_suffix(target.suffix + ".download")
         url = f"{REPO_RAW_BASE}/{rel_path.as_posix()}"
