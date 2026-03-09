@@ -148,6 +148,15 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
     exit 1
   }
 
+  # Ensure rewrite/proxy/requestFiltering sections are unlocked (avoid 500.19 config errors).
+  try {
+    & $env:windir\system32\inetsrv\appcmd.exe unlock config /section:system.webServer/rewrite | Out-Null
+    & $env:windir\system32\inetsrv\appcmd.exe unlock config /section:system.webServer/proxy | Out-Null
+    & $env:windir\system32\inetsrv\appcmd.exe unlock config /section:system.webServer/security/requestFiltering | Out-Null
+  } catch {
+    Warn "Could not unlock IIS config sections automatically."
+  }
+
   # ServerVariables are not required for core proxy functionality and can trigger 500 errors
   # when the rewrite module blocks them. Keep this minimal to avoid IIS errors.
 
