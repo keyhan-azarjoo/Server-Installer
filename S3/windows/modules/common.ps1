@@ -429,6 +429,16 @@ function Resolve-RequiredPort([string]$label, [int[]]$candidates, [int]$defaultP
 
 function Get-LanIPv4 {
   try {
+    if ($env:LOCALS3_HOST_IP -and (Test-IPv4Literal $env:LOCALS3_HOST_IP) -and ($env:LOCALS3_HOST_IP -notlike "127.*")) {
+      return $env:LOCALS3_HOST_IP
+    }
+  } catch {}
+  try {
+    if ($env:LOCALS3_HOST -and (Test-IPv4Literal $env:LOCALS3_HOST) -and ($env:LOCALS3_HOST -notlike "127.*")) {
+      return $env:LOCALS3_HOST
+    }
+  } catch {}
+  try {
     $ip = Get-NetIPAddress -AddressFamily IPv4 -PrefixOrigin Dhcp -ErrorAction SilentlyContinue |
       Where-Object { $_.IPAddress -notlike "169.254.*" -and $_.IPAddress -ne "127.0.0.1" } |
       Select-Object -First 1 -ExpandProperty IPAddress
@@ -480,6 +490,11 @@ function Get-PublicIPv4 {
 }
 
 function Resolve-InstallHost([string]$prompt) {
+  if ($env:LOCALS3_HOST -and (-not [string]::IsNullOrWhiteSpace($env:LOCALS3_HOST))) {
+    $domain = Normalize-HostInput $env:LOCALS3_HOST
+    return $domain
+  }
+
   $domainInput = Read-Host $prompt
   $domain = Normalize-HostInput $domainInput
 
