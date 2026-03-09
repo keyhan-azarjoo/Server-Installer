@@ -264,7 +264,12 @@ set MINIO_API_ROOT_ACCESS=on
   }
   Get-Process -Name "minio" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
   Remove-Item -Path $logFile -Force -ErrorAction SilentlyContinue
-  Start-Process -FilePath "cmd.exe" -ArgumentList @("/c","`"$runner`"") -WindowStyle Hidden | Out-Null
+  # Start MinIO via the scheduled task so it runs under SYSTEM and survives the installer process exit.
+  schtasks /Run /TN $taskName 1>$null 2>$null
+  if ($LASTEXITCODE -ne 0) {
+    Warn "Failed to start MinIO scheduled task. Falling back to direct launch."
+    Start-Process -FilePath "cmd.exe" -ArgumentList @("/c","`"$runner`"") -WindowStyle Hidden | Out-Null
+  }
   $ErrorActionPreference = $prev
 
   if (-not (Wait-TcpPort -targetHost "127.0.0.1" -port $apiPort -maxSeconds 45)) {
