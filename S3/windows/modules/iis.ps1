@@ -401,7 +401,7 @@ function Install-IISMode {
 
   $displayHost = $domain
   $publicUrl = if ($httpsPort -eq 443) { "https://$displayHost" } else { "https://${displayHost}:$httpsPort" }
-  $consoleBrowserUrl = if ($consoleHttpsPort -eq 80) { "http://$domain" } else { "http://${domain}:$consoleHttpsPort" }
+  $consoleBrowserUrl = if ($consoleHttpsPort -eq 443) { "https://$domain" } else { "https://${domain}:$consoleHttpsPort" }
   $consoleRedirectUrl = $consoleBrowserUrl
 
   Ensure-IISInstalled
@@ -417,11 +417,12 @@ function Install-IISMode {
   Write-Host "===== INSTALLATION COMPLETE ====="
   Write-Host "MinIO Console (direct): http://localhost:$uiPort"
   Write-Host "MinIO API (direct):     http://localhost:$apiPort"
-  if ($consoleHttpsPort -eq 443) {
+  if ($httpsPort -eq 443) {
     Write-Host "Proxy URL:              https://$displayHost"
   } else {
-    Write-Host "Proxy URL:              https://${displayHost}:$consoleHttpsPort"
+    Write-Host "Proxy URL:              https://${displayHost}:$httpsPort"
   }
+  Write-Host "Console URL:            $consoleBrowserUrl"
   Write-Host ""
   Write-Host "Login:"
   Write-Host "  Username: $Script:ActiveAccessKey"

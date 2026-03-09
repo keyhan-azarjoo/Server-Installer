@@ -197,27 +197,12 @@ function App() {
     const isS3Install = action === "/run/s3_linux" || action === "/run/s3_windows" || action === "/run/s3_windows_iis" || action === "/run/s3_windows_docker";
     setRunError("");
     if (isS3Install) {
-      const mode = String(body.get("LOCALS3_HOST_MODE") || "").trim().toLowerCase();
-      const customHost = String(body.get("LOCALS3_HOST") || "").trim();
       const selectedIp = String(body.get("LOCALS3_HOST_IP") || "").trim();
-      const publicIp = String(systemInfo?.public_ip || "").trim();
       const ips = Array.isArray(systemInfo?.ips) ? systemInfo.ips.filter((ip) => ip && !String(ip).startsWith("127.")) : [];
-      let resolvedHost = "";
-      if (mode === "lan") {
-        resolvedHost = selectedIp || ips[0] || publicIp || "localhost";
-      } else if (mode === "public") {
-        resolvedHost = publicIp || ips[0] || "localhost";
-      } else if (mode === "custom") {
-        resolvedHost = customHost || publicIp || ips[0] || "localhost";
-      } else {
-        resolvedHost = customHost || selectedIp || publicIp || ips[0] || "localhost";
-      }
+      const resolvedHost = selectedIp || ips[0] || "localhost";
       body.set("LOCALS3_HOST", resolvedHost);
       if (selectedIp) {
         body.set("LOCALS3_HOST_IP", selectedIp);
-      }
-      if (mode) {
-        body.set("LOCALS3_HOST_MODE", mode);
       }
 
       // Strict pre-check: do not start if port is owned by another app.
@@ -696,10 +681,7 @@ function App() {
                 action="/run/s3_windows"
                 fields={[
                   { name: "S3_MODE", label: "Mode", type: "select", options: ["iis", "docker"], defaultValue: "iis" },
-                  { name: "LOCALS3_HOST_MODE", label: "Host Mode", type: "select", options: ["public", "lan", "custom"], defaultValue: "lan" },
-                  { name: "LOCALS3_HOST_IP", label: "Select IP (LAN)", type: "select", options: ((systemInfo?.ips || []).filter((ip) => !String(ip).startsWith("127."))), defaultValue: (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "" },
-                  { name: "LOCALS3_HOST", label: "Custom Host / Domain", defaultValue: "", placeholder: "mystorage.local or static IP" },
-                  { name: "LOCALS3_ENABLE_LAN", label: "LAN Access", type: "select", options: ["true", "false"], defaultValue: "true" },
+                  { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: ((systemInfo?.ips || []).filter((ip) => !String(ip).startsWith("127."))), defaultValue: (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "" },
                   { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", placeholder: "443, 8443, 9443..." },
                   { name: "LOCALS3_API_PORT", label: "MinIO API Port (optional)", placeholder: "9000" },
                   { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port (optional)", placeholder: "9001" },
@@ -763,10 +745,7 @@ function App() {
                 description="Run local S3 installer with selectable host and ports."
                 action="/run/s3_linux"
                 fields={[
-                  { name: "LOCALS3_HOST_MODE", label: "Host Mode", type: "select", options: ["public", "lan", "custom"], defaultValue: "lan" },
-                  { name: "LOCALS3_HOST_IP", label: "Select IP (LAN)", type: "select", options: ((systemInfo?.ips || []).filter((ip) => !String(ip).startsWith("127."))), defaultValue: (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "" },
-                  { name: "LOCALS3_HOST", label: "Custom Host / Domain", defaultValue: "", placeholder: "mystorage.local or static IP" },
-                  { name: "LOCALS3_ENABLE_LAN", label: "LAN Access", type: "select", options: ["true", "false"], defaultValue: "true" },
+                  { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: ((systemInfo?.ips || []).filter((ip) => !String(ip).startsWith("127."))), defaultValue: (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "" },
                   { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", placeholder: "443, 8443, 9443..." },
                   { name: "LOCALS3_API_PORT", label: "MinIO API Port (optional)", placeholder: "9000" },
                   { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port (optional)", placeholder: "9001" },
