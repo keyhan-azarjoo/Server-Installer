@@ -2084,6 +2084,8 @@ echo "[INFO] LocalS3 API/Console services stopped."
 
 def run_dashboard_update(live_cb=None):
     script_url = f"{REPO_RAW_BASE}/dashboard/start-server-dashboard.py"
+    if live_cb:
+        live_cb("[INFO] Updating dashboard files and restarting service...\n")
     if os.name == "nt":
         ps = (
             "$ProgressPreference='SilentlyContinue'; "

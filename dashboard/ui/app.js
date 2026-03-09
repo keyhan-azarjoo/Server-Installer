@@ -174,6 +174,13 @@ function App() {
       }
       setTimeout(() => poll(jobId, title, next), 300);
     } catch (err) {
+      if (title === "Dashboard Update") {
+        append(`Update triggered. Dashboard is restarting... (${err})`);
+        setInfoMessage("Dashboard update started. If the page disconnects, refresh in a few seconds.");
+        setTermState("Idle");
+        setTimeout(() => window.location.reload(), 4000);
+        return;
+      }
       append(`Polling failed: ${err}`);
       setTermState("Error");
     }
