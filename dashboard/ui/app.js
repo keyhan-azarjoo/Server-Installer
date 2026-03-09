@@ -202,18 +202,23 @@ function App() {
       const selectedIp = String(body.get("LOCALS3_HOST_IP") || "").trim();
       const publicIp = String(systemInfo?.public_ip || "").trim();
       const ips = Array.isArray(systemInfo?.ips) ? systemInfo.ips.filter((ip) => ip && !String(ip).startsWith("127.")) : [];
-      let resolvedHost = customHost;
-      if (!resolvedHost && mode === "public") {
-        resolvedHost = publicIp || ips[0] || "localhost";
-      } else if (!resolvedHost && mode === "lan") {
+      let resolvedHost = "";
+      if (mode === "lan") {
         resolvedHost = selectedIp || ips[0] || publicIp || "localhost";
-      } else if (!resolvedHost && mode === "custom") {
-        resolvedHost = customHost || publicIp || ips[0] || "localhost";
-      }
-      if (!resolvedHost) {
+      } else if (mode === "public") {
         resolvedHost = publicIp || ips[0] || "localhost";
+      } else if (mode === "custom") {
+        resolvedHost = customHost || publicIp || ips[0] || "localhost";
+      } else {
+        resolvedHost = customHost || selectedIp || publicIp || ips[0] || "localhost";
       }
       body.set("LOCALS3_HOST", resolvedHost);
+      if (selectedIp) {
+        body.set("LOCALS3_HOST_IP", selectedIp);
+      }
+      if (mode) {
+        body.set("LOCALS3_HOST_MODE", mode);
+      }
 
       // Strict pre-check: do not start if port is owned by another app.
       const p = String(body.get("LOCALS3_HTTPS_PORT") || "").trim();

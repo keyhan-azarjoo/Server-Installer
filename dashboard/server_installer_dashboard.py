@@ -1789,7 +1789,17 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
         selected_mode = "iis"
     mode_choice = "2\n" if selected_mode == "docker" else "1\n"
     requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
-    if not requested_host or requested_host in ("localhost", "127.0.0.1"):
+    requested_mode = (form.get("LOCALS3_HOST_MODE", [""])[0] or "").strip().lower()
+    requested_ip = (form.get("LOCALS3_HOST_IP", [""])[0] or "").strip()
+    if requested_mode == "lan" and requested_ip:
+        form["LOCALS3_HOST"] = [requested_ip]
+    elif requested_mode == "custom" and requested_host:
+        form["LOCALS3_HOST"] = [requested_host]
+    elif requested_mode == "public":
+        if not requested_host or requested_host in ("localhost", "127.0.0.1"):
+            resolved_host = choose_s3_host(requested_host)
+            form["LOCALS3_HOST"] = [resolved_host]
+    elif not requested_host or requested_host in ("localhost", "127.0.0.1"):
         resolved_host = choose_s3_host(requested_host)
         form["LOCALS3_HOST"] = [resolved_host]
     requested_https = (form.get("LOCALS3_HTTPS_PORT", [""])[0] or "").strip()
@@ -1812,6 +1822,8 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
     for key in [
         "LOCALS3_MODE",
         "LOCALS3_HOST",
+        "LOCALS3_HOST_IP",
+        "LOCALS3_HOST_MODE",
         "LOCALS3_ENABLE_LAN",
         "LOCALS3_HTTPS_PORT",
         "LOCALS3_API_PORT",
