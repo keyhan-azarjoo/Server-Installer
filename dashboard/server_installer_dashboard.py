@@ -2081,6 +2081,23 @@ echo "[INFO] LocalS3 API/Console services stopped."
     return run_process(cmd, env=os.environ.copy(), live_cb=live_cb)
 
 
+def run_dashboard_update(live_cb=None):
+    script_url = f"{REPO_RAW_BASE}/dashboard/start-server-dashboard.py"
+    work_dir = ROOT / "dashboard"
+    if os.name == "nt":
+        ps = (
+            "$ProgressPreference='SilentlyContinue'; "
+            f"Invoke-WebRequest -Uri '{script_url}' -OutFile './start-server-dashboard.py'; "
+            "python .\\start-server-dashboard.py"
+        )
+        cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps]
+        return run_process(cmd, env=os.environ.copy(), live_cb=live_cb, cwd=str(work_dir))
+
+    python_bin = "python3" if command_exists("python3") else "python"
+    shell_cmd = f"curl -fsSL '{script_url}' -o ./start-server-dashboard.py && {python_bin} ./start-server-dashboard.py"
+    cmd = ["bash", "-lc", shell_cmd]
+    return run_process(cmd, env=os.environ.copy(), live_cb=live_cb, cwd=str(work_dir))
+
 def run_windows_s3_stop(live_cb=None):
     if os.name != "nt":
         return 1, "Windows S3 stop can only run on Windows hosts."
@@ -3165,6 +3182,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_linux_s3_stop()
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/dashboard_update":
+            title = "Dashboard Update"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_dashboard_update(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_dashboard_update()
                 self.respond_run_result(title, code, output)
             return
 

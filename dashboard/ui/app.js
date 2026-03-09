@@ -234,6 +234,35 @@ function App() {
     }
   };
 
+  const runDashboardUpdate = async () => {
+    const title = "Dashboard Update";
+    append("============================================================");
+    append(`[${new Date().toLocaleTimeString()}] ${title} started`);
+    setTermState(`Running: ${title}`);
+    setTermOpen(true);
+    setTermMin(false);
+    setRunError("");
+    try {
+      const r = await fetch("/run/dashboard_update", { method: "POST", headers: { "X-Requested-With": "fetch" } });
+      const j = await r.json();
+      if (!j.job_id) {
+        append(j.output || "No output.");
+        append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code ?? 1})`);
+        if (Number(j.exit_code ?? 1) !== 0) {
+          setRunError(`${title} failed (exit ${j.exit_code ?? 1}). ${String(j.output || "").slice(0, 200)}`);
+        }
+        setTermState("Idle");
+        loadSystem.current();
+        return;
+      }
+      poll(j.job_id, title, 0);
+    } catch (err) {
+      append(`Request failed: ${err}`);
+      setRunError(`${title} request failed: ${err}`);
+      setTermState("Error");
+    }
+  };
+
   const goBack = () => {
     if (page === "home") return;
     if (page === "dotnet" || page === "s3" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
@@ -919,6 +948,14 @@ function App() {
       {!collapsed && <Chip label={cfg.os_label} size="small" sx={{ mb: 1.5, ml: 1, bgcolor: "rgba(96,165,250,.2)", color: "#dbeafe", border: "1px solid rgba(147,197,253,.45)" }} />}
       <Button fullWidth variant={page === "home" ? "contained" : "outlined"} sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }} onClick={() => { setPage("home"); if (isMobile) setMobileOpen(false); }}>
         {collapsed ? "Home" : "Dashboard Home"}
+      </Button>
+      <Button
+        fullWidth
+        variant="outlined"
+        sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: "#dbeafe", borderColor: "rgba(219,234,254,.35)" }}
+        onClick={runDashboardUpdate}
+      >
+        {collapsed ? "Update" : "Update Dashboard"}
       </Button>
     </Box>
   );
