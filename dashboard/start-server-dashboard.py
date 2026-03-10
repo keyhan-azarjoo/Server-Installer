@@ -515,18 +515,30 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
 
     python_exe = resolve_windows_python()
     task_name = "ServerInstallerDashboard"
-    log_dir = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "logs"
+    program_data = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer"
+    log_dir = program_data / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "server-installer-dashboard.log"
+    task_script = program_data / "run-dashboard.cmd"
     use_https, cert_path, key_path = resolve_https_config()
-    extra_args = ""
+    task_args = [
+        python_exe,
+        str(script_path),
+        "--run-server",
+        "--host",
+        bind_host,
+        "--port",
+        str(selected_port),
+    ]
     if use_https:
-        extra_args = f' --https --cert "{cert_path}" --key "{key_path}"'
-    task_cmd = (
-        'cmd.exe /c "'
-        f'"{python_exe}" "{script_path}" --run-server --host {bind_host} --port {selected_port}{extra_args} '
-        f'>> "{log_path}" 2>&1"'
+        task_args += ["--https", "--cert", cert_path, "--key", key_path]
+    quoted_args = subprocess.list2cmdline(task_args)
+    task_script.write_text(
+        "@echo off\r\n"
+        f"{quoted_args} >> {subprocess.list2cmdline([str(log_path)])} 2>&1\r\n",
+        encoding="ascii",
     )
+    task_cmd = subprocess.list2cmdline([str(task_script)])
     rc, out = run_capture(
         [
             "schtasks",
