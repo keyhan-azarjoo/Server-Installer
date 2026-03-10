@@ -199,9 +199,9 @@ function Ensure-DockerCompose {
   docker compose version 2>&1 | Out-Null
   $ok = ($LASTEXITCODE -eq 0)
   $ErrorActionPreference = $prev
+  $Script:DockerComposeAvailable = $ok
   if (-not $ok) {
-    Err "docker compose plugin not available. Update Docker Desktop and rerun."
-    exit 1
+    Warn "docker compose plugin not available. Continuing with direct container startup fallback."
   }
 }
 
@@ -538,26 +538,33 @@ server {
     exit 1
   }
 
-  $ErrorActionPreference = "Continue"
-  $composeOut = docker --context $dockerCtx compose up -d 2>&1
-  $upExit = $LASTEXITCODE
-  $ErrorActionPreference = $prev
-  if ($upExit -ne 0) {
-    $composeText = ($composeOut | Out-String)
-    Warn "docker compose up failed."
-    if ($composeText -match "invalid proto:") {
-      Warn "Detected compose transport error ('invalid proto:')."
-      Pop-Location
-      Start-ContainersFallback -dockerCtx $dockerCtx -ngconf $ngconf -ngcerts $ngcerts -minioVolume $minioVolume -minioImage $minioImage -httpsPort $httpsPort -consoleHttpsPort $consoleHttpsPort -minioApi $minioApi -minioUI $minioUI -consoleBrowserUrl $consoleBrowserUrl -browserSessionDuration $browserSessionDuration
-      $usedFallback = $true
-      Push-Location $project
-    } else {
-      Warn "Showing compose logs..."
-      $ErrorActionPreference = "Continue"
-      docker --context $dockerCtx compose logs --no-color --tail 200 2>&1
-      $ErrorActionPreference = $prev
-      Pop-Location
-      exit 1
+  if (-not $Script:DockerComposeAvailable) {
+    Pop-Location
+    Start-ContainersFallback -dockerCtx $dockerCtx -ngconf $ngconf -ngcerts $ngcerts -minioVolume $minioVolume -minioImage $minioImage -httpsPort $httpsPort -consoleHttpsPort $consoleHttpsPort -minioApi $minioApi -minioUI $minioUI -consoleBrowserUrl $consoleBrowserUrl -browserSessionDuration $browserSessionDuration
+    $usedFallback = $true
+    Push-Location $project
+  } else {
+    $ErrorActionPreference = "Continue"
+    $composeOut = docker --context $dockerCtx compose up -d 2>&1
+    $upExit = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    if ($upExit -ne 0) {
+      $composeText = ($composeOut | Out-String)
+      Warn "docker compose up failed."
+      if ($composeText -match "invalid proto:") {
+        Warn "Detected compose transport error ('invalid proto:')."
+        Pop-Location
+        Start-ContainersFallback -dockerCtx $dockerCtx -ngconf $ngconf -ngcerts $ngcerts -minioVolume $minioVolume -minioImage $minioImage -httpsPort $httpsPort -consoleHttpsPort $consoleHttpsPort -minioApi $minioApi -minioUI $minioUI -consoleBrowserUrl $consoleBrowserUrl -browserSessionDuration $browserSessionDuration
+        $usedFallback = $true
+        Push-Location $project
+      } else {
+        Warn "Showing compose logs..."
+        $ErrorActionPreference = "Continue"
+        docker --context $dockerCtx compose logs --no-color --tail 200 2>&1
+        $ErrorActionPreference = $prev
+        Pop-Location
+        exit 1
+      }
     }
   }
 
