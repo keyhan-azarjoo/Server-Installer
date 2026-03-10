@@ -105,6 +105,36 @@ function ConvertTo-RsaPrivateKeyPem([System.Security.Cryptography.RSA]$Rsa) {
   ) + "`n-----END RSA PRIVATE KEY-----"
 }
 
+function Repair-DashboardLauncher([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path)) {
+    return
+  }
+
+  $content = Get-Content -LiteralPath $Path -Raw
+  $oldBind = @"
+def can_bind(host: str, port: int):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+"@
+  $newBind = @"
+def can_bind(host: str, port: int):
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        else:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        sock.bind((host, port))
+"@
+
+  if ($content.Contains($oldBind)) {
+    $content = $content.Replace($oldBind, $newBind)
+    Set-Content -LiteralPath $Path -Value $content -Encoding utf8
+  }
+}
+
 function ConvertTo-CertificatePem([System.Security.Cryptography.X509Certificates.X509Certificate2]$Cert) {
   return "-----BEGIN CERTIFICATE-----`n" + [Convert]::ToBase64String(
     $Cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert),
@@ -237,6 +267,7 @@ if (Test-RepoLayout $localRoot) {
 } else {
   Invoke-WebRequest -Uri "$repo/dashboard/start-server-dashboard.py" -OutFile $dashboard
 }
+Repair-DashboardLauncher -Path $dashboard
 
 $python = Get-CommandPath "python"
 if (-not $python) { $python = Get-CommandPath "py" }
