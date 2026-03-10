@@ -16,6 +16,9 @@ from pathlib import Path
 
 REPO = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
 DASHBOARD_LOCAL_ROOT = os.environ.get("SERVER_INSTALLER_LOCAL_ROOT", "").strip()
+DASHBOARD_HTTPS = os.environ.get("DASHBOARD_HTTPS", "").strip().lower() in ("1", "true", "yes", "y", "on")
+DASHBOARD_CERT = os.environ.get("DASHBOARD_CERT", "").strip()
+DASHBOARD_KEY = os.environ.get("DASHBOARD_KEY", "").strip()
 DASHBOARD_FILES = [
     "dashboard/start-server-dashboard.py",
     "dashboard/server_installer_dashboard.py",
@@ -274,12 +277,17 @@ def choose_port(bind_host: str, preferred_port: int):
     return None, diagnostics
 
 
-def check_local_http(port: int, attempts: int = 8, delay: float = 0.5):
-    url = f"http://127.0.0.1:{port}/"
+def check_local_http(port: int, attempts: int = 8, delay: float = 0.5, use_https: bool = False):
+    scheme = "https" if use_https else "http"
+    url = f"{scheme}://127.0.0.1:{port}/"
     last_error = None
     for _ in range(attempts):
         try:
-            with urllib.request.urlopen(url, timeout=2) as resp:
+            ctx = None
+            if use_https:
+                import ssl
+                ctx = ssl._create_unverified_context()
+            with urllib.request.urlopen(url, timeout=2, context=ctx) as resp:
                 return True, f"{resp.status}"
         except Exception as ex:
             last_error = ex
@@ -371,14 +379,18 @@ def run_dashboard_foreground(root: Path, bind_host: str, selected_port: int, dis
                 print(f"- Port {p}: {note}")
 
     cmd = [sys.executable, str(app), "--host", bind_host, "--port", str(selected_port)]
+    use_https, cert_path, key_path = resolve_https_config()
+    if use_https:
+        cmd += ["--https", "--cert", cert_path, "--key", key_path]
     proc = subprocess.Popen(cmd, cwd=str(root))
 
-    ok, detail = check_local_http(selected_port)
+    ok, detail = check_local_http(selected_port, use_https=use_https)
     print("Startup diagnostics:")
     print(f"- Bind host: {bind_host}")
     print(f"- Selected port: {selected_port}")
-    print(f"- Dashboard URL: http://{display_host}:{selected_port}")
-    print(f"- Local URL: http://127.0.0.1:{selected_port}")
+    scheme = "https" if use_https else "http"
+    print(f"- Dashboard URL: {scheme}://{display_host}:{selected_port}")
+    print(f"- Local URL: {scheme}://127.0.0.1:{selected_port}")
     if ok:
         print(f"- Local HTTP check: PASS (HTTP {detail})")
     else:
@@ -389,7 +401,7 @@ def run_dashboard_foreground(root: Path, bind_host: str, selected_port: int, dis
             print(f"- Local HTTP check: FAIL ({detail})")
             print("- Process is running but localhost is not responding yet.")
     print("")
-    print(f"Dashboard ready: http://{display_host}:{selected_port}")
+    print(f"Dashboard ready: {scheme}://{display_host}:{selected_port}")
     return proc.wait()
 
 
@@ -506,9 +518,13 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
     log_dir = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "server-installer-dashboard.log"
+    use_https, cert_path, key_path = resolve_https_config()
+    extra_args = ""
+    if use_https:
+        extra_args = f' --https --cert "{cert_path}" --key "{key_path}"'
     task_cmd = (
         'cmd.exe /c "'
-        f'"{python_exe}" "{script_path}" --run-server --host {bind_host} --port {selected_port} '
+        f'"{python_exe}" "{script_path}" --run-server --host {bind_host} --port {selected_port}{extra_args} '
         f'>> "{log_path}" 2>&1"'
     )
     rc, out = run_capture(
@@ -538,7 +554,7 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
     ok = False
     detail = ""
     for _ in range(15):
-        ok, detail = check_local_http(selected_port)
+    ok, detail = check_local_http(selected_port, use_https=use_https)
         if ok:
             break
         time.sleep(1)
@@ -557,7 +573,7 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
                 )
             # Re-check after fallback
             for _ in range(10):
-                ok, detail = check_local_http(selected_port)
+                ok, detail = check_local_http(selected_port, use_https=use_https)
                 if ok:
                     break
                 time.sleep(1)
@@ -579,10 +595,11 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         encoding="utf-8",
     )
 
+    scheme = "https" if use_https else "http"
     print(f"OS detected: {platform.system()}")
     print(f"Service: {task_name} (scheduled task, enabled)")
-    print(f"Dashboard URL: http://{display_host}:{selected_port}")
-    print(f"Local URL: http://127.0.0.1:{selected_port}")
+    print(f"Dashboard URL: {scheme}://{display_host}:{selected_port}")
+    print(f"Local URL: {scheme}://127.0.0.1:{selected_port}")
     print(f"Log file: {log_path}")
     if ok:
         print(f"Local HTTP check: PASS (HTTP {detail})")
@@ -590,7 +607,7 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         print(f"Local HTTP check: FAIL ({detail})")
         print(f"Inspect log: {log_path}")
     print("")
-    print(f"Dashboard ready: http://{display_host}:{selected_port}")
+    print(f"Dashboard ready: {scheme}://{display_host}:{selected_port}")
     print("Re-running this same command will update files and restart the service.")
     return 0
 
@@ -604,6 +621,17 @@ def resolve_windows_python() -> str:
     if embedded.exists():
         return str(embedded)
     return sys.executable
+
+
+def resolve_https_config():
+    use_https = DASHBOARD_HTTPS
+    if not use_https:
+        return False, "", ""
+    program_data = Path(os.environ.get("ProgramData", "C:/ProgramData"))
+    cert_dir = program_data / "Server-Installer" / "certs"
+    cert_path = (Path(DASHBOARD_CERT) if DASHBOARD_CERT else (cert_dir / "dashboard.crt")).resolve()
+    key_path = (Path(DASHBOARD_KEY) if DASHBOARD_KEY else (cert_dir / "dashboard.key")).resolve()
+    return True, str(cert_path), str(key_path)
 
 
 def is_windows_admin() -> bool:

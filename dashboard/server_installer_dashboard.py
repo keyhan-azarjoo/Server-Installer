@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import ssl
 import ctypes
 import html
 import io
@@ -3370,6 +3371,9 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", type=int, default=8090)
     parser.add_argument("--host", default="0.0.0.0")
+    parser.add_argument("--https", action="store_true")
+    parser.add_argument("--cert", default="")
+    parser.add_argument("--key", default="")
     args = parser.parse_args()
 
     try:
@@ -3382,9 +3386,26 @@ def main():
             print("Hint: Port is already in use by another process. Choose another port.")
         return
 
-    urls = [f"http://127.0.0.1:{args.port}"]
+    use_https = args.https
+    scheme = "https" if use_https else "http"
+
+    if use_https:
+        cert_path = args.cert
+        key_path = args.key
+        if not cert_path or not key_path:
+            print("HTTPS enabled but cert/key not provided. Set --cert and --key.")
+            return
+        try:
+            ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
+            server.socket = ctx.wrap_socket(server.socket, server_side=True)
+        except Exception as ex:
+            print(f"Failed to enable HTTPS: {ex}")
+            return
+
+    urls = [f"{scheme}://127.0.0.1:{args.port}"]
     if args.host not in ("127.0.0.1", "localhost", "0.0.0.0", ""):
-        explicit = f"http://{args.host}:{args.port}"
+        explicit = f"{scheme}://{args.host}:{args.port}"
         if explicit not in urls:
             urls.append(explicit)
 
@@ -3394,7 +3415,7 @@ def main():
         primary_ip = s.getsockname()[0]
         s.close()
         if primary_ip and (not primary_ip.startswith("127.")):
-            candidate = f"http://{primary_ip}:{args.port}"
+            candidate = f"{scheme}://{primary_ip}:{args.port}"
             if candidate not in urls:
                 urls.append(candidate)
     except Exception:

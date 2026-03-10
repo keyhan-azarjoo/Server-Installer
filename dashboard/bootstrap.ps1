@@ -34,5 +34,35 @@ if (-not $python) {
   $python = Join-Path $pyDir "python.exe"
 }
 
+$certDir = Join-Path $root "certs"
+New-Item -ItemType Directory -Force -Path $certDir | Out-Null
+$certPath = Join-Path $certDir "dashboard.crt"
+$keyPath = Join-Path $certDir "dashboard.key"
+
+if (!(Test-Path $certPath) -or !(Test-Path $keyPath)) {
+  Write-Host "[INFO] Generating HTTPS certificate..."
+  $rsa = [System.Security.Cryptography.RSA]::Create(2048)
+  $req = New-Object System.Security.Cryptography.X509Certificates.CertificateRequest(
+    "CN=ServerInstallerDashboard",
+    $rsa,
+    [System.Security.Cryptography.HashAlgorithmName]::SHA256,
+    [System.Security.Cryptography.RSASignaturePadding]::Pkcs1
+  )
+  $cert = $req.CreateSelfSigned([DateTimeOffset]::Now.AddDays(-1), [DateTimeOffset]::Now.AddYears(5))
+  $certPem = "-----BEGIN CERTIFICATE-----`n" + [Convert]::ToBase64String(
+    $cert.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert),
+    [System.Base64FormattingOptions]::InsertLineBreaks
+  ) + "`n-----END CERTIFICATE-----"
+  $keyPem = "-----BEGIN PRIVATE KEY-----`n" + [Convert]::ToBase64String(
+    $rsa.ExportPkcs8PrivateKey(),
+    [System.Base64FormattingOptions]::InsertLineBreaks
+  ) + "`n-----END PRIVATE KEY-----"
+  Set-Content -Path $certPath -Value $certPem -Encoding ascii
+  Set-Content -Path $keyPath -Value $keyPem -Encoding ascii
+}
+
 Write-Host "[INFO] Starting dashboard..."
+$env:DASHBOARD_HTTPS = "1"
+$env:DASHBOARD_CERT = $certPath
+$env:DASHBOARD_KEY = $keyPath
 & $python $dashboard
