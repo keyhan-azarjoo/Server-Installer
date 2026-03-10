@@ -554,7 +554,7 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
     ok = False
     detail = ""
     for _ in range(15):
-    ok, detail = check_local_http(selected_port, use_https=use_https)
+        ok, detail = check_local_http(selected_port, use_https=use_https)
         if ok:
             break
         time.sleep(1)
@@ -564,8 +564,19 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         try:
             with open(log_path, "a", encoding="utf-8") as log_fp:
                 creation_flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+                detached_cmd = [
+                    python_exe,
+                    str(script_path),
+                    "--run-server",
+                    "--host",
+                    bind_host,
+                    "--port",
+                    str(selected_port),
+                ]
+                if use_https:
+                    detached_cmd += ["--https", "--cert", cert_path, "--key", key_path]
                 subprocess.Popen(
-                    [python_exe, str(script_path), "--run-server", "--host", bind_host, "--port", str(selected_port)],
+                    detached_cmd,
                     cwd=str(root),
                     stdout=log_fp,
                     stderr=log_fp,
