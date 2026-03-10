@@ -75,6 +75,17 @@ def command_exists(name):
     return shutil.which(name) is not None
 
 
+def resolve_windows_python():
+    env_override = os.environ.get("SERVER_INSTALLER_PYTHON", "").strip()
+    if env_override and Path(env_override).exists():
+        return env_override
+    program_data = Path(os.environ.get("ProgramData", "C:/ProgramData"))
+    embedded = program_data / "Server-Installer" / "python" / "python.exe"
+    if embedded.exists():
+        return str(embedded)
+    return sys.executable
+
+
 def run_capture(cmd, timeout=20):
     try:
         proc = subprocess.run(
@@ -2157,12 +2168,13 @@ def run_dashboard_update(live_cb=None):
     if live_cb:
         live_cb("[INFO] Updating dashboard files and restarting service...\n")
     if os.name == "nt":
+        python_exe = resolve_windows_python().replace("'", "''")
         ps = (
             "$ProgressPreference='SilentlyContinue'; "
             f"Set-Location -Path '{(ROOT / 'dashboard')}' ; "
             f"Invoke-WebRequest -Uri '{script_url}' -OutFile './start-server-dashboard.py'; "
             "$log = Join-Path $env:TEMP 'server-installer-dashboard-update.log'; "
-            "Start-Process -FilePath python -ArgumentList '.\\start-server-dashboard.py' "
+            f"Start-Process -FilePath '{python_exe}' -ArgumentList '.\\start-server-dashboard.py' "
             "-WindowStyle Hidden -RedirectStandardOutput $log -RedirectStandardError $log;"
             "Write-Host \"[INFO] Update launched in background. Log: $log\""
         )
