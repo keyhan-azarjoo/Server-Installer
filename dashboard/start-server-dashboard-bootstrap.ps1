@@ -8,6 +8,13 @@ function Get-CommandPath([string]$name) {
   return $null
 }
 
+function Test-RepoLayout([string]$Path) {
+  if (-not $Path) { return $false }
+  $dashboardRoot = Join-Path $Path "dashboard"
+  return (Test-Path (Join-Path $dashboardRoot "start-server-dashboard.py")) -and
+         (Test-Path (Join-Path $dashboardRoot "server_installer_dashboard.py"))
+}
+
 function ConvertTo-DerLength([int]$Length) {
   if ($Length -lt 128) {
     return [byte[]]@([byte]$Length)
@@ -82,9 +89,14 @@ New-Item -ItemType Directory -Force -Path $root | Out-Null
 
 $repo = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
 $dashboard = Join-Path $root "start-server-dashboard.py"
+$localRoot = $env:SERVER_INSTALLER_LOCAL_ROOT
 
 Write-Host "[INFO] Downloading dashboard launcher..."
-Invoke-WebRequest -Uri "$repo/dashboard/start-server-dashboard.py" -OutFile $dashboard
+if (Test-RepoLayout $localRoot) {
+  Copy-Item -Path (Join-Path $localRoot "dashboard\start-server-dashboard.py") -Destination $dashboard -Force
+} else {
+  Invoke-WebRequest -Uri "$repo/dashboard/start-server-dashboard.py" -OutFile $dashboard
+}
 
 $python = Get-CommandPath "python"
 if (-not $python) { $python = Get-CommandPath "py" }
