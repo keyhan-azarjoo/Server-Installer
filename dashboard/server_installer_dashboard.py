@@ -1842,8 +1842,8 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
                 pass
             else:
                 return 1, f"Requested HTTPS port {requested_https} is already in use. Choose another port."
-    # Script is interactive; feed defaults for remaining prompts.
-    scripted_input = mode_choice + ("\n" * 200)
+    # Script is interactive; only answer the mode prompt to avoid re-running the installer.
+    scripted_input = mode_choice + "\n"
     cmd = [
         "powershell.exe",
         "-NoProfile",

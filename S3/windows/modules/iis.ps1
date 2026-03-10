@@ -119,7 +119,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
             <add input="{SERVER_PORT}" pattern="^$consoleHttpsPort$" />
           </conditions>
           <serverVariables>
-            <set name="HTTP_X_FORWARDED_PROTO" value="http" />
+            <set name="HTTP_X_FORWARDED_PROTO" value="https" />
             <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
             <set name="HTTP_X_FORWARDED_FOR" value="{REMOTE_ADDR}" />
           </serverVariables>
@@ -277,7 +277,11 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   if ($mainBind) {
     try { $mainBind.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (main): $($_.Exception.Message)" }
   }
-  New-WebBinding -Name $siteName -Protocol "http" -Port $consoleHttpsPort -IPAddress "*" -HostHeader "" | Out-Null
+  New-WebBinding -Name $siteName -Protocol "https" -Port $consoleHttpsPort -IPAddress "*" -HostHeader "" -SslFlags 0 | Out-Null
+  $consoleBind = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "*:${consoleHttpsPort}:" } | Select-Object -First 1
+  if ($consoleBind) {
+    try { $consoleBind.AddSslCertificate($thumb, "My") } catch { Warn "AddSslCertificate (console): $($_.Exception.Message)" }
+  }
   if ($lanIp) {
     New-WebBinding -Name $siteName -Protocol "https" -Port $httpsPort -IPAddress $lanIp -HostHeader "" -SslFlags 0 | Out-Null
     $apiIpBind = Get-WebBinding -Name $siteName -Protocol "https" | Where-Object { $_.bindingInformation -eq "${lanIp}:${httpsPort}:" } | Select-Object -First 1
@@ -314,7 +318,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   }
 
   $proxyUri = if ($httpsPort -eq 443) { "https://$domain/" } else { "https://${domain}:$httpsPort/" }
-  $consoleProxyUri = if ($consoleHttpsPort -eq 80) { "http://$domain/" } else { "http://${domain}:$consoleHttpsPort/" }
+  $consoleProxyUri = if ($consoleHttpsPort -eq 443) { "https://$domain/" } else { "https://${domain}:$consoleHttpsPort/" }
   if (-not (Test-HttpReachable -uri $proxyUri)) {
     Warn "IIS HTTPS endpoint probe failed: $proxyUri"
     Warn "Check IIS logs/Event Viewer and confirm URL Rewrite + ARR are installed and enabled."
@@ -379,10 +383,10 @@ function Install-IISMode {
   if (-not $consoleHttpsPort) {
     $consoleHttpsPort = Resolve-RequiredPort -label "MinIO Console" -candidates $consoleCandidates -defaultPort ($httpsPort + 1000)
   }
-  if (-not (Test-IISBindingPortAvailable -port $consoleHttpsPort -protocol "http" -excludeSite "LocalS3")) {
-    Warn "IIS already has an HTTP binding on port $consoleHttpsPort. Choosing another console port."
+  if (-not (Test-IISBindingPortAvailable -port $consoleHttpsPort -protocol "https" -excludeSite "LocalS3")) {
+    Warn "IIS already has an HTTPS binding on port $consoleHttpsPort. Choosing another console port."
     $alternateConsoleCandidates = $consoleCandidates | Where-Object {
-      $_ -ne $consoleHttpsPort -and (Test-IISBindingPortAvailable -port $_ -protocol "http" -excludeSite "LocalS3")
+      $_ -ne $consoleHttpsPort -and (Test-IISBindingPortAvailable -port $_ -protocol "https" -excludeSite "LocalS3")
     }
     $consoleHttpsPort = Resolve-RequiredPort -label "MinIO Console" -candidates $alternateConsoleCandidates -defaultPort ($httpsPort + 2000)
   }
@@ -393,7 +397,7 @@ function Install-IISMode {
   $publicUrl = if ($httpsPort -eq 443) { "https://$displayHost" } else { "https://${displayHost}:$httpsPort" }
   # If the selected host is localhost but LAN access is enabled, do not force a browser
   # redirect target. That allows users opening the console by LAN IP to stay on that IP.
-  $consoleBrowserUrl = if ($consoleHttpsPort -eq 80) { "http://$domain" } else { "http://${domain}:$consoleHttpsPort" }
+  $consoleBrowserUrl = if ($consoleHttpsPort -eq 443) { "https://$domain" } else { "https://${domain}:$consoleHttpsPort" }
   $consoleRedirectUrl = if ($domain -eq "localhost" -and $lanIp) { "" } else { $consoleBrowserUrl }
 
   Ensure-IISInstalled
@@ -493,7 +497,7 @@ function Resolve-EnvPort {
     Err "Requested $label port $port is already in use."
     exit 1
   }
-  if ($requireIisBinding -and (-not (Test-IISBindingPortAvailable -port $port -protocol "http" -excludeSite "LocalS3"))) {
+  if ($requireIisBinding -and (-not (Test-IISBindingPortAvailable -port $port -protocol "https" -excludeSite "LocalS3"))) {
     Err "Requested $label port $port is already bound in IIS."
     exit 1
   }
