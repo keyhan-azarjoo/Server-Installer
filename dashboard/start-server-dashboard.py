@@ -692,7 +692,17 @@ def main() -> int:
     parser.add_argument("--host", default="auto")
     parser.add_argument("--port", type=int, default=8090)
     parser.add_argument("--run-server", action="store_true", help="Internal mode: run dashboard process in foreground.")
+    parser.add_argument("--https", action="store_true", help="Enable HTTPS for dashboard startup.")
+    parser.add_argument("--cert", default="", help="Path to PEM certificate file.")
+    parser.add_argument("--key", default="", help="Path to PEM private key file.")
     args = parser.parse_args()
+
+    if args.https:
+        os.environ["DASHBOARD_HTTPS"] = "1"
+    if args.cert:
+        os.environ["DASHBOARD_CERT"] = args.cert
+    if args.key:
+        os.environ["DASHBOARD_KEY"] = args.key
 
     if relaunch_as_admin_if_needed():
         return 0
