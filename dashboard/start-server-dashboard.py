@@ -38,15 +38,27 @@ def cache_root() -> Path:
 
 def ensure_files(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
+    local_root = Path(DASHBOARD_LOCAL_ROOT) if DASHBOARD_LOCAL_ROOT else None
+    use_local = bool(local_root and is_repo_layout(local_root))
     for rel in DASHBOARD_FILES:
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)
-        url = f"{REPO}/{rel}"
         tmp_target = target.with_suffix(target.suffix + ".download")
         try:
             print(f"Syncing required file: {rel}")
-            urllib.request.urlretrieve(url, tmp_target)
-            os.replace(tmp_target, target)
+            if use_local:
+                src = local_root / rel
+                if not src.exists():
+                    raise RuntimeError(f"Missing local file: {src}")
+                tmp_target.parent.mkdir(parents=True, exist_ok=True)
+                if tmp_target.exists():
+                    tmp_target.unlink(missing_ok=True)
+                tmp_target.write_bytes(src.read_bytes())
+                os.replace(tmp_target, target)
+            else:
+                url = f"{REPO}/{rel}"
+                urllib.request.urlretrieve(url, tmp_target)
+                os.replace(tmp_target, target)
         except Exception as ex:
             if tmp_target.exists():
                 tmp_target.unlink(missing_ok=True)
