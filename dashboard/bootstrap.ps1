@@ -8,6 +8,73 @@ function Get-CommandPath([string]$name) {
   return $null
 }
 
+function ConvertTo-DerLength([int]$Length) {
+  if ($Length -lt 128) {
+    return [byte[]]@([byte]$Length)
+  }
+
+  $bytes = New-Object System.Collections.Generic.List[byte]
+  $remaining = $Length
+  while ($remaining -gt 0) {
+    $bytes.Insert(0, [byte]($remaining -band 0xFF))
+    $remaining = [Math]::Floor($remaining / 256)
+  }
+
+  $result = New-Object System.Collections.Generic.List[byte]
+  $result.Add([byte](0x80 -bor $bytes.Count))
+  $result.AddRange([byte[]]$bytes.ToArray())
+  return $result.ToArray()
+}
+
+function ConvertTo-DerInteger([byte[]]$Bytes) {
+  if (-not $Bytes -or $Bytes.Length -eq 0) {
+    $Bytes = [byte[]]@(0)
+  }
+
+  $offset = 0
+  while ($offset -lt ($Bytes.Length - 1) -and $Bytes[$offset] -eq 0) {
+    $offset++
+  }
+
+  if ($offset -gt 0) {
+    $Bytes = $Bytes[$offset..($Bytes.Length - 1)]
+  }
+
+  if ($Bytes[0] -band 0x80) {
+    $Bytes = [byte[]]@(0) + $Bytes
+  }
+
+  $result = New-Object System.Collections.Generic.List[byte]
+  $result.Add(0x02)
+  $result.AddRange([byte[]](ConvertTo-DerLength $Bytes.Length))
+  $result.AddRange([byte[]]$Bytes)
+  return $result.ToArray()
+}
+
+function ConvertTo-RsaPrivateKeyPem([System.Security.Cryptography.RSA]$Rsa) {
+  $params = $Rsa.ExportParameters($true)
+  $body = New-Object System.Collections.Generic.List[byte]
+  $body.AddRange([byte[]](ConvertTo-DerInteger ([byte[]]@(0))))
+  $body.AddRange([byte[]](ConvertTo-DerInteger $params.Modulus))
+  $body.AddRange([byte[]](ConvertTo-DerInteger $params.Exponent))
+  $body.AddRange([byte[]](ConvertTo-DerInteger $params.D))
+  $body.AddRange([byte[]](ConvertTo-DerInteger $params.P))
+  $body.AddRange([byte[]](ConvertTo-DerInteger $params.Q))
+  $body.AddRange([byte[]](ConvertTo-DerInteger $params.DP))
+  $body.AddRange([byte[]](ConvertTo-DerInteger $params.DQ))
+  $body.AddRange([byte[]](ConvertTo-DerInteger $params.InverseQ))
+
+  $sequence = New-Object System.Collections.Generic.List[byte]
+  $sequence.Add(0x30)
+  $sequence.AddRange([byte[]](ConvertTo-DerLength $body.Count))
+  $sequence.AddRange([byte[]]$body.ToArray())
+
+  return "-----BEGIN RSA PRIVATE KEY-----`n" + [Convert]::ToBase64String(
+    $sequence.ToArray(),
+    [System.Base64FormattingOptions]::InsertLineBreaks
+  ) + "`n-----END RSA PRIVATE KEY-----"
+}
+
 $root = Join-Path $env:ProgramData "Server-Installer"
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 $pyDir = Join-Path $root "python"
@@ -60,11 +127,19 @@ if (!(Test-Path $certPath) -or !(Test-Path $keyPath)) {
       [System.Base64FormattingOptions]::InsertLineBreaks
     ) + "`n-----END PRIVATE KEY-----"
   } catch {
-    $keyBytes = $rsa.ExportRSAPrivateKey()
-    $keyPem = "-----BEGIN RSA PRIVATE KEY-----`n" + [Convert]::ToBase64String(
-      $keyBytes,
-      [System.Base64FormattingOptions]::InsertLineBreaks
-    ) + "`n-----END RSA PRIVATE KEY-----"
+    try {
+      if ($rsa -is [System.Security.Cryptography.RSACng]) {
+        $keyBytes = $rsa.Key.Export([System.Security.Cryptography.CngKeyBlobFormat]::Pkcs8PrivateBlob)
+        $keyPem = "-----BEGIN PRIVATE KEY-----`n" + [Convert]::ToBase64String(
+          $keyBytes,
+          [System.Base64FormattingOptions]::InsertLineBreaks
+        ) + "`n-----END PRIVATE KEY-----"
+      } else {
+        throw "RSA provider does not support CNG export."
+      }
+    } catch {
+      $keyPem = ConvertTo-RsaPrivateKeyPem -Rsa $rsa
+    }
   }
   Set-Content -Path $certPath -Value $certPem -Encoding ascii
   Set-Content -Path $keyPath -Value $keyPem -Encoding ascii
