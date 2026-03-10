@@ -735,7 +735,7 @@ def main() -> int:
 
     root = resolve_root()
     if args.run_server:
-        return run_dashboard_foreground(root, bind_host, args.port, display_host, preclean=False)
+        return run_dashboard_foreground(root, bind_host, args.port, display_host, preclean=True)
 
     selected_port, diagnostics = choose_port_allowing_dashboard_owner(bind_host, args.port)
     if selected_port is None:
