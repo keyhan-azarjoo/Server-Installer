@@ -198,6 +198,27 @@ function Find-DockerDesktopCli {
     }
   }
 
+  foreach ($regPath in @(
+    "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop",
+    "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Docker Desktop"
+  )) {
+    try {
+      $installLocation = (Get-ItemProperty -Path $regPath -ErrorAction Stop).InstallLocation
+      if (-not [string]::IsNullOrWhiteSpace($installLocation)) {
+        foreach ($candidate in @(
+          (Join-Path $installLocation "DockerCli.exe"),
+          (Join-Path $installLocation "resources\DockerCli.exe"),
+          (Join-Path $installLocation "resources\bin\com.docker.cli.exe")
+        )) {
+          if (Test-Path $candidate) {
+            return $candidate
+          }
+        }
+      }
+    } catch {}
+  }
+
   $roots = @(
     $env:ProgramW6432,
     $env:ProgramFiles,
