@@ -2001,7 +2001,11 @@ def run_linux_s3_installer(form=None, live_cb=None):
         '  kill "$(cat /opt/locals3/nginx/nginx.pid)" >/dev/null 2>&1 || true; '
         '  rm -f /opt/locals3/nginx/nginx.pid || true; '
         'fi; '
-        'if [ -d "$root" ]; then rm -rf "${root}/tmp" >/dev/null 2>&1 || true; fi; '
+        'if [ -d "$root" ]; then '
+        '  rm -rf "${root}/data/.minio.sys" >/dev/null 2>&1 || true; '
+        '  rm -rf "${root}/config" >/dev/null 2>&1 || true; '
+        '  rm -rf "${root}/tmp" >/dev/null 2>&1 || true; '
+        'fi; '
         '}; '
     )
     safe_minio_fn = r'''

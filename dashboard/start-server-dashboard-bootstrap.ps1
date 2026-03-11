@@ -16,9 +16,70 @@ function Get-CommandPath([string]$name) {
 
 function Test-RepoLayout([string]$Path) {
   if (-not $Path) { return $false }
-  $dashboardRoot = Join-Path $Path "dashboard"
-  return (Test-Path (Join-Path $dashboardRoot "start-server-dashboard.py")) -and
-         (Test-Path (Join-Path $dashboardRoot "server_installer_dashboard.py"))
+  $requiredFiles = @(
+    "dashboard\start-server-dashboard.py",
+    "dashboard\server_installer_dashboard.py",
+    "dashboard\ui\components.js",
+    "dashboard\ui\app.js",
+    "DotNet\windows\install-windows-dotnet-host.ps1",
+    "DotNet\windows\modules\common.ps1",
+    "DotNet\windows\modules\iis-mode.ps1",
+    "DotNet\windows\modules\docker-mode.ps1",
+    "DotNet\linux\install-linux-dotnet-runner.sh",
+    "S3\windows\setup-storage.ps1",
+    "S3\windows\modules\common.ps1",
+    "S3\windows\modules\minio.ps1",
+    "S3\windows\modules\cleanup.ps1",
+    "S3\windows\modules\iis.ps1",
+    "S3\windows\modules\docker.ps1",
+    "S3\windows\modules\main.ps1",
+    "S3\linux-macos\setup-storage.sh",
+    "S3\linux-macos\modules\core.sh",
+    "S3\linux-macos\modules\cleanup.sh",
+    "S3\linux-macos\modules\platform.sh"
+  )
+  foreach ($relativePath in $requiredFiles) {
+    if (-not (Test-Path (Join-Path $Path $relativePath))) {
+      return $false
+    }
+  }
+  return $true
+}
+
+function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot, [string]$RepoBase) {
+  $requiredFiles = @(
+    "dashboard/start-server-dashboard.py",
+    "dashboard/server_installer_dashboard.py",
+    "dashboard/ui/components.js",
+    "dashboard/ui/app.js",
+    "DotNet/windows/install-windows-dotnet-host.ps1",
+    "DotNet/windows/modules/common.ps1",
+    "DotNet/windows/modules/iis-mode.ps1",
+    "DotNet/windows/modules/docker-mode.ps1",
+    "DotNet/linux/install-linux-dotnet-runner.sh",
+    "S3/windows/setup-storage.ps1",
+    "S3/windows/modules/common.ps1",
+    "S3/windows/modules/minio.ps1",
+    "S3/windows/modules/cleanup.ps1",
+    "S3/windows/modules/iis.ps1",
+    "S3/windows/modules/docker.ps1",
+    "S3/windows/modules/main.ps1",
+    "S3/linux-macos/setup-storage.sh",
+    "S3/linux-macos/modules/core.sh",
+    "S3/linux-macos/modules/cleanup.sh",
+    "S3/linux-macos/modules/platform.sh"
+  )
+
+  foreach ($relativePath in $requiredFiles) {
+    $targetPath = Join-Path $DestinationRoot ($relativePath -replace '/', '\')
+    $targetDirectory = Split-Path -Path $targetPath -Parent
+    New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
+    if (Test-RepoLayout $SourceRoot) {
+      Copy-Item -Path (Join-Path $SourceRoot ($relativePath -replace '/', '\')) -Destination $targetPath -Force
+    } else {
+      Invoke-WebRequest -Uri "$RepoBase/$relativePath" -OutFile $targetPath
+    }
+  }
 }
 
 function Get-LocalIPv4Addresses {
@@ -263,9 +324,9 @@ $localRoot = $env:SERVER_INSTALLER_LOCAL_ROOT
 
 Write-Host "[INFO] Downloading dashboard launcher..."
 if (Test-RepoLayout $localRoot) {
-  Copy-Item -Path (Join-Path $localRoot "dashboard\start-server-dashboard.py") -Destination $dashboard -Force
+  Sync-ServerInstallerFiles -SourceRoot $localRoot -DestinationRoot $root -RepoBase $repo
 } else {
-  Invoke-WebRequest -Uri "$repo/dashboard/start-server-dashboard.py" -OutFile $dashboard
+  Sync-ServerInstallerFiles -SourceRoot "" -DestinationRoot $root -RepoBase $repo
 }
 Repair-DashboardLauncher -Path $dashboard
 

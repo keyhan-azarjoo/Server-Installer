@@ -12,6 +12,8 @@ cleanup_previous_locals3() {
   fi
 
   if [ -d "$root" ]; then
+    rm -rf "${root}/data/.minio.sys" >/dev/null 2>&1 || true
+    rm -rf "${root}/config" >/dev/null 2>&1 || true
     rm -rf "${root}/tmp" >/dev/null 2>&1 || true
   fi
 }

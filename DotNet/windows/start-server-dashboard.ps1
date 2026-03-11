@@ -62,22 +62,44 @@ else {
 
 function Ensure-ServerInstallerFiles {
     $repoRootCandidate = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-    $localDashboard = Join-Path $repoRootCandidate "dashboard\server_installer_dashboard.py"
-    $localComponents = Join-Path $repoRootCandidate "dashboard\ui\components.js"
-    $localApp = Join-Path $repoRootCandidate "dashboard\ui\app.js"
-    if ((Test-Path -LiteralPath $localDashboard) -and (Test-Path -LiteralPath $localComponents) -and (Test-Path -LiteralPath $localApp)) {
+    $requiredFiles = @(
+        "dashboard/start-server-dashboard.py",
+        "dashboard/server_installer_dashboard.py",
+        "dashboard/ui/components.js",
+        "dashboard/ui/app.js",
+        "DotNet/windows/install-windows-dotnet-host.ps1",
+        "DotNet/windows/modules/common.ps1",
+        "DotNet/windows/modules/iis-mode.ps1",
+        "DotNet/windows/modules/docker-mode.ps1",
+        "DotNet/linux/install-linux-dotnet-runner.sh",
+        "S3/windows/setup-storage.ps1",
+        "S3/windows/modules/common.ps1",
+        "S3/windows/modules/minio.ps1",
+        "S3/windows/modules/cleanup.ps1",
+        "S3/windows/modules/iis.ps1",
+        "S3/windows/modules/docker.ps1",
+        "S3/windows/modules/main.ps1",
+        "S3/linux-macos/setup-storage.sh",
+        "S3/linux-macos/modules/core.sh",
+        "S3/linux-macos/modules/cleanup.sh",
+        "S3/linux-macos/modules/platform.sh"
+    )
+
+    $haveLocalRepo = $true
+    foreach ($relativePath in $requiredFiles) {
+        $localPath = Join-Path $repoRootCandidate ($relativePath -replace '/', '\')
+        if (-not (Test-Path -LiteralPath $localPath)) {
+            $haveLocalRepo = $false
+            break
+        }
+    }
+    if ($haveLocalRepo) {
         Write-Host "Using local repository dashboard files."
         return $repoRootCandidate
     }
 
     $installRoot = Join-Path $env:ProgramData "Server-Installer"
     $baseUrl = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
-
-    $requiredFiles = @(
-        "dashboard/server_installer_dashboard.py",
-        "dashboard/ui/components.js",
-        "dashboard/ui/app.js"
-    )
 
     foreach ($relativePath in $requiredFiles) {
         $targetPath = Join-Path $installRoot ($relativePath -replace '/', '\')
