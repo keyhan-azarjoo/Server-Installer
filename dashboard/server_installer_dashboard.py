@@ -72,6 +72,10 @@ MONGO_WINDOWS_FILES = [
     "Mongo/windows/setup-mongodb.ps1",
 ]
 
+MONGO_UNIX_FILES = [
+    "Mongo/linux-macos/setup-mongodb.sh",
+]
+
 SESSIONS = set()
 JOBS = {}
 JOBS_LOCK = threading.Lock()
@@ -1044,6 +1048,16 @@ if(Test-Path $root){ Remove-Item -Recurse -Force -Path $root -ErrorAction Silent
     return rc == 0, (out or "LocalMongoDB managed files cleaned.")
 
 
+def _linux_cleanup_localmongo(prefix):
+    if command_exists("docker"):
+        run_capture(prefix + ["docker", "rm", "-f", "localmongo-https", "localmongo-web", "localmongo-mongodb"], timeout=60)
+        run_capture(prefix + ["docker", "network", "rm", "localmongo-net"], timeout=30)
+        run_capture(prefix + ["docker", "volume", "rm", "-f", "localmongo-data"], timeout=30)
+    run_capture(prefix + ["rm", "-rf", "/opt/localmongo"], timeout=30)
+    run_capture(prefix + ["rm", "-rf", "/usr/local/localmongo"], timeout=30)
+    return True, "LocalMongoDB service and managed files removed."
+
+
 def _linux_cleanup_locals3(prefix):
     cmds = [
         ["systemctl", "stop", "locals3-minio"],
@@ -1194,6 +1208,8 @@ def manage_service(action, name, kind):
                     _linux_cleanup_locals3(_sudo_prefix())
             if _is_mongo_name(svc_name) and os.name == "nt":
                 _windows_cleanup_localmongo()
+            elif _is_mongo_name(svc_name):
+                _linux_cleanup_localmongo(_sudo_prefix())
             return rc == 0, (out or f"Docker container '{svc_name}' deleted.")
         if action in ("start", "stop", "restart"):
             rc, out = run_capture(["docker", action, svc_name], timeout=60)
@@ -2121,6 +2137,69 @@ def run_windows_mongo_installer(form, live_cb=None):
         env=env,
         live_cb=live_cb,
     )
+
+
+def run_unix_mongo_installer(form=None, live_cb=None):
+    if os.name == "nt":
+        return 1, "Linux/macOS MongoDB installer can only run on Linux or macOS hosts."
+    ensure_repo_files(MONGO_UNIX_FILES, live_cb=live_cb, refresh=False)
+    form = form or {}
+
+    env = os.environ.copy()
+    for key in [
+        "LOCALMONGO_HOST",
+        "LOCALMONGO_HOST_IP",
+        "LOCALMONGO_HTTPS_PORT",
+        "LOCALMONGO_MONGO_PORT",
+        "LOCALMONGO_WEB_PORT",
+        "LOCALMONGO_ADMIN_USER",
+        "LOCALMONGO_ADMIN_PASSWORD",
+        "LOCALMONGO_UI_USER",
+        "LOCALMONGO_UI_PASSWORD",
+    ]:
+        value = (form.get(key, [""])[0] or "").strip()
+        if value:
+            env[key] = value
+
+    requested_host = env.get("LOCALMONGO_HOST", "").strip()
+    requested_ip = env.get("LOCALMONGO_HOST_IP", "").strip()
+    if (not requested_host) and requested_ip:
+        env["LOCALMONGO_HOST"] = requested_ip
+    elif not requested_host:
+        env["LOCALMONGO_HOST"] = choose_service_host()
+
+    for port_key in ("LOCALMONGO_HTTPS_PORT", "LOCALMONGO_MONGO_PORT", "LOCALMONGO_WEB_PORT"):
+        port_value = env.get(port_key, "").strip()
+        if port_value and (not port_value.isdigit()):
+            return 1, f"{port_key} must be numeric."
+
+    for port_key in ("LOCALMONGO_HTTPS_PORT", "LOCALMONGO_MONGO_PORT", "LOCALMONGO_WEB_PORT"):
+        port_value = env.get(port_key, "").strip()
+        if port_value and is_local_tcp_port_listening(port_value):
+            usage = get_port_usage(port_value, "tcp")
+            if not usage.get("managed_owner"):
+                return 1, f"Requested port {port_value} for {port_key} is already in use. Choose another port."
+
+    cmd = ["bash", str(ROOT / "Mongo" / "linux-macos" / "setup-mongodb.sh")]
+    if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        cmd = ["sudo", "env"]
+        for key in [
+            "LOCALMONGO_HOST",
+            "LOCALMONGO_HOST_IP",
+            "LOCALMONGO_HTTPS_PORT",
+            "LOCALMONGO_MONGO_PORT",
+            "LOCALMONGO_WEB_PORT",
+            "LOCALMONGO_ADMIN_USER",
+            "LOCALMONGO_ADMIN_PASSWORD",
+            "LOCALMONGO_UI_USER",
+            "LOCALMONGO_UI_PASSWORD",
+        ]:
+            value = env.get(key, "").strip()
+            if value:
+                cmd.append(f"{key}={value}")
+        cmd += ["bash", str(ROOT / "Mongo" / "linux-macos" / "setup-mongodb.sh")]
+
+    return run_process(cmd, env=env, live_cb=live_cb)
 
 
 def run_linux_s3_installer(form=None, live_cb=None):
@@ -3651,6 +3730,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_windows_mongo_installer(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/mongo_unix":
+            title = "MongoDB Installer (Linux/macOS)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_unix_mongo_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_unix_mongo_installer(form)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/s3_windows_stop":

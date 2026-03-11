@@ -898,7 +898,81 @@ function App() {
           </Grid>
         );
       }
-      return <Alert severity="info">MongoDB installer is currently configured for Windows hosts.</Alert>;
+      if (cfg.os === "linux" || cfg.os === "darwin") {
+        return (
+          <Grid container spacing={2}>
+            <Grid item xs={12} md={8}>
+              <ActionCard
+                title={`Install MongoDB (${cfg.os === "linux" ? "Linux" : "macOS"})`}
+                description="Deploy MongoDB with a Compass-style web admin UI behind HTTPS."
+                action="/run/mongo_unix"
+                fields={[
+                  { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: ((systemInfo?.ips || []).filter((ip) => !String(ip).startsWith("127."))), defaultValue: (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "" },
+                  { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "443, 9445..." },
+                  { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017" },
+                  { name: "LOCALMONGO_WEB_PORT", label: "Local Web UI Port", defaultValue: "8081", placeholder: "8081" },
+                  { name: "LOCALMONGO_ADMIN_USER", label: "MongoDB Admin User", defaultValue: "admin" },
+                  { name: "LOCALMONGO_ADMIN_PASSWORD", label: "MongoDB Admin Password", type: "password", defaultValue: "StrongPassword123" },
+                  { name: "LOCALMONGO_UI_USER", label: "Web UI User", defaultValue: "admin" },
+                  { name: "LOCALMONGO_UI_PASSWORD", label: "Web UI Password", type: "password", defaultValue: "StrongPassword123" },
+                ]}
+                onRun={run}
+                color="#7c3aed"
+              />
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+                <CardContent>
+                  <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Requirements</Typography>
+                  <Typography variant="body2">Docker: {docker.installed ? `Installed (${docker.version || "unknown"})` : (cfg.os === "linux" ? "Will be installed if missing" : "Docker Desktop must be running")}</Typography>
+                  <Typography variant="body2">HTTPS Proxy: Built into Mongo setup</Typography>
+                  <Typography variant="body2">MongoDB: {mongo.installed ? `Installed (${mongo.server_version || "docker"})` : "Not installed yet"}</Typography>
+                  {!!mongo.https_url && <Typography variant="body2" sx={{ mt: 1 }}>HTTPS URL: {mongo.https_url}</Typography>}
+                  {!!mongo.connection_string && <Typography variant="body2">Connection: {mongo.connection_string}</Typography>}
+                </CardContent>
+              </Card>
+            </Grid>
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+                <CardContent>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                    <Typography variant="h6" fontWeight={800}>MongoDB Services</Typography>
+                    <Box sx={{ flexGrow: 1 }} />
+                    {!!mongo.https_url && (
+                      <Button variant="contained" disabled={serviceBusy} onClick={() => window.open(mongo.https_url, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
+                        Open Compass-Style UI
+                      </Button>
+                    )}
+                    <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
+                    <Button variant="outlined" color="error" disabled={serviceBusy || mongoServices.length === 0} onClick={() => stopServicesBatch(mongoServices, "MongoDB")} sx={{ textTransform: "none" }}>Stop All MongoDB</Button>
+                  </Stack>
+                  <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
+                    {mongoServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}
+                    {mongoServices.map((svc) => (
+                      <Paper key={`mongo-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                          <Box sx={{ minWidth: 250 }}>
+                            <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
+                            {renderServiceUrls(svc)}
+                            {renderServicePorts(svc)}
+                          </Box>
+                          <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
+                          <Box sx={{ flexGrow: 1 }} />
+                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("start", svc)} sx={{ textTransform: "none" }}>Start</Button>
+                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
+                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
+                        </Stack>
+                      </Paper>
+                    ))}
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          </Grid>
+        );
+      }
+      return <Alert severity="info">MongoDB installer is not configured for this OS.</Alert>;
     }
 
     if (page === "dotnet") {
