@@ -10,6 +10,9 @@ const DownloadCompassIcon = MuiIcons.DownloadRounded || MuiIcons.Download || nul
 const CopyCompassIcon = MuiIcons.ContentCopyRounded || MuiIcons.ContentCopy || null;
 const TryOpenCompassIcon = MuiIcons.OpenInNewRounded || MuiIcons.LaunchRounded || MuiIcons.OpenInNew || MuiIcons.Launch || null;
 const OpenCompassStyleIcon = MuiIcons.LanguageRounded || MuiIcons.PublicRounded || MuiIcons.Language || MuiIcons.Public || null;
+const RefreshSmallIcon = MuiIcons.RefreshRounded || MuiIcons.SyncRounded || MuiIcons.Refresh || null;
+const StartAllIcon = MuiIcons.PlayArrowRounded || MuiIcons.PlayArrow || null;
+const StopAllIcon = MuiIcons.StopRounded || MuiIcons.Stop || null;
 const DRAWER_W = 250;
 const DRAWER_MIN = 82;
 
@@ -122,6 +125,35 @@ function ActionIcon({ title, onClick, disabled, color = "primary", variant = "ou
           {title}
           {!IconComp && fallback ? ` ${fallback}` : ""}
         </Button>
+      </span>
+    </Tooltip>
+  );
+}
+
+function IconOnlyAction({ title, onClick, disabled, color = "default", variant = "outlined", IconComp, fallback }) {
+  return (
+    <Tooltip title={title}>
+      <span>
+        <IconButton
+          type="button"
+          color={color}
+          disabled={disabled}
+          onClick={onClick}
+          aria-label={title}
+          size="small"
+          sx={{
+            border: "1px solid",
+            borderColor: variant === "contained" ? "transparent" : "rgba(37,99,235,.22)",
+            bgcolor: variant === "contained" ? "primary.main" : "transparent",
+            color: variant === "contained" ? "#fff" : "inherit",
+            borderRadius: 2,
+            "&:hover": {
+              bgcolor: variant === "contained" ? "primary.dark" : "rgba(37,99,235,.08)",
+            },
+          }}
+        >
+          {IconComp ? <IconComp fontSize="small" /> : <span style={{ fontSize: 11, fontWeight: 700 }}>{fallback || "?"}</span>}
+        </IconButton>
       </span>
     </Tooltip>
   );
@@ -938,6 +970,24 @@ function App() {
     }
   };
 
+  const promptOpenMongoWebsite = React.useCallback(() => {
+    if (!mongoWebsiteUrl) return;
+    const username = window.prompt("MongoDB web username:", "admin");
+    if (username === null) return;
+    const password = window.prompt("MongoDB web password:", "StrongPassword123");
+    if (password === null) return;
+    try {
+      const target = new URL(mongoWebsiteUrl, window.location.origin);
+      if (/^https?:$/i.test(target.protocol)) {
+        target.username = username;
+        target.password = password;
+      }
+      window.open(target.toString(), "_blank", "noopener,noreferrer");
+    } catch (_) {
+      window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer");
+    }
+  }, [mongoWebsiteUrl]);
+
   const renderPage = () => {
     if (page === "home") {
       return (
@@ -1331,22 +1381,21 @@ function App() {
                   <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                     <Typography variant="h6" fontWeight={800}>MongoDB Services</Typography>
                     <Box sx={{ flexGrow: 1 }} />
-                    <ActionIcon title="Download Compass" onClick={() => window.open(mongoCompassDownloadUrl, "_blank", "noopener,noreferrer")} IconComp={DownloadCompassIcon} fallback="DL" />
-                    <ActionIcon title="Copy Compass URI" onClick={() => copyText(mongoCompassUri, "Compass connection URI")} IconComp={CopyCompassIcon} fallback="CP" />
-                    <ActionIcon title="Try Open Compass" onClick={tryOpenCompass} IconComp={TryOpenCompassIcon} fallback="OP" />
+                    <IconOnlyAction title="Download Compass" onClick={() => window.open(mongoCompassDownloadUrl, "_blank", "noopener,noreferrer")} IconComp={DownloadCompassIcon} fallback="DL" />
+                    <IconOnlyAction title="Copy Compass URI" onClick={() => copyText(mongoCompassUri, "Compass connection URI")} IconComp={CopyCompassIcon} fallback="CP" />
+                    <IconOnlyAction title="Try Open Compass" onClick={tryOpenCompass} IconComp={TryOpenCompassIcon} fallback="OP" />
                     {!!mongoWebsiteUrl && (
-                      <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={() => window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
+                      <IconOnlyAction title="Open Compass-Style UI" disabled={serviceBusy} onClick={promptOpenMongoWebsite} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
                     )}
-                    <Button variant="outlined" disabled={isScopeLoading("mongo")} onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
-                    <Button
-                      variant="outlined"
+                    <IconOnlyAction title="Refresh MongoDB" disabled={isScopeLoading("mongo")} onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])} IconComp={RefreshSmallIcon} fallback="RF" />
+                    <IconOnlyAction
+                      title={hasStoppedServices(mongoDisplayServices) ? "Start All MongoDB" : "Stop All MongoDB"}
                       color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
                       disabled={serviceBusy || mongoDisplayServices.length === 0}
                       onClick={() => batchServiceAction(mongoDisplayServices, "MongoDB", hasStoppedServices(mongoDisplayServices) ? "start" : "stop")}
-                      sx={{ textTransform: "none" }}
-                    >
-                      {hasStoppedServices(mongoDisplayServices) ? "Start All MongoDB" : "Stop All MongoDB"}
-                    </Button>
+                      IconComp={hasStoppedServices(mongoDisplayServices) ? StartAllIcon : StopAllIcon}
+                      fallback={hasStoppedServices(mongoDisplayServices) ? "ST" : "SP"}
+                    />
                   </Stack>
                   <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
                     {mongoDisplayServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}
@@ -1422,22 +1471,21 @@ function App() {
                   <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                     <Typography variant="h6" fontWeight={800}>MongoDB Services</Typography>
                     <Box sx={{ flexGrow: 1 }} />
-                    <ActionIcon title="Download Compass" onClick={() => window.open(mongoCompassDownloadUrl, "_blank", "noopener,noreferrer")} IconComp={DownloadCompassIcon} fallback="DL" />
-                    <ActionIcon title="Copy Compass URI" onClick={() => copyText(mongoCompassUri, "Compass connection URI")} IconComp={CopyCompassIcon} fallback="CP" />
-                    <ActionIcon title="Try Open Compass" onClick={tryOpenCompass} IconComp={TryOpenCompassIcon} fallback="OP" />
+                    <IconOnlyAction title="Download Compass" onClick={() => window.open(mongoCompassDownloadUrl, "_blank", "noopener,noreferrer")} IconComp={DownloadCompassIcon} fallback="DL" />
+                    <IconOnlyAction title="Copy Compass URI" onClick={() => copyText(mongoCompassUri, "Compass connection URI")} IconComp={CopyCompassIcon} fallback="CP" />
+                    <IconOnlyAction title="Try Open Compass" onClick={tryOpenCompass} IconComp={TryOpenCompassIcon} fallback="OP" />
                     {!!mongoWebsiteUrl && (
-                      <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={() => window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
+                      <IconOnlyAction title="Open Compass-Style UI" disabled={serviceBusy} onClick={promptOpenMongoWebsite} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
                     )}
-                    <Button variant="outlined" disabled={isScopeLoading("mongo")} onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
-                    <Button
-                      variant="outlined"
+                    <IconOnlyAction title="Refresh MongoDB" disabled={isScopeLoading("mongo")} onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])} IconComp={RefreshSmallIcon} fallback="RF" />
+                    <IconOnlyAction
+                      title={hasStoppedServices(mongoDisplayServices) ? "Start All MongoDB" : "Stop All MongoDB"}
                       color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
                       disabled={serviceBusy || mongoDisplayServices.length === 0}
                       onClick={() => batchServiceAction(mongoDisplayServices, "MongoDB", hasStoppedServices(mongoDisplayServices) ? "start" : "stop")}
-                      sx={{ textTransform: "none" }}
-                    >
-                      {hasStoppedServices(mongoDisplayServices) ? "Start All MongoDB" : "Stop All MongoDB"}
-                    </Button>
+                      IconComp={hasStoppedServices(mongoDisplayServices) ? StartAllIcon : StopAllIcon}
+                      fallback={hasStoppedServices(mongoDisplayServices) ? "ST" : "SP"}
+                    />
                   </Stack>
                   <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
                     {mongoDisplayServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}
