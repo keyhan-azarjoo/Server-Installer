@@ -133,6 +133,19 @@ trust_caddy_root_macos() {
   security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain "$cert_path" >/dev/null 2>&1 || true
 }
 
+open_linux_firewall_port() {
+  local port="$1"
+  if has_cmd ufw; then
+    ufw allow "${port}/tcp" >/dev/null 2>&1 || true
+    return
+  fi
+  if has_cmd firewall-cmd; then
+    firewall-cmd --permanent --add-port="${port}/tcp" >/dev/null 2>&1 || true
+    firewall-cmd --reload >/dev/null 2>&1 || true
+    return
+  fi
+}
+
 main() {
   local os_name host_value https_port mongo_port web_port mongo_user mongo_password ui_user ui_password
   local root_dir caddyfile data_dir config_dir caddy_root cert_path addresses https_url lan_url mongo_url
@@ -243,6 +256,8 @@ EOF
   [ -f "$cert_path" ] || cert_path="${data_dir}/pki/authorities/local/root.crt"
   if [ "$os_name" = "linux" ]; then
     trust_caddy_root_linux "$cert_path"
+    open_linux_firewall_port "$https_port"
+    open_linux_firewall_port "$mongo_port"
   else
     trust_caddy_root_macos "$cert_path"
   fi
