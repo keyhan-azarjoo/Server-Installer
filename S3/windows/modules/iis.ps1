@@ -388,34 +388,23 @@ function Install-IISMode {
     }
   }
 
-  $httpsPort = Resolve-HttpsPortForIIS
-  if ($httpsPort -ne 443) { Warn "Using HTTPS port: $httpsPort" }
+  $httpsPort = Resolve-RequiredConfiguredPort -envName "LOCALS3_HTTPS_PORT" -label "S3 HTTPS" -requireIisBinding
+  if ($httpsPort -eq 443) {
+    Err "LOCALS3_HTTPS_PORT cannot be 443. Choose a unique port from the dashboard."
+    exit 1
+  }
 
-  $apiPort = Resolve-EnvPort -envName "LOCALS3_API_PORT" -label "MinIO API"
-  if (-not $apiPort) {
-    $apiPort = Resolve-RequiredPort -label "MinIO API" -candidates @(9000,19000,29000,39000,49000,59000) -defaultPort 9000
-  }
-  $uiPort = Resolve-EnvPort -envName "LOCALS3_UI_PORT" -label "MinIO Console UI"
-  if (-not $uiPort) {
-    $uiPort = Resolve-RequiredPort -label "MinIO Console UI" -candidates @(9001,19001,29001,39001,49001,59001) -defaultPort 9001
-  }
-  if ($uiPort -eq $apiPort) {
-    Warn "MinIO UI port cannot equal API port ($apiPort)."
-    $uiPort = Resolve-RequiredPort -label "MinIO Console UI" -candidates @() -defaultPort ($apiPort + 1)
-  }
+  $apiPort = Resolve-RequiredConfiguredPort -envName "LOCALS3_API_PORT" -label "MinIO API"
+  $uiPort = Resolve-RequiredConfiguredPort -envName "LOCALS3_UI_PORT" -label "MinIO Console UI"
   # Console HTTPS proxy port: try httpsPort+1000 range (e.g. 8443→9443)
   # Exclude $httpsPort so the API and console bindings do not collide.
   $consoleCandidates = @(9443,10443,11443,12443,13443) | Where-Object { $_ -ne $httpsPort }
-  $consoleHttpsPort = Resolve-EnvPort -envName "LOCALS3_CONSOLE_PORT" -label "MinIO Console" -requireIisBinding
-  if (-not $consoleHttpsPort) {
-    $consoleHttpsPort = Resolve-RequiredPort -label "MinIO Console" -candidates $consoleCandidates -defaultPort ($httpsPort + 1000)
-  }
-  if (-not (Test-IISBindingPortAvailable -port $consoleHttpsPort -protocol "https" -excludeSite "LocalS3")) {
-    Warn "IIS already has an HTTPS binding on port $consoleHttpsPort. Choosing another console port."
-    $alternateConsoleCandidates = $consoleCandidates | Where-Object {
-      $_ -ne $consoleHttpsPort -and (Test-IISBindingPortAvailable -port $_ -protocol "https" -excludeSite "LocalS3")
-    }
-    $consoleHttpsPort = Resolve-RequiredPort -label "MinIO Console" -candidates $alternateConsoleCandidates -defaultPort ($httpsPort + 2000)
+  $consoleHttpsPort = Resolve-RequiredConfiguredPort -envName "LOCALS3_CONSOLE_PORT" -label "MinIO Console" -requireIisBinding
+  Assert-UniqueConfiguredPorts @{
+    "LOCALS3_HTTPS_PORT" = $httpsPort
+    "LOCALS3_API_PORT" = $apiPort
+    "LOCALS3_UI_PORT" = $uiPort
+    "LOCALS3_CONSOLE_PORT" = $consoleHttpsPort
   }
 
   Run-PreflightChecks -DataPath $root
@@ -529,6 +518,51 @@ function Resolve-EnvPort {
     exit 1
   }
   return $port
+}
+
+function Resolve-RequiredConfiguredPort {
+  param(
+    [string]$envName,
+    [string]$label,
+    [switch]$requireIisBinding
+  )
+  $raw = ""
+  try { $raw = (Get-Item -Path "env:$envName" -ErrorAction SilentlyContinue).Value } catch {}
+  if (-not $raw -or [string]::IsNullOrWhiteSpace($raw)) {
+    Err "$envName is required. Enter all S3 ports in the dashboard before starting."
+    exit 1
+  }
+  $raw = $raw.Trim()
+  $port = 0
+  if (-not [int]::TryParse($raw, [ref]$port)) {
+    Err "$envName must be numeric."
+    exit 1
+  }
+  if ($port -lt 1 -or $port -gt 65535) {
+    Err "$envName must be between 1 and 65535."
+    exit 1
+  }
+  if (-not (Port-Free $port)) {
+    Err "Requested $label port $port is already in use."
+    exit 1
+  }
+  if ($requireIisBinding -and (-not (Test-IISBindingPortAvailable -port $port -protocol "https" -excludeSite "LocalS3"))) {
+    Err "Requested $label port $port is already bound in IIS."
+    exit 1
+  }
+  return $port
+}
+
+function Assert-UniqueConfiguredPorts([hashtable]$ports) {
+  $seen = @{}
+  foreach ($name in $ports.Keys) {
+    $value = [int]$ports[$name]
+    if ($seen.ContainsKey($value)) {
+      Err "Ports must be unique. '$name' conflicts with '$($seen[$value])' on port $value."
+      exit 1
+    }
+    $seen[$value] = $name
+  }
 }
 
 function Test-IISBindingPortAvailable([int]$port, [string]$protocol, [string]$excludeSite = "") {

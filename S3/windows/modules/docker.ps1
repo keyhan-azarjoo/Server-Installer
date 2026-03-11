@@ -457,6 +457,42 @@ function Start-ContainersFallback([string]$dockerCtx, [string]$ngconf, [string]$
   }
 }
 
+function Resolve-RequiredEnvPort([string]$envName, [string]$label) {
+  $raw = ""
+  try { $raw = (Get-Item -Path "env:$envName" -ErrorAction SilentlyContinue).Value } catch {}
+  if (-not $raw -or [string]::IsNullOrWhiteSpace($raw)) {
+    Err "$envName is required. Enter all S3 ports in the dashboard before starting."
+    exit 1
+  }
+  $raw = $raw.Trim()
+  $port = 0
+  if (-not [int]::TryParse($raw, [ref]$port)) {
+    Err "$envName must be numeric."
+    exit 1
+  }
+  if ($port -lt 1 -or $port -gt 65535) {
+    Err "$envName must be between 1 and 65535."
+    exit 1
+  }
+  if (-not (Port-Free $port)) {
+    Err "Requested $label port $port is already in use."
+    exit 1
+  }
+  return $port
+}
+
+function Assert-UniquePortSet([hashtable]$ports) {
+  $seen = @{}
+  foreach ($name in $ports.Keys) {
+    $value = [int]$ports[$name]
+    if ($seen.ContainsKey($value)) {
+      Err "Ports must be unique. '$name' conflicts with '$($seen[$value])' on port $value."
+      exit 1
+    }
+    $seen[$value] = $name
+  }
+}
+
 function Write-FilesAndUp {
   $project = Join-Path $env:ProgramData "LocalS3\storage-server"
   $ngconf = Join-Path $project "nginx\conf"
@@ -483,29 +519,20 @@ function Write-FilesAndUp {
   Info "Using Docker context: $dockerCtx"
   Prompt-CleanupPreviousServers -dockerCtx $dockerCtx
 
-  $httpsPort = 443
-  if (-not (Port-Free $httpsPort)) {
-    Warn "Port 443 is already in use."
-    $listeners = Get-PortListeners 443
-    if ($listeners.Count -gt 0) {
-      Write-Host "Port 443 listeners:"
-      $listeners | Format-Table -AutoSize | Out-String | Write-Host
-    }
-    $httpsPort = Pick-Port @(8443,9443,10443)
-    if (-not $httpsPort) {
-      Err "Port 443 is busy and no free alternate HTTPS port is available (8443/9443/10443)."
-      exit 1
-    }
-    Warn "Using alternate HTTPS port: $httpsPort"
+  $httpsPort = Resolve-RequiredEnvPort -envName "LOCALS3_HTTPS_PORT" -label "S3 HTTPS"
+  if ($httpsPort -eq 443) {
+    Err "LOCALS3_HTTPS_PORT cannot be 443. Choose a unique port from the dashboard."
+    exit 1
   }
-
-  $minioApi = Pick-Port @(9000,19000,29000)
-  $minioUI = Pick-Port @(9001,19001,29001)
-  if (-not $minioApi) { Err "No free port for MinIO API (9000/19000/29000)."; exit 1 }
-  if (-not $minioUI) { Err "No free port for MinIO UI (9001/19001/29001)."; exit 1 }
-
-  $consoleCandidates = @(9443,10443,11443,12443,13443) | Where-Object { $_ -ne $httpsPort }
-  $consoleHttpsPort = Resolve-RequiredPort -label "MinIO Console HTTPS" -candidates $consoleCandidates -defaultPort ($httpsPort + 1000)
+  $minioApi = Resolve-RequiredEnvPort -envName "LOCALS3_API_PORT" -label "MinIO API"
+  $minioUI = Resolve-RequiredEnvPort -envName "LOCALS3_UI_PORT" -label "MinIO UI"
+  $consoleHttpsPort = Resolve-RequiredEnvPort -envName "LOCALS3_CONSOLE_PORT" -label "MinIO Console HTTPS"
+  Assert-UniquePortSet @{
+    "LOCALS3_HTTPS_PORT" = $httpsPort
+    "LOCALS3_API_PORT" = $minioApi
+    "LOCALS3_UI_PORT" = $minioUI
+    "LOCALS3_CONSOLE_PORT" = $consoleHttpsPort
+  }
 
   if ($enableLan) {
     Ensure-FirewallPort -port $httpsPort

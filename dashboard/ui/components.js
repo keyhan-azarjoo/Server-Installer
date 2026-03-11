@@ -76,6 +76,7 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
   const s3Actions = ["/run/s3_linux", "/run/s3_windows", "/run/s3_windows_iis", "/run/s3_windows_docker"];
   const isS3Install = s3Actions.includes(action);
   const httpsPortField = (fields || []).find((f) => f.name === "LOCALS3_HTTPS_PORT");
+  const s3PortFieldNames = ["LOCALS3_HTTPS_PORT", "LOCALS3_API_PORT", "LOCALS3_UI_PORT", "LOCALS3_CONSOLE_PORT"];
   const [httpsPort, setHttpsPort] = React.useState((httpsPortField && httpsPortField.defaultValue) ? String(httpsPortField.defaultValue) : "");
   const [httpsPortState, setHttpsPortState] = React.useState({
     checking: false,
@@ -184,6 +185,15 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
       });
       return undefined;
     }
+    if (Number(p) === 443) {
+      setHttpsPortState({
+        checking: false,
+        usable: false,
+        error: true,
+        message: "S3 HTTPS port 443 is not allowed. Choose a different port.",
+      });
+      return undefined;
+    }
 
     let canceled = false;
     const timer = setTimeout(async () => {
@@ -258,6 +268,28 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
     if (isS3Install && httpsPortField && (httpsPortState.checking || !httpsPortState.usable)) {
       return;
     }
+    if (isS3Install) {
+      const s3Ports = [];
+      for (const fieldName of s3PortFieldNames) {
+        const input = formEl.querySelector(`[name="${fieldName}"]`);
+        const value = String(input && input.value ? input.value : "").trim();
+        if (!value) {
+          return;
+        }
+        if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535) {
+          return;
+        }
+        s3Ports.push({ fieldName, value: Number(value) });
+      }
+      const seen = new Set();
+      for (const item of s3Ports) {
+        if (seen.has(item.value)) {
+          window.alert("All S3 ports must be unique.");
+          return;
+        }
+        seen.add(item.value);
+      }
+    }
     let sourcePathValue = "";
     if (sourcePathKey) {
       const sourcePathInput = formEl.querySelector(`[name="${sourcePathKey}"]`);
@@ -316,6 +348,22 @@ function ActionCard({ title, description, action, fields, onRun, color }) {
                   FormHelperTextProps={{
                     sx: httpsPortState.error ? { color: "error.main", fontWeight: 700 } : {},
                   }}
+                  sx={{ mb: 1.5 }}
+                />
+              );
+            }
+            if (isS3Install && s3PortFieldNames.includes(f.name) && f.name !== "LOCALS3_HTTPS_PORT") {
+              return (
+                <TextField
+                  key={f.name}
+                  fullWidth
+                  size="small"
+                  type="text"
+                  name={f.name}
+                  label={f.label}
+                  defaultValue={f.defaultValue || ""}
+                  placeholder={f.placeholder || ""}
+                  required
                   sx={{ mb: 1.5 }}
                 />
               );

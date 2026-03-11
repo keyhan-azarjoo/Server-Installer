@@ -1174,10 +1174,10 @@ function App() {
                 fields={[
                   { name: "S3_MODE", label: "Mode", type: "select", options: ["iis", "docker"], defaultValue: "iis" },
                   { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
-                  { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", placeholder: "443, 8443, 9443..." },
-                  { name: "LOCALS3_API_PORT", label: "MinIO API Port (optional)", placeholder: "9000" },
-                  { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port (optional)", placeholder: "9001" },
-                  { name: "LOCALS3_CONSOLE_PORT", label: "Console Proxy Port (optional)", placeholder: "9443 or 10443..." },
+                  { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
+                  { name: "LOCALS3_API_PORT", label: "MinIO API Port", defaultValue: "9000", required: true, placeholder: "9000" },
+                  { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port", defaultValue: "9001", required: true, placeholder: "9001" },
+                  { name: "LOCALS3_CONSOLE_PORT", label: "Console Proxy Port", defaultValue: "9443", required: true, placeholder: "9443" },
                   { name: "LOCALS3_ROOT_USER", label: "S3 Username", defaultValue: "admin" },
                   { name: "LOCALS3_ROOT_PASSWORD", label: "S3 Password", defaultValue: "StrongPassword123" },
                 ]}
@@ -1270,9 +1270,9 @@ function App() {
                 action="/run/s3_linux"
                 fields={[
                   { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
-                  { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", placeholder: "443, 8443, 9443..." },
-                  { name: "LOCALS3_API_PORT", label: "MinIO API Port (optional)", placeholder: "9000" },
-                  { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port (optional)", placeholder: "9001" },
+                  { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
+                  { name: "LOCALS3_API_PORT", label: "MinIO API Port", defaultValue: "9000", required: true, placeholder: "9000" },
+                  { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port", defaultValue: "9001", required: true, placeholder: "9001" },
                   { name: "LOCALS3_ROOT_USER", label: "S3 Username", defaultValue: "admin" },
                   { name: "LOCALS3_ROOT_PASSWORD", label: "S3 Password", defaultValue: "StrongPassword123" },
                 ]}
