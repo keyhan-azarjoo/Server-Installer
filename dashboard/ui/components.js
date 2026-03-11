@@ -1,8 +1,10 @@
 const {
-  Box, Button, Card, CardContent, FormControl, InputLabel, MenuItem, Select, TextField, Typography
+  Box, Button, Card, CardContent, FormControl, InputAdornment, InputLabel, MenuItem, Select, TextField, Typography
 } = MaterialUI;
 
 function Field({ field }) {
+  const isPassword = field.type === "password";
+  const [showPassword, setShowPassword] = React.useState(false);
   if (field.type === "folder") {
     return (
       <Box sx={{ mb: 1.5 }}>
@@ -39,12 +41,26 @@ function Field({ field }) {
     <TextField
       fullWidth
       size="small"
-      type={field.type === "password" ? "password" : "text"}
+      type={isPassword && showPassword ? "text" : (isPassword ? "password" : "text")}
       name={field.name}
       label={field.label}
       defaultValue={field.defaultValue || ""}
       placeholder={field.placeholder || ""}
       required={!!field.required}
+      InputProps={isPassword ? {
+        endAdornment: (
+          <InputAdornment position="end">
+            <Button
+              type="button"
+              size="small"
+              onClick={() => setShowPassword((v) => !v)}
+              sx={{ minWidth: 0, px: 1, textTransform: "none", fontWeight: 700 }}
+            >
+              {showPassword ? "Hide" : "Show"}
+            </Button>
+          </InputAdornment>
+        ),
+      } : undefined}
       sx={{ mb: 1.5 }}
     />
   );

@@ -2947,15 +2947,31 @@ def page_login(message=""):
 body{{font-family:Segoe UI,Arial,sans-serif;background:#f4f7fb;margin:0;padding:40px}}
 .card{{max-width:420px;margin:auto;background:#fff;border-radius:12px;padding:20px;box-shadow:0 8px 30px rgba(2,32,71,.08)}}
 input{{width:100%;padding:10px;margin:6px 0 12px;border:1px solid #d0d7e2;border-radius:8px}}
+.password-wrap{{position:relative}}
+.password-wrap input{{padding-right:74px}}
+.password-toggle{{position:absolute;right:8px;top:50%;transform:translateY(-56%);background:#fff;color:#0f172a;border:1px solid #cbd5e1;padding:6px 10px;border-radius:8px;font-size:12px}}
 button{{background:#0f766e;color:#fff;border:0;padding:10px 14px;border-radius:8px}}
 </style></head>
 <body><div class="card"><h2>Server Installer</h2>{msg}
 <p>Remote access requires this computer's OS username/password.</p>
 <form method="post" action="/login">
 <label>Server Username</label><input name="username" required>
-<label>Server Password</label><input type="password" name="password" required>
+<label>Server Password</label><div class="password-wrap"><input type="password" name="password" required><button type="button" class="password-toggle" data-password-toggle>Show</button></div>
 <button type="submit">Open Dashboard</button>
-</form></div></body></html>"""
+</form></div>
+<script>
+document.querySelectorAll('[data-password-toggle]').forEach(function(btn) {{
+  btn.addEventListener('click', function() {{
+    var wrap = btn.closest('.password-wrap');
+    var input = wrap ? wrap.querySelector('input[type="password"], input[type="text"]') : null;
+    if (!input) return;
+    var show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.textContent = show ? 'Hide' : 'Show';
+  }});
+}});
+</script>
+</body></html>"""
 
 
 def page_dashboard_mui(message="", system_name=""):
