@@ -130,7 +130,8 @@ function ActionIcon({ title, onClick, disabled, color = "primary", variant = "ou
   );
 }
 
-function IconOnlyAction({ title, onClick, disabled, color = "default", variant = "outlined", IconComp }) {
+function IconOnlyAction({ title, onClick, disabled, color = "default", variant = "outlined", IconComp, fallback }) {
+  const showFallback = !IconComp && !!fallback;
   return (
     <Tooltip title={title}>
       <span>
@@ -147,12 +148,16 @@ function IconOnlyAction({ title, onClick, disabled, color = "default", variant =
             bgcolor: variant === "contained" ? "primary.main" : "transparent",
             color: variant === "contained" ? "#fff" : "inherit",
             borderRadius: 2,
+            px: showFallback ? 1 : 0.8,
+            minWidth: showFallback ? 40 : "auto",
             "&:hover": {
               bgcolor: variant === "contained" ? "primary.dark" : "rgba(37,99,235,.08)",
             },
           }}
         >
-          {IconComp ? <IconComp fontSize="small" /> : null}
+          {IconComp ? <IconComp fontSize="small" /> : (
+            showFallback ? <Typography component="span" variant="caption" fontWeight={800}>{fallback}</Typography> : null
+          )}
         </IconButton>
       </span>
     </Tooltip>
@@ -972,6 +977,10 @@ function App() {
 
   const promptOpenMongoWebsite = React.useCallback(() => {
     if (!mongoWebsiteUrl) return;
+    if (cfg.os === "windows" && mongo.web_version === "native-service") {
+      window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer");
+      return;
+    }
     const username = window.prompt("MongoDB web username:", "admin");
     if (username === null) return;
     const password = window.prompt("MongoDB web password:", "StrongPassword123");
@@ -986,7 +995,7 @@ function App() {
     } catch (_) {
       window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer");
     }
-  }, [mongoWebsiteUrl]);
+  }, [cfg.os, mongo.web_version, mongoWebsiteUrl]);
 
   const renderPage = () => {
     if (page === "home") {
@@ -1387,15 +1396,27 @@ function App() {
                     {!!mongoWebsiteUrl && (
                       <IconOnlyAction title="Open Compass-Style UI" disabled={serviceBusy} onClick={promptOpenMongoWebsite} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
                     )}
-                    <IconOnlyAction title="Refresh MongoDB" disabled={isScopeLoading("mongo")} onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])} IconComp={RefreshSmallIcon} fallback="RF" />
-                    <IconOnlyAction
-                      title={hasStoppedServices(mongoDisplayServices) ? "Start All MongoDB" : "Stop All MongoDB"}
+                    <Button
+                      type="button"
+                      variant="outlined"
+                      disabled={isScopeLoading("mongo")}
+                      onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])}
+                      startIcon={RefreshSmallIcon ? <RefreshSmallIcon fontSize="small" /> : null}
+                      sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
+                    >
+                      Refresh
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="contained"
                       color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
                       disabled={serviceBusy || mongoDisplayServices.length === 0}
                       onClick={() => batchServiceAction(mongoDisplayServices, "MongoDB", hasStoppedServices(mongoDisplayServices) ? "start" : "stop")}
-                      IconComp={hasStoppedServices(mongoDisplayServices) ? StartAllIcon : StopAllIcon}
-                      fallback={hasStoppedServices(mongoDisplayServices) ? "ST" : "SP"}
-                    />
+                      startIcon={(hasStoppedServices(mongoDisplayServices) ? StartAllIcon : StopAllIcon) ? React.createElement(hasStoppedServices(mongoDisplayServices) ? StartAllIcon : StopAllIcon, { fontSize: "small" }) : null}
+                      sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
+                    >
+                      {hasStoppedServices(mongoDisplayServices) ? "Start All" : "Stop All"}
+                    </Button>
                   </Stack>
                   <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
                     {mongoDisplayServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}
@@ -1477,15 +1498,27 @@ function App() {
                     {!!mongoWebsiteUrl && (
                       <IconOnlyAction title="Open Compass-Style UI" disabled={serviceBusy} onClick={promptOpenMongoWebsite} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
                     )}
-                    <IconOnlyAction title="Refresh MongoDB" disabled={isScopeLoading("mongo")} onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])} IconComp={RefreshSmallIcon} fallback="RF" />
-                    <IconOnlyAction
-                      title={hasStoppedServices(mongoDisplayServices) ? "Start All MongoDB" : "Stop All MongoDB"}
+                    <Button
+                      type="button"
+                      variant="outlined"
+                      disabled={isScopeLoading("mongo")}
+                      onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])}
+                      startIcon={RefreshSmallIcon ? <RefreshSmallIcon fontSize="small" /> : null}
+                      sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
+                    >
+                      Refresh
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="contained"
                       color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
                       disabled={serviceBusy || mongoDisplayServices.length === 0}
                       onClick={() => batchServiceAction(mongoDisplayServices, "MongoDB", hasStoppedServices(mongoDisplayServices) ? "start" : "stop")}
-                      IconComp={hasStoppedServices(mongoDisplayServices) ? StartAllIcon : StopAllIcon}
-                      fallback={hasStoppedServices(mongoDisplayServices) ? "ST" : "SP"}
-                    />
+                      startIcon={(hasStoppedServices(mongoDisplayServices) ? StartAllIcon : StopAllIcon) ? React.createElement(hasStoppedServices(mongoDisplayServices) ? StartAllIcon : StopAllIcon, { fontSize: "small" }) : null}
+                      sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
+                    >
+                      {hasStoppedServices(mongoDisplayServices) ? "Start All" : "Stop All"}
+                    </Button>
                   </Stack>
                   <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
                     {mongoDisplayServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}

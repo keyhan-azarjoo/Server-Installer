@@ -26,7 +26,7 @@ import getpass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
@@ -812,23 +812,30 @@ def find_windows_mongosh_exe():
     return ""
 
 
-def get_windows_native_mongo_uri(loopback=True):
+def get_windows_native_mongo_uri(loopback=True, username=None, password=None):
     info = get_windows_native_mongo_info() if os.name == "nt" else {}
     port = str(info.get("port") or "27017").strip()
     configured_host = str(info.get("host") or "").strip()
     host = "127.0.0.1" if loopback else (configured_host or choose_service_host())
     if str(info.get("auth_enabled") or "").lower() in ("true", "1") or bool(info.get("auth_enabled")):
-        return f"mongodb://admin:StrongPassword123@{host}:{port}/admin?authSource=admin"
+        user = str(username or "admin").strip() or "admin"
+        secret = "" if password is None else str(password)
+        if not secret:
+            secret = "StrongPassword123"
+        return (
+            f"mongodb://{quote(user)}:{quote(secret)}"
+            f"@{host}:{port}/admin?authSource=admin"
+        )
     return f"mongodb://{host}:{port}/admin"
 
 
-def run_windows_mongosh_json(body_js, timeout=40):
+def run_windows_mongosh_json(body_js, timeout=40, username=None, password=None):
     if os.name != "nt":
         return False, {"error": "Windows native Mongo UI is only available on Windows."}
     mongosh = find_windows_mongosh_exe()
     if not mongosh:
         return False, {"error": "mongosh.exe not found. Re-run the Windows MongoDB installer."}
-    uri = get_windows_native_mongo_uri(loopback=True)
+    uri = get_windows_native_mongo_uri(loopback=True, username=username, password=password)
     temp_dir = Path(os.environ.get("TEMP", os.environ.get("TMP", str(ROOT))))
     temp_dir.mkdir(parents=True, exist_ok=True)
     script_path = temp_dir / f"codex-mongo-native-{secrets.token_hex(8)}.js"
@@ -874,7 +881,7 @@ try {{
     return True, payload.get("result")
 
 
-def mongo_native_overview():
+def mongo_native_overview(username=None, password=None):
     body_js = """
 const adminDb = db.getSiblingDB('admin');
 const build = adminDb.runCommand({ buildInfo: 1 }) || {};
@@ -888,10 +895,10 @@ return {
   }))
 };
 """
-    return run_windows_mongosh_json(body_js, timeout=40)
+    return run_windows_mongosh_json(body_js, timeout=40, username=username, password=password)
 
 
-def mongo_native_collections(db_name):
+def mongo_native_collections(db_name, username=None, password=None):
     db_name = str(db_name or "").strip()
     if not db_name:
         return False, {"error": "Database name is required."}
@@ -905,10 +912,10 @@ return {{
   }}))
 }};
 """
-    return run_windows_mongosh_json(body_js, timeout=40)
+    return run_windows_mongosh_json(body_js, timeout=40, username=username, password=password)
 
 
-def mongo_native_documents(db_name, collection_name, limit=50):
+def mongo_native_documents(db_name, collection_name, limit=50, username=None, password=None):
     db_name = str(db_name or "").strip()
     collection_name = str(collection_name or "").strip()
     try:
@@ -927,10 +934,10 @@ return {{
   documents: docs
 }};
 """
-    return run_windows_mongosh_json(body_js, timeout=50)
+    return run_windows_mongosh_json(body_js, timeout=50, username=username, password=password)
 
 
-def mongo_native_run_script(db_name, script_text):
+def mongo_native_run_script(db_name, script_text, username=None, password=None):
     db_name = str(db_name or "admin").strip() or "admin"
     script_text = str(script_text or "").strip()
     if not script_text:
@@ -939,7 +946,7 @@ def mongo_native_run_script(db_name, script_text):
 const db = globalThis.db.getSiblingDB({json.dumps(db_name)});
 {script_text}
 """
-    return run_windows_mongosh_json(body_js, timeout=60)
+    return run_windows_mongosh_json(body_js, timeout=60, username=username, password=password)
 
 
 def get_service_items():
@@ -4083,6 +4090,11 @@ def page_mongo_native_ui():
     auth_text = "enabled" if auth_enabled else "not initialized"
     tls_text = "disabled"
     compass_uri = get_windows_native_mongo_uri(loopback=False) if os.name == "nt" else connection
+    login_hint = (
+        "Enter the MongoDB admin credentials to unlock the web manager."
+        if auth_enabled else
+        "Authentication is not initialized on this MongoDB service. You can continue without credentials, or enter credentials if you enabled auth manually."
+    )
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>MongoDB Web</title>
 <style>
 body{{font-family:Segoe UI,Arial,sans-serif;background:#0b1220;color:#e5eefc;padding:24px;margin:0}}
@@ -4093,8 +4105,9 @@ body{{font-family:Segoe UI,Arial,sans-serif;background:#0b1220;color:#e5eefc;pad
 a{{color:#93c5fd}}
 code, pre{{background:#0a1020;padding:3px 6px;border-radius:6px;color:#dbeafe}}
 .actions{{margin-top:18px;display:flex;gap:12px;flex-wrap:wrap}}
-.btn{{display:inline-block;padding:10px 14px;border-radius:10px;text-decoration:none;background:#2563eb;color:#fff}}
+.btn{{display:inline-block;padding:10px 14px;border-radius:10px;text-decoration:none;background:#2563eb;color:#fff;border:0;cursor:pointer;font:inherit}}
 .btn.secondary{{background:#334155}}
+.btn.danger{{background:#b91c1c}}
 .layout{{display:grid;grid-template-columns:260px 280px 1fr;gap:16px;margin-top:20px}}
 .panel{{background:#0f172a;border:1px solid #22304a;border-radius:14px;padding:14px;min-height:420px}}
 .panel h3{{margin:0 0 12px 0;font-size:16px}}
@@ -4106,12 +4119,21 @@ textarea{{width:100%;min-height:180px;background:#0a1020;color:#dbeafe;border:1p
 select,input{{background:#0a1020;color:#dbeafe;border:1px solid #22304a;border-radius:10px;padding:8px 10px}}
 pre{{white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto;padding:14px}}
 .stack{{display:flex;flex-direction:column;gap:14px}}
+.login-shell{{margin-top:20px;display:grid;grid-template-columns:minmax(320px,520px);justify-content:center}}
+.login-panel{{min-height:auto}}
+.hidden{{display:none}}
+.status{{margin-top:10px;padding:10px 12px;border-radius:10px;border:1px solid #243454;background:#0a1020}}
+.status.error{{border-color:#7f1d1d;color:#fecaca;background:#220c12}}
+.status.ok{{border-color:#14532d;color:#bbf7d0;background:#0a1f17}}
+.auth-grid{{display:grid;grid-template-columns:1fr 1fr;gap:12px}}
+.auth-grid label{{display:flex;flex-direction:column;gap:6px}}
 @media (max-width:1100px){{.layout{{grid-template-columns:1fr}}}}
+@media (max-width:700px){{.auth-grid{{grid-template-columns:1fr}}}}
 </style>
 </head><body><div class="card">
 <div class="pill">MongoDB</div><div class="pill">Windows Native</div><div class="pill">{html.escape(web_version)}</div>
 <h2>MongoDB Web</h2>
-<p class="muted">Windows native MongoDB management UI. Browse databases and collections, inspect documents, and run `mongosh` commands directly from the dashboard.</p>
+<p class="muted">Windows native MongoDB management UI. Sign in on this page, then browse databases and collections, inspect documents, and run `mongosh` commands directly from the dashboard.</p>
 <div class="row">Connection: <code>{html.escape(connection or "mongodb://localhost:27017/")}</code></div>
 <div class="row">Compass URI: <code id="compassUri">{html.escape(compass_uri or "mongodb://admin:StrongPassword123@localhost:27017/admin?authSource=admin")}</code></div>
 <div class="row">Version: <code>{html.escape(version or "unknown")}</code></div>
@@ -4121,8 +4143,28 @@ pre{{white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto;p
 <a class="btn" href="/">Back To Dashboard</a>
 <a class="btn secondary" href="https://www.mongodb.com/try/download/compass" target="_blank" rel="noreferrer noopener">Download Compass</a>
 <button class="btn secondary" id="copyCompass" type="button">Copy Compass URI</button>
+<button class="btn secondary hidden" id="logoutMongo" type="button">Log Out</button>
 </div>
-<div class="layout">
+<div class="login-shell" id="loginShell">
+  <div class="panel login-panel">
+    <h3>Login</h3>
+    <p class="muted">{html.escape(login_hint)}</p>
+    <div class="auth-grid">
+      <label class="muted">Username
+        <input id="mongoUser" type="text" autocomplete="username" value="admin">
+      </label>
+      <label class="muted">Password
+        <input id="mongoPassword" type="password" autocomplete="current-password" value="StrongPassword123">
+      </label>
+    </div>
+    <div class="toolbar">
+      <button class="btn" id="loginMongo" type="button">Log In</button>
+      <button class="btn secondary" id="continueMongo" type="button"{' style="display:none"' if auth_enabled else ''}>Continue Without Login</button>
+    </div>
+    <div class="status" id="loginStatus">{html.escape(login_hint)}</div>
+  </div>
+</div>
+<div class="layout hidden" id="managerLayout">
   <div class="panel">
     <h3>Databases</h3>
     <div class="toolbar"><button class="btn secondary" id="refreshDbs" type="button">Refresh</button></div>
@@ -4156,7 +4198,8 @@ pre{{white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto;p
   </div>
 </div>
 <script>
-const state = {{ db: "", collection: "" }};
+const AUTH_STORAGE_KEY = 'mongo-native-auth-v1';
+const state = {{ db: "", collection: "", auth: null }};
 const dbList = document.getElementById("dbList");
 const collectionList = document.getElementById("collectionList");
 const selectedDbLabel = document.getElementById("selectedDbLabel");
@@ -4165,15 +4208,33 @@ const commandOutput = document.getElementById("commandOutput");
 const commandDb = document.getElementById("commandDb");
 const commandText = document.getElementById("commandText");
 const docLimit = document.getElementById("docLimit");
+const loginShell = document.getElementById("loginShell");
+const managerLayout = document.getElementById("managerLayout");
+const loginStatus = document.getElementById("loginStatus");
+const loginBtn = document.getElementById("loginMongo");
+const continueBtn = document.getElementById("continueMongo");
+const logoutBtn = document.getElementById("logoutMongo");
+const mongoUser = document.getElementById("mongoUser");
+const mongoPassword = document.getElementById("mongoPassword");
+const authRequired = {str(auth_enabled).lower()};
+
+function currentHeaders(extra) {{
+  const headers = Object.assign({{ "X-Requested-With": "fetch" }}, extra || {{}});
+  if (state.auth) {{
+    headers["X-Mongo-User"] = state.auth.username || "";
+    headers["X-Mongo-Password"] = state.auth.password || "";
+  }}
+  return headers;
+}}
 
 async function apiGet(url) {{
-  const r = await fetch(url, {{ headers: {{ "X-Requested-With": "fetch" }} }});
+  const r = await fetch(url, {{ headers: currentHeaders() }});
   return await r.json();
 }}
 async function apiPost(url, body) {{
   const r = await fetch(url, {{
     method: "POST",
-    headers: {{ "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" }},
+    headers: currentHeaders({{ "Content-Type": "application/x-www-form-urlencoded" }}),
     body: new URLSearchParams(body).toString()
   }});
   return await r.json();
@@ -4181,9 +4242,41 @@ async function apiPost(url, body) {{
 function pretty(value) {{
   return JSON.stringify(value, null, 2);
 }}
-async function loadDatabases() {{
+function setLoginState(message, tone) {{
+  loginStatus.textContent = message || '';
+  loginStatus.className = 'status' + (tone === 'error' ? ' error' : (tone === 'ok' ? ' ok' : ''));
+}}
+function setLoggedIn(loggedIn) {{
+  loginShell.classList.toggle('hidden', loggedIn);
+  managerLayout.classList.toggle('hidden', !loggedIn);
+  logoutBtn.classList.toggle('hidden', !loggedIn);
+}}
+function saveAuth() {{
+  try {{
+    if (state.auth) {{
+      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(state.auth));
+    }} else {{
+      sessionStorage.removeItem(AUTH_STORAGE_KEY);
+    }}
+  }} catch (_err) {{}}
+}}
+function restoreAuth() {{
+  try {{
+    const raw = sessionStorage.getItem(AUTH_STORAGE_KEY) || '';
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    return {{
+      username: String(parsed.username || ''),
+      password: String(parsed.password || '')
+    }};
+  }} catch (_err) {{
+    return null;
+  }}
+}}
+async function loadDatabases(initialPayload) {{
   dbList.innerHTML = '<div class="muted">Loading...</div>';
-  const j = await apiGet('/api/mongo/native/overview');
+  const j = initialPayload || await apiGet('/api/mongo/native/overview');
   if (!j.ok) {{
     dbList.innerHTML = '<div class="muted">' + String(j.error || 'Failed to load databases.') + '</div>';
     return;
@@ -4266,16 +4359,77 @@ async function runCommand() {{
   await loadDatabases();
   if (state.db) await loadCollections();
 }}
+async function attemptLogin(username, password) {{
+  state.auth = {{
+    username: String(username || ''),
+    password: String(password || '')
+  }};
+  setLoginState('Checking MongoDB credentials...', '');
+  const j = await apiGet('/api/mongo/native/overview');
+  if (!j.ok) {{
+    state.auth = null;
+    saveAuth();
+    setLoggedIn(false);
+    setLoginState(String(j.error || 'Login failed.'), 'error');
+    return false;
+  }}
+  saveAuth();
+  setLoggedIn(true);
+  setLoginState(authRequired ? 'MongoDB login successful.' : 'Connected to MongoDB.', 'ok');
+  await loadDatabases(j);
+  return true;
+}}
+async function submitLogin() {{
+  loginBtn.disabled = true;
+  continueBtn.disabled = true;
+  try {{
+    await attemptLogin(mongoUser.value || '', mongoPassword.value || '');
+  }} finally {{
+    loginBtn.disabled = false;
+    continueBtn.disabled = false;
+  }}
+}}
+function logoutMongo() {{
+  state.auth = null;
+  state.db = '';
+  state.collection = '';
+  saveAuth();
+  setLoggedIn(false);
+  dbList.innerHTML = '<div class="muted">Log in to load databases.</div>';
+  collectionList.innerHTML = '<div class="muted">No database selected.</div>';
+  selectedDbLabel.textContent = 'Select a database.';
+  docOutput.textContent = 'Select a collection.';
+  commandOutput.textContent = 'Run a command to manage MongoDB.';
+  setLoginState(authRequired ? 'Enter MongoDB credentials to continue.' : 'Continue without login or enter credentials.', '');
+}}
 document.getElementById('refreshDbs').onclick = loadDatabases;
 document.getElementById('refreshDocs').onclick = loadDocuments;
 document.getElementById('runCommand').onclick = runCommand;
+loginBtn.onclick = submitLogin;
+continueBtn.onclick = () => attemptLogin('', '');
+logoutBtn.onclick = logoutMongo;
+mongoPassword.addEventListener('keydown', (ev) => {{
+  if (ev.key === 'Enter') {{
+    ev.preventDefault();
+    submitLogin();
+  }}
+}});
 document.getElementById('copyCompass').onclick = async () => {{
   const text = document.getElementById('compassUri').textContent || '';
   try {{
     await navigator.clipboard.writeText(text);
   }} catch (_err) {{}}
 }};
-loadDatabases();
+const savedAuth = restoreAuth();
+if (savedAuth) {{
+  mongoUser.value = savedAuth.username || mongoUser.value;
+  mongoPassword.value = savedAuth.password || mongoPassword.value;
+  attemptLogin(savedAuth.username || '', savedAuth.password || '');
+}} else if (!authRequired) {{
+  setLoginState('Authentication is optional here. Continue without login or enter credentials.', '');
+}} else {{
+  setLoginState('Enter MongoDB credentials to continue.', '');
+}}
 </script>
 </div></body></html>"""
 
@@ -4291,6 +4445,11 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length).decode("utf-8", errors="replace")
         return parse_qs(raw, keep_blank_values=True)
+
+    def get_mongo_native_credentials(self):
+        username = (self.headers.get("X-Mongo-User", "") or "").strip()
+        password = self.headers.get("X-Mongo-Password", "")
+        return username, password
 
     def _parse_multipart(self):
         ctype = self.headers.get("Content-Type", "") or ""
@@ -4545,7 +4704,8 @@ class Handler(BaseHTTPRequestHandler):
             if (not self.is_local_client()) and (not self.is_auth()):
                 self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
-            ok, payload = mongo_native_overview()
+            username, password = self.get_mongo_native_credentials()
+            ok, payload = mongo_native_overview(username=username, password=password)
             status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
             if ok and isinstance(payload, dict):
                 payload = {"ok": True, **payload}
@@ -4563,7 +4723,8 @@ class Handler(BaseHTTPRequestHandler):
             if "?" in self.path:
                 query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
             db_name = (query.get("db", [""])[0] or "").strip()
-            ok, payload = mongo_native_collections(db_name)
+            username, password = self.get_mongo_native_credentials()
+            ok, payload = mongo_native_collections(db_name, username=username, password=password)
             status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
             if ok and isinstance(payload, dict):
                 payload = {"ok": True, **payload}
@@ -4583,7 +4744,8 @@ class Handler(BaseHTTPRequestHandler):
             db_name = (query.get("db", [""])[0] or "").strip()
             collection_name = (query.get("collection", [""])[0] or "").strip()
             limit = (query.get("limit", ["50"])[0] or "50").strip()
-            ok, payload = mongo_native_documents(db_name, collection_name, limit)
+            username, password = self.get_mongo_native_credentials()
+            ok, payload = mongo_native_documents(db_name, collection_name, limit, username=username, password=password)
             status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
             if ok and isinstance(payload, dict):
                 payload = {"ok": True, **payload}
@@ -4698,7 +4860,8 @@ class Handler(BaseHTTPRequestHandler):
             form = self.parse_request_form()
             db_name = (form.get("db", ["admin"])[0] or "admin").strip()
             script_text = (form.get("script", [""])[0] or "").strip()
-            ok, payload = mongo_native_run_script(db_name, script_text)
+            username, password = self.get_mongo_native_credentials()
+            ok, payload = mongo_native_run_script(db_name, script_text, username=username, password=password)
             status = HTTPStatus.OK if ok else HTTPStatus.BAD_REQUEST
             if ok:
                 self.write_json({"ok": True, "result": payload}, status)

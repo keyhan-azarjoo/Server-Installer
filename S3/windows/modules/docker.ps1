@@ -224,6 +224,25 @@ function Sanitize-DockerEnv {
   }
 }
 
+function Find-OpenSslExe {
+  $cmd = Get-Command openssl.exe -ErrorAction SilentlyContinue
+  if ($cmd -and $cmd.Source -and (Test-Path $cmd.Source)) {
+    return $cmd.Source
+  }
+
+  foreach ($candidate in @(
+    "C:\Program Files\OpenSSL-Win64\bin\openssl.exe",
+    "C:\Program Files (x86)\OpenSSL-Win32\bin\openssl.exe",
+    "C:\Program Files\Git\usr\bin\openssl.exe"
+  )) {
+    if (Test-Path $candidate) {
+      return $candidate
+    }
+  }
+
+  return ""
+}
+
 
 function Ensure-LocalTlsCert([string]$dockerCtx, [string]$certDir, [string]$domain, [string]$lanIp) {
   $crt = Join-Path $certDir "localhost.crt"
@@ -239,8 +258,9 @@ function Ensure-LocalTlsCert([string]$dockerCtx, [string]$certDir, [string]$doma
   Remove-Item -Path $crt,$key -Force -ErrorAction SilentlyContinue
 
   $nativeGenerated = $false
-  $openssl = Get-Command openssl.exe -ErrorAction SilentlyContinue
-  if ($openssl) {
+  $opensslPath = Find-OpenSslExe
+  if ($opensslPath) {
+    Info "Using OpenSSL: $opensslPath"
     $pfxPath = Join-Path $certDir "localhost.pfx"
     $derPath = Join-Path $certDir "localhost.cer"
     $passwordPlain = [Guid]::NewGuid().ToString("N") + "!" + [Guid]::NewGuid().ToString("N")
@@ -267,10 +287,10 @@ function Ensure-LocalTlsCert([string]$dockerCtx, [string]$certDir, [string]$doma
       Export-Certificate -Cert "Cert:\LocalMachine\My\$($cert.Thumbprint)" -FilePath $derPath -Force | Out-Null
       Export-PfxCertificate -Cert "Cert:\LocalMachine\My\$($cert.Thumbprint)" -FilePath $pfxPath -Password $password -Force | Out-Null
 
-      & $openssl.Source x509 -inform DER -in $derPath -out $crt | Out-Null
+      & $opensslPath x509 -inform DER -in $derPath -out $crt | Out-Null
       if ($LASTEXITCODE -ne 0) { throw "OpenSSL failed converting certificate to PEM." }
 
-      & $openssl.Source pkcs12 -in $pfxPath -nocerts -nodes -passin ("pass:" + $passwordPlain) -out $key | Out-Null
+      & $opensslPath pkcs12 -in $pfxPath -nocerts -nodes -passin ("pass:" + $passwordPlain) -out $key | Out-Null
       if ($LASTEXITCODE -ne 0) { throw "OpenSSL failed extracting private key from PFX." }
 
       $nativeGenerated = (Test-Path $crt) -and (Test-Path $key)
