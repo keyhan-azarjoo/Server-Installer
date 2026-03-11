@@ -847,13 +847,9 @@ function App() {
           ? (/\]:\d+$/.test(authority) ? authority : `${authority}:27017`)
           : (/:\d+$/.test(authority) ? authority : `${authority}:27017`)
       );
-      if (!mongo.auth_enabled) return `mongodb://${normalized}/`;
       const user = encodeURIComponent("admin");
       const pass = encodeURIComponent("StrongPassword123");
-      const hasPort = /^\[[^\]]+\](?::\d+)?$/.test(authority)
-        ? /\]:\d+$/.test(authority)
-        : /:\d+$/.test(authority);
-      return `mongodb://${user}:${pass}@${hasPort ? authority : `${authority}:27017`}/admin?authSource=admin`;
+      return `mongodb://${user}:${pass}@${normalized}/admin?authSource=admin`;
     };
     if (mongo.connection_string) {
       try {
@@ -870,7 +866,7 @@ function App() {
       "localhost"
     );
     return buildMongoUri(host);
-  }, [mongo.auth_enabled, mongo.connection_string, mongoStatusInfo, systemInfo]);
+  }, [mongo.connection_string, mongoStatusInfo, systemInfo]);
   const mongoServiceUrls = React.useMemo(() => uniqUrls((mongoDisplayServices || []).flatMap((svc) => svc?.urls || [])), [mongoDisplayServices]);
   const mongoWebsiteUrl = React.useMemo(() => {
     if (mongo.https_url) return String(mongo.https_url).trim();
