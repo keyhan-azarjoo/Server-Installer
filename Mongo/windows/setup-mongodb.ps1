@@ -31,10 +31,18 @@ function Remove-ExistingLocalMongo([string]$dockerCtx) {
   docker --context $dockerCtx rm -f localmongo-https localmongo-web localmongo-mongodb 2>$null | Out-Null
   docker --context $dockerCtx network rm localmongo-net 2>$null | Out-Null
   docker --context $dockerCtx volume rm -f localmongo-data 2>$null | Out-Null
+  schtasks /End /TN "LocalMongoDB-Autostart" 1>$null 2>$null | Out-Null
+  schtasks /Delete /TN "LocalMongoDB-Autostart" /F 1>$null 2>$null | Out-Null
   if (Test-Path $Script:MongoRoot) {
     Remove-Item -Recurse -Force -Path $Script:MongoRoot -ErrorAction SilentlyContinue
   }
   $ErrorActionPreference = $prev
+}
+
+function Register-LocalMongoAutostart([string]$dockerCtx) {
+  $taskCommand = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "docker --context ' + $dockerCtx + ' start localmongo-mongodb localmongo-web localmongo-https | Out-Null"'
+  schtasks /Delete /TN "LocalMongoDB-Autostart" /F 1>$null 2>$null | Out-Null
+  schtasks /Create /TN "LocalMongoDB-Autostart" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR $taskCommand /F | Out-Null
 }
 
 function Trust-LocalMongoCaddyRoot([string]$rootCertPath) {
@@ -226,6 +234,7 @@ $($addresses -join ", ") {
 
   Ensure-FirewallPort -port $httpsPort
   Ensure-FirewallPort -port $mongoPort
+  Register-LocalMongoAutostart -dockerCtx $dockerCtx
 
   $httpsUrl = "https://localhost:$httpsPort"
   $lanUrl = ""
@@ -248,6 +257,7 @@ $($addresses -join ", ") {
   Write-Host "MongoDB root password:         $mongoPassword"
   Write-Host "Web UI username:               $uiUser"
   Write-Host "Web UI password:               $uiPassword"
+  Write-Host "Service:                       LocalMongoDB-Autostart (enabled)"
   Write-Host ""
   Write-Host "You can manage databases, collections, users, and access through the web UI using the MongoDB admin credentials above."
 }

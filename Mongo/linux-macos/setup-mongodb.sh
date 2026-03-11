@@ -171,11 +171,63 @@ clear_existing_localmongo() {
   docker volume rm -f localmongo-data >/dev/null 2>&1 || true
   rm -rf "$root_dir" >/dev/null 2>&1 || true
   if [ "$os_name" = "linux" ]; then
+    systemctl disable --now localmongo-stack >/dev/null 2>&1 || true
+    rm -f /etc/systemd/system/localmongo-stack.service >/dev/null 2>&1 || true
+    systemctl daemon-reload >/dev/null 2>&1 || true
     rm -f /usr/local/share/ca-certificates/localmongo.crt >/dev/null 2>&1 || true
     if has_cmd update-ca-certificates; then
       update-ca-certificates >/dev/null 2>&1 || true
     fi
+  else
+    launchctl bootout system /Library/LaunchDaemons/com.localmongo.stack.plist >/dev/null 2>&1 || true
+    rm -f /Library/LaunchDaemons/com.localmongo.stack.plist >/dev/null 2>&1 || true
   fi
+}
+
+install_localmongo_service() {
+  local os_name="$1"
+  if [ "$os_name" = "linux" ]; then
+    cat >/etc/systemd/system/localmongo-stack.service <<'EOF'
+[Unit]
+Description=LocalMongoDB Docker Stack
+After=docker.service network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/docker start localmongo-mongodb localmongo-web localmongo-https
+ExecStop=/usr/bin/docker stop localmongo-https localmongo-web localmongo-mongodb
+TimeoutStartSec=120
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    systemctl daemon-reload
+    systemctl enable --now localmongo-stack >/dev/null 2>&1 || true
+    return
+  fi
+
+  cat >/Library/LaunchDaemons/com.localmongo.stack.plist <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.localmongo.stack</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/sh</string>
+    <string>-lc</string>
+    <string>docker start localmongo-mongodb localmongo-web localmongo-https >/dev/null 2>&1 || true</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+</dict>
+</plist>
+EOF
+  chmod 644 /Library/LaunchDaemons/com.localmongo.stack.plist
+  launchctl bootout system /Library/LaunchDaemons/com.localmongo.stack.plist >/dev/null 2>&1 || true
+  launchctl bootstrap system /Library/LaunchDaemons/com.localmongo.stack.plist >/dev/null 2>&1 || true
 }
 
 main() {
@@ -310,6 +362,8 @@ EOF
     exit 1
   fi
 
+  install_localmongo_service "$os_name"
+
   printf '\n===== INSTALLATION COMPLETE =====\n'
   printf 'Compass-style web UI (HTTPS): %s\n' "$https_url"
   [ -n "$lan_url" ] && printf 'Compass-style web UI (Host):  %s\n' "$lan_url"
@@ -322,6 +376,11 @@ EOF
   printf 'MongoDB root password:         %s\n' "$mongo_password"
   printf 'Web UI username:               %s\n' "$ui_user"
   printf 'Web UI password:               %s\n' "$ui_password"
+  if [ "$os_name" = "linux" ]; then
+    printf 'Service:                       localmongo-stack (enabled)\n'
+  else
+    printf 'Service:                       com.localmongo.stack (loaded)\n'
+  fi
 }
 
 main "$@"

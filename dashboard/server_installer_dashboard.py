@@ -1041,6 +1041,8 @@ if(Get-Command docker -ErrorAction SilentlyContinue){
   docker network rm localmongo-net 1>$null 2>$null | Out-Null
   docker volume rm -f localmongo-data 1>$null 2>$null | Out-Null
 }
+schtasks /End /TN "LocalMongoDB-Autostart" 1>$null 2>$null | Out-Null
+schtasks /Delete /TN "LocalMongoDB-Autostart" /F 1>$null 2>$null | Out-Null
 $root = Join-Path $env:ProgramData 'LocalMongoDB'
 if(Test-Path $root){ Remove-Item -Recurse -Force -Path $root -ErrorAction SilentlyContinue }
 try {
@@ -1053,6 +1055,11 @@ try {
 
 
 def _linux_cleanup_localmongo(prefix):
+    run_capture(prefix + ["systemctl", "disable", "--now", "localmongo-stack"], timeout=60)
+    run_capture(prefix + ["rm", "-f", "/etc/systemd/system/localmongo-stack.service"], timeout=30)
+    run_capture(prefix + ["systemctl", "daemon-reload"], timeout=30)
+    run_capture(prefix + ["launchctl", "bootout", "system", "/Library/LaunchDaemons/com.localmongo.stack.plist"], timeout=30)
+    run_capture(prefix + ["rm", "-f", "/Library/LaunchDaemons/com.localmongo.stack.plist"], timeout=30)
     if command_exists("docker"):
         run_capture(prefix + ["docker", "rm", "-f", "localmongo-https", "localmongo-web", "localmongo-mongodb"], timeout=60)
         run_capture(prefix + ["docker", "network", "rm", "localmongo-net"], timeout=30)
