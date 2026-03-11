@@ -238,15 +238,63 @@ function Ensure-LocalTlsCert([string]$dockerCtx, [string]$certDir, [string]$doma
   New-Item -ItemType Directory -Force -Path $certDir | Out-Null
   Remove-Item -Path $crt,$key -Force -ErrorAction SilentlyContinue
 
-  $prev = $ErrorActionPreference
-  $ErrorActionPreference = "Continue"
-  docker --context $dockerCtx run --rm -v "${certDir}:/out" alpine:3.20 sh -lc "apk add --no-cache openssl >/dev/null && openssl req -x509 -nodes -newkey rsa:2048 -days 825 -keyout /out/localhost.key -out /out/localhost.crt -subj '/CN=$domain' -addext 'subjectAltName=$san'" 2>&1 | Out-Null
-  $exit = $LASTEXITCODE
-  $ErrorActionPreference = $prev
+  $nativeGenerated = $false
+  $openssl = Get-Command openssl.exe -ErrorAction SilentlyContinue
+  if ($openssl) {
+    $pfxPath = Join-Path $certDir "localhost.pfx"
+    $derPath = Join-Path $certDir "localhost.cer"
+    $passwordPlain = [Guid]::NewGuid().ToString("N") + "!" + [Guid]::NewGuid().ToString("N")
+    $password = ConvertTo-SecureString -String $passwordPlain -AsPlainText -Force
+    $sanExt = "2.5.29.17={text}DNS=localhost&IPAddress=127.0.0.1"
+    if ($domain -and $domain -ne "localhost") {
+      if (Test-IPv4Literal $domain) { $sanExt += "&IPAddress=$domain" } else { $sanExt += "&DNS=$domain" }
+    }
+    if ($lanIp) { $sanExt += "&IPAddress=$lanIp" }
+    $serverAuthExt = "2.5.29.37={text}1.3.6.1.5.5.7.3.1"
+    $leafBcExt = "2.5.29.19={critical}{text}ca=false"
 
-  if ($exit -ne 0 -or -not (Test-Path $crt) -or -not (Test-Path $key)) {
-    Err "Failed to generate TLS certificate/key for Nginx."
-    exit 1
+    try {
+      $cert = New-SelfSignedCertificate -Subject "CN=localhost" `
+        -FriendlyName "LocalS3 Docker TLS" `
+        -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 `
+        -KeyExportPolicy Exportable `
+        -KeyUsage DigitalSignature, KeyEncipherment `
+        -TextExtension @($sanExt, $leafBcExt, $serverAuthExt) `
+        -CertStoreLocation "Cert:\LocalMachine\My" `
+        -NotAfter (Get-Date).AddYears(3)
+      if (-not $cert) { throw "Certificate was not created." }
+
+      Export-Certificate -Cert "Cert:\LocalMachine\My\$($cert.Thumbprint)" -FilePath $derPath -Force | Out-Null
+      Export-PfxCertificate -Cert "Cert:\LocalMachine\My\$($cert.Thumbprint)" -FilePath $pfxPath -Password $password -Force | Out-Null
+
+      & $openssl.Source x509 -inform DER -in $derPath -out $crt | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "OpenSSL failed converting certificate to PEM." }
+
+      & $openssl.Source pkcs12 -in $pfxPath -nocerts -nodes -passin ("pass:" + $passwordPlain) -out $key | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw "OpenSSL failed extracting private key from PFX." }
+
+      $nativeGenerated = (Test-Path $crt) -and (Test-Path $key)
+    } catch {
+      Warn "Native Windows TLS generation failed: $($_.Exception.Message)"
+      Warn "Falling back to Docker-based certificate generation."
+    } finally {
+      Remove-Item -Path $pfxPath,$derPath -Force -ErrorAction SilentlyContinue
+    }
+  } else {
+    Warn "openssl.exe not found on Windows. Falling back to Docker-based certificate generation."
+  }
+
+  if (-not $nativeGenerated) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    docker --context $dockerCtx run --rm -v "${certDir}:/out" alpine:3.20 sh -lc "apk add --no-cache openssl >/dev/null && openssl req -x509 -nodes -newkey rsa:2048 -days 825 -keyout /out/localhost.key -out /out/localhost.crt -subj '/CN=$domain' -addext 'subjectAltName=$san'" 2>&1 | Out-Null
+    $exit = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+
+    if ($exit -ne 0 -or -not (Test-Path $crt) -or -not (Test-Path $key)) {
+      Err "Failed to generate TLS certificate/key for Nginx."
+      exit 1
+    }
   }
 }
 

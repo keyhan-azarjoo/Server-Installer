@@ -130,7 +130,7 @@ function ActionIcon({ title, onClick, disabled, color = "primary", variant = "ou
   );
 }
 
-function IconOnlyAction({ title, onClick, disabled, color = "default", variant = "outlined", IconComp, fallback }) {
+function IconOnlyAction({ title, onClick, disabled, color = "default", variant = "outlined", IconComp }) {
   return (
     <Tooltip title={title}>
       <span>
@@ -152,7 +152,7 @@ function IconOnlyAction({ title, onClick, disabled, color = "default", variant =
             },
           }}
         >
-          {IconComp ? <IconComp fontSize="small" /> : <span style={{ fontSize: 11, fontWeight: 700 }}>{fallback || "?"}</span>}
+          {IconComp ? <IconComp fontSize="small" /> : null}
         </IconButton>
       </span>
     </Tooltip>
