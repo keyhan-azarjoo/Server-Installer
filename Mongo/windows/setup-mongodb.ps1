@@ -637,6 +637,32 @@ security:
   [System.IO.File]::WriteAllText($cfgPath, $config, (New-Object System.Text.UTF8Encoding($false)))
 }
 
+function Invoke-MongoshWithTimeout([string]$mongoshExe, [string]$uri, [string]$scriptPath, [int]$timeoutSeconds = 45) {
+  if ([string]::IsNullOrWhiteSpace($mongoshExe) -or -not (Test-Path $mongoshExe)) {
+    return 1
+  }
+  $outPath = Join-Path $Script:MongoRoot "logs\mongosh-last.log"
+  $errPath = Join-Path $Script:MongoRoot "logs\mongosh-last.err.log"
+  Remove-Item -Force -Path $outPath, $errPath -ErrorAction SilentlyContinue
+  try {
+    $proc = Start-Process -FilePath $mongoshExe `
+      -ArgumentList @($uri, "--quiet", "--file", $scriptPath) `
+      -PassThru `
+      -WindowStyle Hidden `
+      -RedirectStandardOutput $outPath `
+      -RedirectStandardError $errPath
+    if (-not $proc.WaitForExit($timeoutSeconds * 1000)) {
+      try { $proc.Kill() } catch {}
+      Warn "mongosh timed out after $timeoutSeconds seconds."
+      return 124
+    }
+    return $proc.ExitCode
+  } catch {
+    Warn "mongosh execution failed: $($_.Exception.Message)"
+    return 1
+  }
+}
+
 function Initialize-NativeMongoAuthentication([string]$mongoshExe, [string]$connectHost, [int]$mongoPort, [string]$mongoUser, [string]$mongoPassword) {
   if ([string]::IsNullOrWhiteSpace($mongoshExe) -or -not (Test-Path $mongoshExe)) {
     return $false
@@ -656,13 +682,7 @@ if (!existing) {
 "@
   [System.IO.File]::WriteAllText($initScript, $js, (New-Object System.Text.UTF8Encoding($false)))
 
-  $prev = $ErrorActionPreference
-  $ErrorActionPreference = "Continue"
-  try {
-    & $mongoshExe "mongodb://$connectHost`:$mongoPort/admin" --quiet --file $initScript 2>$null | Out-Null
-  } catch {}
-  $exitCode = $LASTEXITCODE
-  $ErrorActionPreference = $prev
+  $exitCode = Invoke-MongoshWithTimeout -mongoshExe $mongoshExe -uri "mongodb://$connectHost`:$mongoPort/admin" -scriptPath $initScript -timeoutSeconds 45
   Remove-Item -Force -Path $initScript -ErrorAction SilentlyContinue
   return ($exitCode -eq 0)
 }
@@ -680,13 +700,7 @@ if (!result || result.ok !== 1) {
 "@
   [System.IO.File]::WriteAllText($testScript, $js, (New-Object System.Text.UTF8Encoding($false)))
   $uri = "mongodb://$([uri]::EscapeDataString($mongoUser)):$([uri]::EscapeDataString($mongoPassword))@$connectHost`:$mongoPort/admin?authSource=admin"
-  $prev = $ErrorActionPreference
-  $ErrorActionPreference = "Continue"
-  try {
-    & $mongoshExe $uri --quiet --file $testScript 2>$null | Out-Null
-  } catch {}
-  $exitCode = $LASTEXITCODE
-  $ErrorActionPreference = $prev
+  $exitCode = Invoke-MongoshWithTimeout -mongoshExe $mongoshExe -uri $uri -scriptPath $testScript -timeoutSeconds 30
   Remove-Item -Force -Path $testScript -ErrorAction SilentlyContinue
   return ($exitCode -eq 0)
 }
