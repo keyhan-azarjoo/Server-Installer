@@ -127,8 +127,21 @@ function ActionIcon({ title, onClick, disabled, color = "primary", variant = "ou
   );
 }
 
-function isServiceRunningStatus(status) {
-  return /running|active|up/i.test(String(status || ""));
+function isServiceRunningStatus(status, subStatus = "") {
+  const primary = String(status || "").trim();
+  const secondary = String(subStatus || "").trim();
+  if (/running|up/i.test(secondary)) return true;
+  if (/dead|failed|inactive|exited/i.test(secondary)) return false;
+  return /running|active|up/i.test(primary);
+}
+
+function formatServiceState(status, subStatus = "") {
+  const primary = String(status || "").trim();
+  const secondary = String(subStatus || "").trim();
+  if (primary && secondary && primary.toLowerCase() !== secondary.toLowerCase()) {
+    return `${primary}/${secondary}`;
+  }
+  return primary || secondary || "-";
 }
 
 function App() {
@@ -218,6 +231,16 @@ function App() {
   }, [page]);
 
   React.useEffect(() => {
+    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo")) {
+      return undefined;
+    }
+    const t = setInterval(() => {
+      loadServices.current();
+    }, 10000);
+    return () => clearInterval(t);
+  }, [page]);
+
+  React.useEffect(() => {
     const hook = (payload) => {
       if (!payload || typeof payload !== "object") return;
       if (payload.open) setTermOpen(true);
@@ -244,6 +267,7 @@ function App() {
           setRunError(`${title} failed (exit ${j.exit_code}). Check Web Terminal output for details.`);
         }
         setTermState("Idle");
+        loadServices.current();
         loadSystem.current();
         return;
       }
@@ -463,6 +487,11 @@ function App() {
 
   const onServiceAction = async (action, svc) => {
     if (!svc || !svc.name) return;
+    if (action === "stop" || action === "delete") {
+      const label = action === "delete" ? "delete" : "stop";
+      const ok = window.confirm(`Do you want to ${label} '${svc.name}'?`);
+      if (!ok) return;
+    }
     setServiceBusy(true);
     try {
       const body = new URLSearchParams();
@@ -493,6 +522,8 @@ function App() {
       setInfoMessage(`No running ${label} services found to stop.`);
       return;
     }
+    const ok = window.confirm(`Do you want to stop all running ${label} services (${list.length})?`);
+    if (!ok) return;
     setServiceBusy(true);
     try {
       let okCount = 0;
@@ -840,7 +871,7 @@ function App() {
                             <Typography variant="caption" color="text.secondary">{svc.display_name || "-"}</Typography>
                           </Box>
                           <Chip size="small" label={svc.kind || "service"} />
-                          <Chip size="small" color={/running|active|up/i.test(status) ? "success" : "default"} label={status || "-"} />
+                          <Chip size="small" color={isServiceRunningStatus(status, svc.sub_status) ? "success" : "default"} label={formatServiceState(status, svc.sub_status)} />
                           <Chip size="small" color={autostart ? "primary" : "default"} label={autostart ? "autostart:on" : "autostart:off"} />
                           <Box sx={{ flexGrow: 1 }} />
                           <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("start", svc)} sx={{ textTransform: "none" }}>{actionLabel("start")}</Button>
@@ -939,17 +970,17 @@ function App() {
                             {renderServiceUrls(svc)}
                             {renderServicePorts(svc)}
                           </Box>
-                          <Chip size="small" color={isServiceRunningStatus(svc.status) ? "success" : "default"} label={svc.status || "-"} />
+                          <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
                           <Box sx={{ flexGrow: 1 }} />
                           <Button
                             size="small"
                             variant="outlined"
-                            color={isServiceRunningStatus(svc.status) ? "error" : "primary"}
+                            color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "primary"}
                             disabled={serviceBusy}
-                            onClick={() => onServiceAction(isServiceRunningStatus(svc.status) ? "stop" : "start", svc)}
+                            onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
                             sx={{ textTransform: "none" }}
                           >
-                            {isServiceRunningStatus(svc.status) ? "Stop" : "Start"}
+                            {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
                           </Button>
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
                         </Stack>
@@ -1016,17 +1047,17 @@ function App() {
                             {renderServiceUrls(svc)}
                             {renderServicePorts(svc)}
                           </Box>
-                          <Chip size="small" color={isServiceRunningStatus(svc.status) ? "success" : "default"} label={svc.status || "-"} />
+                          <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
                           <Box sx={{ flexGrow: 1 }} />
                           <Button
                             size="small"
                             variant="outlined"
-                            color={isServiceRunningStatus(svc.status) ? "error" : "primary"}
+                            color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "primary"}
                             disabled={serviceBusy}
-                            onClick={() => onServiceAction(isServiceRunningStatus(svc.status) ? "stop" : "start", svc)}
+                            onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
                             sx={{ textTransform: "none" }}
                           >
-                            {isServiceRunningStatus(svc.status) ? "Stop" : "Start"}
+                            {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
                           </Button>
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
                         </Stack>
@@ -1103,7 +1134,7 @@ function App() {
                             {renderServiceUrls(svc)}
                             {renderServicePorts(svc)}
                           </Box>
-                          <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
+                          <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
                           <Box sx={{ flexGrow: 1 }} />
                           <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("start", svc)} sx={{ textTransform: "none" }}>Start</Button>
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
@@ -1178,7 +1209,7 @@ function App() {
                             {renderServiceUrls(svc)}
                             {renderServicePorts(svc)}
                           </Box>
-                          <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
+                          <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
                           <Box sx={{ flexGrow: 1 }} />
                           <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("start", svc)} sx={{ textTransform: "none" }}>Start</Button>
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>

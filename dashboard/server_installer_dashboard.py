@@ -978,8 +978,30 @@ def get_service_items():
                 desc = " ".join(parts[4:]) if len(parts) > 4 else ""
                 if not managed_patterns.search(f"{name} {desc}"):
                     continue
-                rc_enabled, out_enabled = run_capture(["systemctl", "is-enabled", name], timeout=20)
-                autostart = rc_enabled == 0 and str(out_enabled or "").strip().lower() in ("enabled", "static")
+                active_state = active
+                sub_state = sub
+                unit_desc = desc
+                unit_file_state = ""
+                rc_show, out_show = run_capture(
+                    ["systemctl", "show", name, "-p", "ActiveState", "-p", "SubState", "-p", "UnitFileState", "-p", "Description"],
+                    timeout=20,
+                )
+                if rc_show == 0 and out_show:
+                    for raw_line in out_show.splitlines():
+                        line = str(raw_line or "").strip()
+                        if line.startswith("ActiveState="):
+                            active_state = line.split("=", 1)[1].strip() or active_state
+                        elif line.startswith("SubState="):
+                            sub_state = line.split("=", 1)[1].strip() or sub_state
+                        elif line.startswith("UnitFileState="):
+                            unit_file_state = line.split("=", 1)[1].strip().lower()
+                        elif line.startswith("Description="):
+                            unit_desc = line.split("=", 1)[1].strip() or unit_desc
+                if not unit_file_state:
+                    rc_enabled, out_enabled = run_capture(["systemctl", "is-enabled", name], timeout=20)
+                    if rc_enabled == 0:
+                        unit_file_state = str(out_enabled or "").strip().lower()
+                autostart = unit_file_state in ("enabled", "static")
                 urls = []
                 ports = []
                 base_name = name.replace(".service", "")
@@ -993,9 +1015,9 @@ def get_service_items():
                     {
                         "kind": "service",
                         "name": name,
-                        "display_name": desc,
-                        "status": active,
-                        "sub_status": sub,
+                        "display_name": unit_desc,
+                        "status": active_state,
+                        "sub_status": sub_state,
                         "load": load,
                         "autostart": autostart,
                         "platform": "linux",
