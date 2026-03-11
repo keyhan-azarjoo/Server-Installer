@@ -120,11 +120,27 @@ function Find-DockerSwitchCli {
     "C:\Program Files\Docker\Docker\DockerCli.exe",
     "C:\Program Files\Docker\Docker\com.docker.cli.exe",
     "C:\Program Files\Docker\Docker\resources\bin\com.docker.cli.exe",
-    "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker\DockerCli.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker\com.docker.cli.exe")
   )) {
-    if (Test-Path $candidate) {
+    if ($candidate -and (Test-Path $candidate)) {
       return $candidate
     }
+  }
+
+  foreach ($root in @(
+    "C:\Program Files\Docker\Docker",
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker")
+  )) {
+    if (-not $root -or -not (Test-Path $root)) { continue }
+    try {
+      $match = Get-ChildItem -Path $root -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -in @("DockerCli.exe","com.docker.cli.exe") } |
+        Select-Object -First 1
+      if ($match -and $match.FullName) {
+        return $match.FullName
+      }
+    } catch {}
   }
 
   return ""
@@ -145,9 +161,22 @@ function Ensure-DockerLinuxEngine {
 
   $dockerCli = Find-DockerSwitchCli
   if (-not $dockerCli) {
-    Err "Docker Desktop switch CLI not found."
-    Warn "Open Docker Desktop manually and switch to Linux containers, then rerun."
-    exit 1
+    Warn "Docker Desktop switch CLI not found. Attempting Docker Desktop repair/install..."
+    $ok = Install-DockerDesktopDirect
+    if (-not $ok) {
+      Err "Automatic Docker Desktop installation/repair failed."
+      Warn "Open Docker Desktop manually and switch to Linux containers, then rerun."
+      exit 1
+    }
+    Try-EnableDockerCliFromDefaultPath
+    Start-DockerDesktop
+    Start-Sleep -Seconds 10
+    $dockerCli = Find-DockerSwitchCli
+    if (-not $dockerCli) {
+      Err "Docker Desktop switch CLI not found after repair/install."
+      Warn "Open Docker Desktop manually and switch to Linux containers, then rerun."
+      exit 1
+    }
   }
   Info "Using Docker switch CLI: $dockerCli"
 
