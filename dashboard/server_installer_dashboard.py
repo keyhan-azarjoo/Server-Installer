@@ -784,6 +784,161 @@ def get_windows_native_mongo_info():
         return {}
 
 
+def find_windows_mongosh_exe():
+    if os.name != "nt":
+        return ""
+    candidates = [
+        Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "LocalMongoDB" / "mongosh" / "bin" / "mongosh.exe",
+        Path(os.environ.get("ProgramData", r"C:\ProgramData")) / "LocalMongoDB" / "mongodb" / "bin" / "mongosh.exe",
+    ]
+    for base in filter(None, [os.environ.get("ProgramFiles"), os.environ.get("ProgramW6432"), r"C:\Program Files"]):
+        root = Path(base) / "MongoDB"
+        if root.exists():
+            candidates.extend(root.rglob("mongosh.exe"))
+    for path in candidates:
+        try:
+            if path and Path(path).exists():
+                return str(Path(path))
+        except Exception:
+            continue
+    rc, out = run_capture(["where", "mongosh"], timeout=10)
+    if rc == 0 and out:
+        for line in out.splitlines():
+            p = line.strip().strip('"')
+            if p.lower().endswith("mongosh.exe") and Path(p).exists():
+                return p
+    return ""
+
+
+def get_windows_native_mongo_uri(loopback=True):
+    info = get_windows_native_mongo_info() if os.name == "nt" else {}
+    port = str(info.get("port") or "27017").strip()
+    host = "127.0.0.1" if loopback else choose_service_host()
+    if str(info.get("auth_enabled") or "").lower() in ("true", "1") or bool(info.get("auth_enabled")):
+        return f"mongodb://admin:StrongPassword123@{host}:{port}/admin?authSource=admin"
+    return f"mongodb://{host}:{port}/admin"
+
+
+def run_windows_mongosh_json(body_js, timeout=40):
+    if os.name != "nt":
+        return False, {"error": "Windows native Mongo UI is only available on Windows."}
+    mongosh = find_windows_mongosh_exe()
+    if not mongosh:
+        return False, {"error": "mongosh.exe not found. Re-run the Windows MongoDB installer."}
+    uri = get_windows_native_mongo_uri(loopback=True)
+    temp_dir = Path(os.environ.get("TEMP", os.environ.get("TMP", str(ROOT))))
+    temp_dir.mkdir(parents=True, exist_ok=True)
+    script_path = temp_dir / f"codex-mongo-native-{secrets.token_hex(8)}.js"
+    begin = "__CODEX_MONGO_JSON_BEGIN__"
+    end = "__CODEX_MONGO_JSON_END__"
+    wrapper = f"""
+try {{
+  const __result = (() => {{
+{body_js}
+  }})();
+  print("{begin}");
+  print(EJSON.stringify({{ ok: true, result: __result }}, null, 2));
+  print("{end}");
+}} catch (e) {{
+  print("{begin}");
+  print(EJSON.stringify({{ ok: false, error: String((e && (e.stack || e.message)) || e) }}, null, 2));
+  print("{end}");
+  quit(1);
+}}
+"""
+    script_path.write_text(wrapper, encoding="utf-8")
+    try:
+        rc, out = run_capture([mongosh, uri, "--quiet", "--file", str(script_path)], timeout=timeout)
+    finally:
+        try:
+            script_path.unlink(missing_ok=True)
+        except Exception:
+            pass
+    text = out or ""
+    start = text.find(begin)
+    stop = text.find(end, start + len(begin)) if start >= 0 else -1
+    if start < 0 or stop < 0:
+        return False, {"error": (text.strip() or "mongosh did not return JSON output.")}
+    payload_text = text[start + len(begin):stop].strip()
+    try:
+        payload = json.loads(payload_text)
+    except Exception as ex:
+        return False, {"error": f"Failed to parse mongosh output: {ex}", "raw": payload_text}
+    if rc != 0 and payload.get("ok") is not True:
+        return False, payload
+    if payload.get("ok") is not True:
+        return False, payload
+    return True, payload.get("result")
+
+
+def mongo_native_overview():
+    body_js = """
+const adminDb = db.getSiblingDB('admin');
+const build = adminDb.runCommand({ buildInfo: 1 }) || {};
+const list = adminDb.adminCommand({ listDatabases: 1, nameOnly: true }) || {};
+return {
+  version: build.version || "",
+  databases: (list.databases || []).map((x) => ({
+    name: x.name || "",
+    sizeOnDisk: x.sizeOnDisk || 0,
+    empty: !!x.empty
+  }))
+};
+"""
+    return run_windows_mongosh_json(body_js, timeout=40)
+
+
+def mongo_native_collections(db_name):
+    db_name = str(db_name or "").strip()
+    if not db_name:
+        return False, {"error": "Database name is required."}
+    body_js = f"""
+const targetDb = db.getSiblingDB({json.dumps(db_name)});
+return {{
+  database: {json.dumps(db_name)},
+  collections: (targetDb.getCollectionInfos() || []).map((c) => ({{
+    name: c.name || "",
+    type: c.type || "collection"
+  }}))
+}};
+"""
+    return run_windows_mongosh_json(body_js, timeout=40)
+
+
+def mongo_native_documents(db_name, collection_name, limit=50):
+    db_name = str(db_name or "").strip()
+    collection_name = str(collection_name or "").strip()
+    try:
+        limit = max(1, min(200, int(limit)))
+    except Exception:
+        limit = 50
+    if not db_name or not collection_name:
+        return False, {"error": "Database and collection are required."}
+    body_js = f"""
+const targetDb = db.getSiblingDB({json.dumps(db_name)});
+const docs = targetDb.getCollection({json.dumps(collection_name)}).find({{}}, {{}}).limit({limit}).toArray();
+return {{
+  database: {json.dumps(db_name)},
+  collection: {json.dumps(collection_name)},
+  limit: {limit},
+  documents: docs
+}};
+"""
+    return run_windows_mongosh_json(body_js, timeout=50)
+
+
+def mongo_native_run_script(db_name, script_text):
+    db_name = str(db_name or "admin").strip() or "admin"
+    script_text = str(script_text or "").strip()
+    if not script_text:
+        return False, {"error": "Script is required."}
+    body_js = f"""
+const db = globalThis.db.getSiblingDB({json.dumps(db_name)});
+{script_text}
+"""
+    return run_windows_mongosh_json(body_js, timeout=60)
+
+
 def get_service_items():
     items = []
     managed_patterns = re.compile(
@@ -3924,31 +4079,201 @@ def page_mongo_native_ui():
         connection = f"mongodb://{host}:{int(port)}/"
     auth_text = "enabled" if auth_enabled else "not initialized"
     tls_text = "disabled"
+    compass_uri = get_windows_native_mongo_uri(loopback=False) if os.name == "nt" else connection
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>MongoDB Web</title>
 <style>
 body{{font-family:Segoe UI,Arial,sans-serif;background:#0b1220;color:#e5eefc;padding:24px;margin:0}}
-.card{{max-width:920px;margin:0 auto;background:#111a2e;border:1px solid #243454;border-radius:16px;padding:24px}}
+.card{{max-width:1280px;margin:0 auto;background:#111a2e;border:1px solid #243454;border-radius:16px;padding:24px}}
 .muted{{color:#a9b9d5}}
 .row{{margin:10px 0}}
 .pill{{display:inline-block;padding:6px 10px;border-radius:999px;background:#1d4ed8;color:#fff;font-size:12px;margin-right:8px}}
 a{{color:#93c5fd}}
-code{{background:#0a1020;padding:3px 6px;border-radius:6px;color:#dbeafe}}
+code, pre{{background:#0a1020;padding:3px 6px;border-radius:6px;color:#dbeafe}}
 .actions{{margin-top:18px;display:flex;gap:12px;flex-wrap:wrap}}
 .btn{{display:inline-block;padding:10px 14px;border-radius:10px;text-decoration:none;background:#2563eb;color:#fff}}
 .btn.secondary{{background:#334155}}
+.layout{{display:grid;grid-template-columns:260px 280px 1fr;gap:16px;margin-top:20px}}
+.panel{{background:#0f172a;border:1px solid #22304a;border-radius:14px;padding:14px;min-height:420px}}
+.panel h3{{margin:0 0 12px 0;font-size:16px}}
+.list{{display:flex;flex-direction:column;gap:8px;max-height:420px;overflow:auto}}
+.item{{padding:10px 12px;border-radius:10px;border:1px solid #243454;background:#111827;color:#e5eefc;cursor:pointer;text-align:left}}
+.item.active{{border-color:#60a5fa;background:#13213c}}
+.toolbar{{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 14px 0}}
+textarea{{width:100%;min-height:180px;background:#0a1020;color:#dbeafe;border:1px solid #22304a;border-radius:12px;padding:12px;font-family:Consolas,monospace}}
+select,input{{background:#0a1020;color:#dbeafe;border:1px solid #22304a;border-radius:10px;padding:8px 10px}}
+pre{{white-space:pre-wrap;word-break:break-word;max-height:420px;overflow:auto;padding:14px}}
+.stack{{display:flex;flex-direction:column;gap:14px}}
+@media (max-width:1100px){{.layout{{grid-template-columns:1fr}}}}
 </style>
 </head><body><div class="card">
 <div class="pill">MongoDB</div><div class="pill">Windows Native</div><div class="pill">{html.escape(web_version)}</div>
 <h2>MongoDB Web</h2>
-<p class="muted">Windows native MongoDB does not include the Linux Docker web admin UI. This page keeps the same dashboard action available and exposes the live connection details.</p>
+<p class="muted">Windows native MongoDB management UI. Browse databases and collections, inspect documents, and run `mongosh` commands directly from the dashboard.</p>
 <div class="row">Connection: <code>{html.escape(connection or "mongodb://localhost:27017/")}</code></div>
+<div class="row">Compass URI: <code id="compassUri">{html.escape(compass_uri or "mongodb://admin:StrongPassword123@localhost:27017/admin?authSource=admin")}</code></div>
 <div class="row">Version: <code>{html.escape(version or "unknown")}</code></div>
 <div class="row">Authentication: <code>{html.escape(auth_text)}</code></div>
 <div class="row">TLS/SSL: <code>{html.escape(tls_text)}</code></div>
 <div class="actions">
 <a class="btn" href="/">Back To Dashboard</a>
 <a class="btn secondary" href="https://www.mongodb.com/try/download/compass" target="_blank" rel="noreferrer noopener">Download Compass</a>
+<button class="btn secondary" id="copyCompass" type="button">Copy Compass URI</button>
 </div>
+<div class="layout">
+  <div class="panel">
+    <h3>Databases</h3>
+    <div class="toolbar"><button class="btn secondary" id="refreshDbs" type="button">Refresh</button></div>
+    <div class="list" id="dbList"><div class="muted">Loading...</div></div>
+  </div>
+  <div class="panel">
+    <h3>Collections</h3>
+    <div class="row muted" id="selectedDbLabel">Select a database.</div>
+    <div class="list" id="collectionList"><div class="muted">No database selected.</div></div>
+  </div>
+  <div class="panel">
+    <div class="stack">
+      <div>
+        <h3>Documents</h3>
+        <div class="toolbar">
+          <label class="muted">Limit <input id="docLimit" type="number" min="1" max="200" value="50"></label>
+          <button class="btn secondary" id="refreshDocs" type="button">Load Documents</button>
+        </div>
+        <pre id="docOutput">Select a collection.</pre>
+      </div>
+      <div>
+        <h3>Command Console</h3>
+        <div class="toolbar">
+          <label class="muted">Database <input id="commandDb" type="text" value="admin"></label>
+          <button class="btn" id="runCommand" type="button">Run</button>
+        </div>
+        <textarea id="commandText">return db.runCommand({{ ping: 1 }});</textarea>
+        <pre id="commandOutput">Run a command to manage MongoDB.</pre>
+      </div>
+    </div>
+  </div>
+</div>
+<script>
+const state = {{ db: "", collection: "" }};
+const dbList = document.getElementById("dbList");
+const collectionList = document.getElementById("collectionList");
+const selectedDbLabel = document.getElementById("selectedDbLabel");
+const docOutput = document.getElementById("docOutput");
+const commandOutput = document.getElementById("commandOutput");
+const commandDb = document.getElementById("commandDb");
+const commandText = document.getElementById("commandText");
+const docLimit = document.getElementById("docLimit");
+
+async function apiGet(url) {{
+  const r = await fetch(url, {{ headers: {{ "X-Requested-With": "fetch" }} }});
+  return await r.json();
+}}
+async function apiPost(url, body) {{
+  const r = await fetch(url, {{
+    method: "POST",
+    headers: {{ "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" }},
+    body: new URLSearchParams(body).toString()
+  }});
+  return await r.json();
+}}
+function pretty(value) {{
+  return JSON.stringify(value, null, 2);
+}}
+async function loadDatabases() {{
+  dbList.innerHTML = '<div class="muted">Loading...</div>';
+  const j = await apiGet('/api/mongo/native/overview');
+  if (!j.ok) {{
+    dbList.innerHTML = '<div class="muted">' + String(j.error || 'Failed to load databases.') + '</div>';
+    return;
+  }}
+  const dbs = Array.isArray(j.databases) ? j.databases : [];
+  if (!dbs.length) {{
+    dbList.innerHTML = '<div class="muted">No databases found.</div>';
+    return;
+  }}
+  dbList.innerHTML = '';
+  dbs.forEach((item) => {{
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'item' + (state.db === item.name ? ' active' : '');
+    btn.textContent = item.name;
+    btn.onclick = async () => {{
+      state.db = item.name;
+      state.collection = '';
+      commandDb.value = item.name;
+      await loadDatabases();
+      await loadCollections();
+    }};
+    dbList.appendChild(btn);
+  }});
+}}
+async function loadCollections() {{
+  if (!state.db) {{
+    selectedDbLabel.textContent = 'Select a database.';
+    collectionList.innerHTML = '<div class="muted">No database selected.</div>';
+    return;
+  }}
+  selectedDbLabel.textContent = 'Database: ' + state.db;
+  collectionList.innerHTML = '<div class="muted">Loading...</div>';
+  const j = await apiGet('/api/mongo/native/collections?db=' + encodeURIComponent(state.db));
+  if (!j.ok) {{
+    collectionList.innerHTML = '<div class="muted">' + String(j.error || 'Failed to load collections.') + '</div>';
+    return;
+  }}
+  const cols = Array.isArray(j.collections) ? j.collections : [];
+  if (!cols.length) {{
+    collectionList.innerHTML = '<div class="muted">No collections found.</div>';
+    return;
+  }}
+  collectionList.innerHTML = '';
+  cols.forEach((item) => {{
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'item' + (state.collection === item.name ? ' active' : '');
+    btn.textContent = item.name;
+    btn.onclick = async () => {{
+      state.collection = item.name;
+      await loadCollections();
+      await loadDocuments();
+    }};
+    collectionList.appendChild(btn);
+  }});
+}}
+async function loadDocuments() {{
+  if (!state.db || !state.collection) {{
+    docOutput.textContent = 'Select a collection.';
+    return;
+  }}
+  docOutput.textContent = 'Loading...';
+  const limit = Math.max(1, Math.min(200, Number(docLimit.value || 50)));
+  const j = await apiGet('/api/mongo/native/documents?db=' + encodeURIComponent(state.db) + '&collection=' + encodeURIComponent(state.collection) + '&limit=' + encodeURIComponent(limit));
+  if (!j.ok) {{
+    docOutput.textContent = String(j.error || 'Failed to load documents.');
+    return;
+  }}
+  docOutput.textContent = pretty(j.documents || []);
+}}
+async function runCommand() {{
+  commandOutput.textContent = 'Running...';
+  const j = await apiPost('/api/mongo/native/command', {{ db: commandDb.value || 'admin', script: commandText.value || '' }});
+  if (!j.ok) {{
+    commandOutput.textContent = String(j.error || 'Command failed.');
+    return;
+  }}
+  commandOutput.textContent = pretty(j.result);
+  await loadDatabases();
+  if (state.db) await loadCollections();
+}}
+document.getElementById('refreshDbs').onclick = loadDatabases;
+document.getElementById('refreshDocs').onclick = loadDocuments;
+document.getElementById('runCommand').onclick = runCommand;
+document.getElementById('copyCompass').onclick = async () => {{
+  const text = document.getElementById('compassUri').textContent || '';
+  try {{
+    await navigator.clipboard.writeText(text);
+  }} catch (_err) {{}}
+}};
+loadDatabases();
+</script>
 </div></body></html>"""
 
 
