@@ -523,6 +523,21 @@ def get_mongo_info():
     }
     preferred_host = choose_service_host()
 
+    if os.name == "nt":
+        native = get_windows_native_mongo_info()
+        if native.get("installed"):
+            info["installed"] = True
+        if native.get("version"):
+            info["server_version"] = str(native.get("version") or "")
+        connection = str(native.get("connection") or "").strip()
+        port = str(native.get("port") or "").strip()
+        if connection:
+            info["connection_string"] = connection
+        elif port.isdigit():
+            info["connection_string"] = f"mongodb://{preferred_host}:{int(port)}/"
+        if native.get("mode") == "native":
+            info["web_version"] = "native"
+
     if command_exists("docker"):
         for name in ("localmongo-mongodb", "localmongo-web", "localmongo-https"):
             details = _get_docker_container_details(name)
@@ -720,6 +735,51 @@ def _safe_service_name(name):
     return value
 
 
+def get_windows_native_mongo_info():
+    if os.name != "nt":
+        return {}
+    ps = (
+        "$root=Join-Path $env:ProgramData 'LocalMongoDB'; "
+        "$meta=Join-Path $root 'install-info.json'; "
+        "$cfg=Join-Path $root 'config\\mongod.cfg'; "
+        "$svc=Get-Service -Name 'LocalMongoDB' -ErrorAction SilentlyContinue; "
+        "$obj=[ordered]@{installed=$false;version='';connection='';port='';mode=''}; "
+        "if($svc){$obj.installed=$true}; "
+        "if(Test-Path $meta){ "
+        "  try { "
+        "    $m=Get-Content -LiteralPath $meta -Raw | ConvertFrom-Json; "
+        "    if($m.version){$obj.version=[string]$m.version}; "
+        "    if($m.connection_string){$obj.connection=[string]$m.connection_string}; "
+        "    if($m.mongo_port){$obj.port=[string]$m.mongo_port}; "
+        "    if($m.mode){$obj.mode=[string]$m.mode}; "
+        "    $obj.installed=$true; "
+        "  } catch {} "
+        "} "
+        "if((-not $obj.port) -and (Test-Path $cfg)){ "
+        "  $match=Select-String -Path $cfg -Pattern '^\\s*port\\s*:\\s*(\\d+)' -AllMatches -ErrorAction SilentlyContinue | Select-Object -First 1; "
+        "  if($match){$obj.port=[string]$match.Matches[0].Groups[1].Value} "
+        "} "
+        "if((-not $obj.version) -and (Test-Path (Join-Path $root 'mongodb\\bin\\mongod.exe'))){ "
+        "  try { "
+        "    $ver=& (Join-Path $root 'mongodb\\bin\\mongod.exe') --version 2>$null | Out-String; "
+        "    if($ver -match 'db version v([0-9A-Za-z\\.\\-]+)'){ $obj.version=$matches[1] } "
+        "  } catch {} "
+        "} "
+        "$obj | ConvertTo-Json -Depth 3"
+    )
+    rc, out = run_capture(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps],
+        timeout=20,
+    )
+    if rc != 0 or not out:
+        return {}
+    try:
+        data = json.loads(out)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
 def get_service_items():
     items = []
     managed_patterns = re.compile(
@@ -727,6 +787,7 @@ def get_service_items():
         re.IGNORECASE,
     )
     preferred_host = choose_service_host()
+    native_mongo = get_windows_native_mongo_info() if os.name == "nt" else {}
 
     if os.name == "nt":
         cmd = [
@@ -758,7 +819,7 @@ def get_service_items():
                             "start_type": str(row.get("StartType", "")).strip(),
                             "platform": "windows",
                             "urls": [],
-                            "ports": [],
+                            "ports": ([{"port": int(native_mongo.get("port")), "protocol": "tcp"}] if _is_mongo_name(name) and str(native_mongo.get("port", "")).isdigit() else []),
                         }
                     )
             except Exception:
@@ -1032,6 +1093,11 @@ if (Test-Path "IIS:\Sites\LocalMongoDB") {
   Stop-Website -Name 'LocalMongoDB' | Out-Null
   Remove-Website -Name 'LocalMongoDB' | Out-Null
 }
+$svc = Get-CimInstance Win32_Service -Filter "Name='LocalMongoDB'" -ErrorAction SilentlyContinue
+if($svc){
+  Stop-Service -Name 'LocalMongoDB' -Force -ErrorAction SilentlyContinue
+  sc.exe delete "LocalMongoDB" | Out-Null
+}
 $bindings = @('0.0.0.0:9445','127.0.0.1:9445')
 foreach($binding in $bindings){
   netsh http delete sslcert ipport=$binding 1>$null 2>$null | Out-Null
@@ -1045,6 +1111,7 @@ schtasks /End /TN "LocalMongoDB-Autostart" 1>$null 2>$null | Out-Null
 schtasks /Delete /TN "LocalMongoDB-Autostart" /F 1>$null 2>$null | Out-Null
 $root = Join-Path $env:ProgramData 'LocalMongoDB'
 if(Test-Path $root){ Remove-Item -Recurse -Force -Path $root -ErrorAction SilentlyContinue }
+Get-NetFirewallRule -DisplayName 'ServerInstaller-Managed-TCP-27017' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
 try {
   $cert = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match 'CN=Caddy Local Authority' -or $_.FriendlyName -match 'Caddy' }
   foreach($item in $cert){ Remove-Item -Path $item.PSPath -Force -ErrorAction SilentlyContinue }
@@ -2127,16 +2194,29 @@ def run_windows_mongo_installer(form, live_cb=None):
     elif not requested_host:
         env["LOCALMONGO_HOST"] = choose_service_host()
 
-    for port_key in ("LOCALMONGO_HTTPS_PORT", "LOCALMONGO_MONGO_PORT", "LOCALMONGO_WEB_PORT"):
+    windows_mode = (env.get("LOCALMONGO_WINDOWS_MODE", "native") or "native").strip().lower()
+    port_keys = ("LOCALMONGO_MONGO_PORT",) if windows_mode != "docker" else (
+        "LOCALMONGO_HTTPS_PORT",
+        "LOCALMONGO_MONGO_PORT",
+        "LOCALMONGO_WEB_PORT",
+    )
+    for port_key in port_keys:
         port_value = env.get(port_key, "").strip()
         if port_value and (not port_value.isdigit()):
             return 1, f"{port_key} must be numeric."
 
-    requested_https = env.get("LOCALMONGO_HTTPS_PORT", "").strip()
-    if requested_https and is_local_tcp_port_listening(requested_https):
-        usage = get_port_usage(requested_https, "tcp")
+    requested_mongo = env.get("LOCALMONGO_MONGO_PORT", "").strip()
+    if requested_mongo and is_local_tcp_port_listening(requested_mongo):
+        usage = get_port_usage(requested_mongo, "tcp")
         if not usage.get("managed_owner"):
-            return 1, f"Requested HTTPS port {requested_https} is already in use. Choose another port."
+            return 1, f"Requested MongoDB port {requested_mongo} is already in use. Choose another port."
+
+    if windows_mode == "docker":
+        requested_https = env.get("LOCALMONGO_HTTPS_PORT", "").strip()
+        if requested_https and is_local_tcp_port_listening(requested_https):
+            usage = get_port_usage(requested_https, "tcp")
+            if not usage.get("managed_owner"):
+                return 1, f"Requested HTTPS port {requested_https} is already in use. Choose another port."
 
     return run_process(
         [

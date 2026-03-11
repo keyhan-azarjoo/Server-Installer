@@ -63,6 +63,27 @@ function getSelectableIps(systemInfo) {
   return values;
 }
 
+function trimDetectedUrl(value) {
+  return String(value || "").trim().replace(/[),.;]+$/, "");
+}
+
+function extractLabeledUrl(text, label) {
+  const source = String(text || "");
+  const safeLabel = String(label || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = source.match(new RegExp(`${safeLabel}\\s*:\\s*(https?:\\/\\/\\S+)`, "i"));
+  return match ? trimDetectedUrl(match[1]) : "";
+}
+
+function uniqUrls(items) {
+  const values = [];
+  (items || []).forEach((item) => {
+    const url = trimDetectedUrl(item);
+    if (!url || values.includes(url)) return;
+    values.push(url);
+  });
+  return values;
+}
+
 function MiniMetric({ label, valueText, percent, color }) {
   return (
     <Paper variant="outlined" sx={{ p: 1, borderRadius: 2 }}>
@@ -610,6 +631,27 @@ function App() {
     return buildMongoUri(host);
   }, [mongo.connection_string, systemInfo]);
 
+  const s3ServiceUrls = React.useMemo(() => uniqUrls((s3Services || []).flatMap((svc) => svc?.urls || [])), [s3Services]);
+  const s3ConsoleUrl = React.useMemo(() => {
+    const fromTerminal = extractLabeledUrl(termText, "Console URL");
+    if (fromTerminal) return fromTerminal;
+    return s3ServiceUrls.find((url) => /:(9443|10443|18443|8444)(\/|$)/.test(url)) || "";
+  }, [s3ServiceUrls, termText]);
+  const s3ApiUrl = React.useMemo(() => {
+    const fromTerminal = extractLabeledUrl(termText, "API URL");
+    if (fromTerminal) return fromTerminal;
+    return s3ServiceUrls.find((url) => url !== s3ConsoleUrl) || s3ServiceUrls[0] || "";
+  }, [s3ConsoleUrl, s3ServiceUrls, termText]);
+  const s3LoginText = React.useMemo(() => {
+    if (!s3ConsoleUrl && !s3ApiUrl) return "";
+    return [
+      `Console: ${s3ConsoleUrl || "-"}`,
+      `API: ${s3ApiUrl || "-"}`,
+      "Username: admin",
+      "Password: StrongPassword123",
+    ].join("\n");
+  }, [s3ApiUrl, s3ConsoleUrl]);
+
   const launchCompassProtocol = React.useCallback((uri) => {
     if (!uri) return;
     window.location.href = uri;
@@ -855,9 +897,24 @@ function App() {
                   <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                     <Typography variant="h6" fontWeight={800}>S3 Services</Typography>
                     <Box sx={{ flexGrow: 1 }} />
+                    {!!s3ConsoleUrl && (
+                      <ActionIcon title="Open S3 Dashboard" disabled={serviceBusy} onClick={() => window.open(s3ConsoleUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
+                    )}
+                    {!!s3ApiUrl && (
+                      <ActionIcon title="Open S3 API" disabled={serviceBusy} onClick={() => window.open(s3ApiUrl, "_blank", "noopener,noreferrer")} IconComp={TryOpenCompassIcon} fallback="API" />
+                    )}
+                    {!!s3LoginText && (
+                      <ActionIcon title="Copy S3 Login" onClick={() => copyText(s3LoginText, "S3 login details")} IconComp={CopyCompassIcon} fallback="CP" />
+                    )}
                     <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button variant="outlined" color="error" disabled={serviceBusy || s3Services.length === 0} onClick={() => stopServicesBatch(s3Services, "S3")} sx={{ textTransform: "none" }}>Stop All S3</Button>
                   </Stack>
+                  {(!!s3ConsoleUrl || !!s3ApiUrl) && (
+                    <Box sx={{ mt: 1 }}>
+                      {!!s3ConsoleUrl && <Typography variant="body2">Dashboard URL: {s3ConsoleUrl}</Typography>}
+                      {!!s3ApiUrl && <Typography variant="body2">API URL: {s3ApiUrl}</Typography>}
+                    </Box>
+                  )}
                   <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
                     {s3Services.length === 0 && <Typography variant="body2">No S3-related services found.</Typography>}
                     {s3Services.map((svc) => (
@@ -918,9 +975,24 @@ function App() {
                   <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                     <Typography variant="h6" fontWeight={800}>S3 Services</Typography>
                     <Box sx={{ flexGrow: 1 }} />
+                    {!!s3ConsoleUrl && (
+                      <ActionIcon title="Open S3 Dashboard" disabled={serviceBusy} onClick={() => window.open(s3ConsoleUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
+                    )}
+                    {!!s3ApiUrl && (
+                      <ActionIcon title="Open S3 API" disabled={serviceBusy} onClick={() => window.open(s3ApiUrl, "_blank", "noopener,noreferrer")} IconComp={TryOpenCompassIcon} fallback="API" />
+                    )}
+                    {!!s3LoginText && (
+                      <ActionIcon title="Copy S3 Login" onClick={() => copyText(s3LoginText, "S3 login details")} IconComp={CopyCompassIcon} fallback="CP" />
+                    )}
                     <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
                     <Button variant="outlined" color="error" disabled={serviceBusy || s3Services.length === 0} onClick={() => stopServicesBatch(s3Services, "S3")} sx={{ textTransform: "none" }}>Stop All S3</Button>
                   </Stack>
+                  {(!!s3ConsoleUrl || !!s3ApiUrl) && (
+                    <Box sx={{ mt: 1 }}>
+                      {!!s3ConsoleUrl && <Typography variant="body2">Dashboard URL: {s3ConsoleUrl}</Typography>}
+                      {!!s3ApiUrl && <Typography variant="body2">API URL: {s3ApiUrl}</Typography>}
+                    </Box>
+                  )}
                   <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
                     {s3Services.length === 0 && <Typography variant="body2">No S3-related services found.</Typography>}
                     {s3Services.map((svc) => (
@@ -955,7 +1027,7 @@ function App() {
             <Grid item xs={12} md={8}>
               <ActionCard
                 title="Install MongoDB (Windows)"
-                description="Deploy MongoDB with a Compass-style web admin UI behind HTTPS."
+                description="Install MongoDB as a native Windows service."
                 action="/run/mongo_windows"
                 fields={[
                   { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
@@ -975,9 +1047,9 @@ function App() {
               <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
                 <CardContent>
                   <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Requirements</Typography>
-                  <Typography variant="body2">Docker: {docker.installed ? `Installed (${docker.version || "unknown"})` : "Will be installed if missing"}</Typography>
-                  <Typography variant="body2">HTTPS Proxy: Built into Mongo setup</Typography>
-                  <Typography variant="body2">MongoDB: {mongo.installed ? `Installed (${mongo.server_version || "docker"})` : "Not installed yet"}</Typography>
+                  <Typography variant="body2">Windows service: native `mongod` install</Typography>
+                  <Typography variant="body2">Docker: optional, not required</Typography>
+                  <Typography variant="body2">MongoDB: {mongo.installed ? `Installed (${mongo.server_version || "native"})` : "Not installed yet"}</Typography>
                   {!!mongo.https_url && <Typography variant="body2" sx={{ mt: 1 }}>HTTPS URL: {mongo.https_url}</Typography>}
                   {!!mongo.connection_string && <Typography variant="body2">Connection: {mongo.connection_string}</Typography>}
                 </CardContent>

@@ -5,6 +5,7 @@ $ErrorActionPreference = "Stop"
 
 $Script:MongoRoot = Join-Path $env:ProgramData "LocalMongoDB"
 $Script:MongoLabel = "com.localmongo.installer=true"
+$Script:NativeMongoServiceName = "LocalMongoDB"
 
 function Get-EnvOrDefault([string]$name, [string]$defaultValue) {
   $value = [Environment]::GetEnvironmentVariable($name)
@@ -345,9 +346,272 @@ function Ensure-DockerLinuxEngine([string]$dockerCtx) {
   return $resolvedCtx
 }
 
+function Get-LocalMongoMetadataPath {
+  return (Join-Path $Script:MongoRoot "install-info.json")
+}
+
+function Get-MongodVersion([string]$mongodExe) {
+  if (-not (Test-Path $mongodExe)) {
+    return ""
+  }
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  $out = (& $mongodExe --version 2>$null | Out-String)
+  $ErrorActionPreference = $prev
+  if ($out -match 'db version v([0-9][0-9A-Za-z\.\-]+)') {
+    return $matches[1]
+  }
+  return ""
+}
+
+function Find-MongodExe {
+  $cmd = Get-Command "mongod.exe" -ErrorAction SilentlyContinue
+  if ($cmd -and $cmd.Source -and (Test-Path $cmd.Source)) {
+    return $cmd.Source
+  }
+
+  $candidates = @(
+    (Join-Path $Script:MongoRoot "mongodb\bin\mongod.exe")
+  )
+
+  foreach ($base in @($env:ProgramFiles, $env:ProgramW6432, (Join-Path $env:SystemDrive "Program Files"))) {
+    if ([string]::IsNullOrWhiteSpace($base)) { continue }
+    $mongoServerRoot = Join-Path $base "MongoDB\Server"
+    if (-not (Test-Path $mongoServerRoot)) { continue }
+    $serverDirs = Get-ChildItem -Path $mongoServerRoot -Directory -ErrorAction SilentlyContinue | Sort-Object Name -Descending
+    foreach ($dir in $serverDirs) {
+      $candidates += (Join-Path $dir.FullName "bin\mongod.exe")
+    }
+  }
+
+  foreach ($candidate in $candidates) {
+    if (Test-Path $candidate) {
+      return $candidate
+    }
+  }
+
+  return $null
+}
+
+function Install-MongoViaWinget {
+  if (-not (Has-Cmd "winget")) {
+    return $null
+  }
+
+  Info "Attempting MongoDB install via winget..."
+  foreach ($pkg in @("MongoDB.Server", "MongoDB.DatabaseServer")) {
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    try {
+      & winget install -e --id $pkg --accept-source-agreements --accept-package-agreements --silent --disable-interactivity 2>$null | Out-Null
+    } catch {}
+    $exitCode = $LASTEXITCODE
+    $ErrorActionPreference = $prev
+    if ($exitCode -eq 0) {
+      $mongod = Find-MongodExe
+      if ($mongod) {
+        return $mongod
+      }
+    }
+  }
+
+  return $null
+}
+
+function Install-MongoFromZip {
+  $downloadRoot = Join-Path $Script:MongoRoot "downloads"
+  $extractRoot = Join-Path $downloadRoot "extract"
+  $nativeRoot = Join-Path $Script:MongoRoot "mongodb"
+  $version = Get-EnvOrDefault "LOCALMONGO_VERSION" "7.0.14"
+  $zipPath = Join-Path $downloadRoot "mongodb-windows.zip"
+  $customUrl = Get-EnvOrDefault "LOCALMONGO_DOWNLOAD_URL" ""
+  $urls = @()
+
+  if ($customUrl) {
+    $urls += $customUrl
+  } else {
+    $urls += @(
+      "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-$version.zip",
+      "https://downloads.mongodb.org/windows/mongodb-windows-x86_64-$version.zip",
+      "https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-2012plus-$version.zip",
+      "https://downloads.mongodb.org/windows/mongodb-windows-x86_64-2012plus-$version.zip"
+    )
+  }
+
+  if (-not (Test-Path $zipPath) -or ((Get-Item $zipPath).Length -lt 104857600)) {
+    Info "Downloading MongoDB archive..."
+    $ok = Download-FileFast -urls $urls -outFile $zipPath
+    if (-not $ok) {
+      Err "Failed to download MongoDB for Windows."
+      Warn "Set LOCALMONGO_DOWNLOAD_URL to a valid MongoDB Windows ZIP if your environment blocks the default URLs."
+      exit 1
+    }
+  } else {
+    Info "Using cached MongoDB archive: $zipPath"
+  }
+
+  if (Test-Path $extractRoot) {
+    Remove-Item -Recurse -Force -Path $extractRoot -ErrorAction SilentlyContinue
+  }
+  if (Test-Path $nativeRoot) {
+    Remove-Item -Recurse -Force -Path $nativeRoot -ErrorAction SilentlyContinue
+  }
+  New-Item -ItemType Directory -Force -Path $extractRoot, $nativeRoot | Out-Null
+
+  Info "Extracting MongoDB archive..."
+  Expand-Archive -Path $zipPath -DestinationPath $extractRoot -Force
+  $mongod = Get-ChildItem -Path $extractRoot -Recurse -Filter "mongod.exe" -File -ErrorAction SilentlyContinue | Select-Object -First 1
+  if (-not $mongod) {
+    Err "Downloaded MongoDB archive does not contain mongod.exe."
+    exit 1
+  }
+
+  $installRoot = Split-Path -Path $mongod.FullName -Parent | Split-Path -Parent
+  Copy-Item -Path (Join-Path $installRoot "*") -Destination $nativeRoot -Recurse -Force
+
+  $nativeMongod = Join-Path $nativeRoot "bin\mongod.exe"
+  if (-not (Test-Path $nativeMongod)) {
+    Err "MongoDB extraction completed but mongod.exe is missing from the expected path."
+    exit 1
+  }
+
+  return $nativeMongod
+}
+
+function Ensure-NativeMongoBinary {
+  $mongod = Find-MongodExe
+  if ($mongod) {
+    Info "Using existing mongod.exe: $mongod"
+    return $mongod
+  }
+
+  $wingetMongod = Install-MongoViaWinget
+  if ($wingetMongod) {
+    Info "MongoDB installed via winget."
+    return $wingetMongod
+  }
+
+  return (Install-MongoFromZip)
+}
+
+function Remove-ExistingNativeLocalMongo {
+  $service = Get-Service -Name $Script:NativeMongoServiceName -ErrorAction SilentlyContinue
+  if ($service) {
+    try {
+      if ($service.Status -ne "Stopped") {
+        Stop-Service -Name $Script:NativeMongoServiceName -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 2
+      }
+    } catch {}
+    sc.exe delete $Script:NativeMongoServiceName | Out-Null
+    Start-Sleep -Seconds 2
+  }
+
+  foreach ($path in @(
+    (Get-LocalMongoMetadataPath),
+    (Join-Path $Script:MongoRoot "config\mongod.cfg")
+  )) {
+    if (Test-Path $path) {
+      Remove-Item -Force -Path $path -ErrorAction SilentlyContinue
+    }
+  }
+}
+
+function Write-LocalMongoMetadata([string]$mode, [string]$mongodExe, [string]$hostValue, [int]$mongoPort, [string]$version) {
+  $metadata = [ordered]@{
+    mode = $mode
+    service_name = $Script:NativeMongoServiceName
+    mongod_path = $mongodExe
+    host = $hostValue
+    mongo_port = $mongoPort
+    connection_string = "mongodb://${hostValue}:$mongoPort/"
+    version = $version
+  }
+  $json = $metadata | ConvertTo-Json -Depth 4
+  [System.IO.File]::WriteAllText((Get-LocalMongoMetadataPath), $json, (New-Object System.Text.UTF8Encoding($false)))
+}
+
+function Install-NativeLocalMongo([string]$hostValue, [int]$mongoPort, [string]$mongoUser, [string]$mongoPassword, [string]$uiUser, [string]$uiPassword) {
+  Info "Installing MongoDB as a native Windows service..."
+  Remove-ExistingNativeLocalMongo
+
+  if (-not (Port-Free $mongoPort)) {
+    Warn "MongoDB port $mongoPort is still in use after cleanup."
+    $listeners = Get-PortListeners $mongoPort
+    if ($listeners.Count -gt 0) {
+      $listeners | Format-Table -AutoSize | Out-String | Write-Host
+    }
+    exit 1
+  }
+
+  $mongodExe = Ensure-NativeMongoBinary
+  $version = Get-MongodVersion -mongodExe $mongodExe
+  $configDir = Join-Path $Script:MongoRoot "config"
+  $dataDir = Join-Path $Script:MongoRoot "data"
+  $logDir = Join-Path $Script:MongoRoot "logs"
+  $cfgPath = Join-Path $configDir "mongod.cfg"
+  $logPath = Join-Path $logDir "mongod.log"
+  New-Item -ItemType Directory -Force -Path $Script:MongoRoot, $configDir, $dataDir, $logDir | Out-Null
+
+  $bindIps = @("127.0.0.1")
+  if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") {
+    $bindIps += $hostValue
+  }
+
+  $config = @"
+storage:
+  dbPath: "$($dataDir -replace '\\','\\')"
+systemLog:
+  destination: file
+  path: "$($logPath -replace '\\','\\')"
+  logAppend: true
+net:
+  bindIp: "$($bindIps -join ',')"
+  port: $mongoPort
+"@
+  [System.IO.File]::WriteAllText($cfgPath, $config, (New-Object System.Text.UTF8Encoding($false)))
+
+  & $mongodExe --config $cfgPath --install --serviceName $Script:NativeMongoServiceName --serviceDisplayName $Script:NativeMongoServiceName | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Err "Failed to register MongoDB Windows service."
+    exit 1
+  }
+
+  Set-Service -Name $Script:NativeMongoServiceName -StartupType Automatic
+  Start-Service -Name $Script:NativeMongoServiceName
+  if (-not (Wait-TcpPort -targetHost "127.0.0.1" -port $mongoPort -maxSeconds 45)) {
+    Err "MongoDB service did not open TCP port $mongoPort."
+    exit 1
+  }
+
+  Ensure-FirewallPort -port $mongoPort
+  Write-LocalMongoMetadata -mode "native" -mongodExe $mongodExe -hostValue $hostValue -mongoPort $mongoPort -version $version
+
+  Write-Host ""
+  Write-Host "===== INSTALLATION COMPLETE ====="
+  Write-Host "MongoDB service:               $($Script:NativeMongoServiceName)"
+  Write-Host "MongoDB connection:            mongodb://localhost:$mongoPort/"
+  if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") {
+    Write-Host "MongoDB connection (Host):     mongodb://${hostValue}:$mongoPort/"
+  }
+  if ($version) {
+    Write-Host "MongoDB version:               $version"
+  }
+  Write-Host "Data path:                     $dataDir"
+  Write-Host "Log path:                      $logPath"
+  Write-Host "Admin/User fields:             saved for compatibility; native Windows mode does not deploy the Docker web UI."
+  Write-Host ""
+  Write-Host "MongoDB is installed as a native Windows service and set to start automatically."
+}
+
 function Main {
   Relaunch-Elevated
-  Info "===== Local MongoDB Installer (Windows / Docker) ====="
+  $windowsMode = Get-EnvOrDefault "LOCALMONGO_WINDOWS_MODE" "native"
+  if ($windowsMode -ne "docker") {
+    Info "===== Local MongoDB Installer (Windows / Native) ====="
+  } else {
+    Info "===== Local MongoDB Installer (Windows / Docker) ====="
+  }
 
   $hostValue = Get-EnvOrDefault "LOCALMONGO_HOST" ""
   $hostIp = Get-EnvOrDefault "LOCALMONGO_HOST_IP" ""
@@ -371,6 +635,11 @@ function Main {
   $mongoPassword = Get-EnvOrDefault "LOCALMONGO_ADMIN_PASSWORD" "StrongPassword123"
   $uiUser = Get-EnvOrDefault "LOCALMONGO_UI_USER" $mongoUser
   $uiPassword = Get-EnvOrDefault "LOCALMONGO_UI_PASSWORD" $mongoPassword
+
+  if ($windowsMode -ne "docker") {
+    Install-NativeLocalMongo -hostValue $hostValue -mongoPort $mongoPort -mongoUser $mongoUser -mongoPassword $mongoPassword -uiUser $uiUser -uiPassword $uiPassword
+    return
+  }
 
   Ensure-DockerInstalled
   Wait-DockerEngine
