@@ -1510,18 +1510,22 @@ def ensure_repo_files(relative_paths, live_cb=None, refresh=True, retries=2):
         rel_path = Path(rel)
         target = ROOT / rel_path
         local_source = None
+        bundled_source = (ROOT / rel_path).resolve()
+        if bundled_source.exists():
+            local_source = bundled_source
         if local_root_ok:
             candidate = (local_root / rel_path).resolve()
             if candidate.exists():
                 local_source = candidate
         exists_before = target.exists()
         if local_source is not None:
-            target.parent.mkdir(parents=True, exist_ok=True)
             if live_cb:
                 live_cb(f"Using local file: {rel_path.as_posix()}\n")
             else:
                 print(f"Using local file: {rel_path.as_posix()}")
-            shutil.copy2(local_source, target)
+            if local_source != target.resolve():
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(local_source, target)
             continue
         if exists_before and (not refresh):
             continue

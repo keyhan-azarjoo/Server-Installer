@@ -106,9 +106,8 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
 <configuration>
   <system.webServer>
     <security>
-      <requestFiltering>
+      <requestFiltering allowDoubleEscaping="true">
         <requestLimits maxAllowedContentLength="4294967295" maxUrl="16384" maxQueryString="16384" />
-        <allowDoubleEscaping>true</allowDoubleEscaping>
       </requestFiltering>
     </security>
     <rewrite>
@@ -416,7 +415,7 @@ function Install-IISMode {
   Write-Host "  MinIO Console:          $consoleBrowserUrl"
   Write-Host "  S3 API / Share links:   $publicUrl"
   if ($enableLan -and $lanIp) {
-    Write-Host "  LAN Console:            http://${lanIp}:$consoleHttpsPort"
+    Write-Host "  LAN Console:            https://${lanIp}:$consoleHttpsPort"
     Write-Host "  LAN S3 API:             https://${lanIp}:$httpsPort"
     Write-Host "  For DNS: map $domain -> $lanIp"
   }
