@@ -543,7 +543,12 @@ function App() {
     const buildMongoUri = (baseHost) => {
       const user = encodeURIComponent("admin");
       const pass = encodeURIComponent("StrongPassword123");
-      return `mongodb://${user}:${pass}@${baseHost}:27017/admin?authSource=admin`;
+      const authority = String(baseHost || "").trim().replace(/\/+$/, "");
+      if (!authority) return `mongodb://${user}:${pass}@localhost:27017/admin?authSource=admin`;
+      const hasPort = /^\[[^\]]+\](?::\d+)?$/.test(authority)
+        ? /\]:\d+$/.test(authority)
+        : /:\d+$/.test(authority);
+      return `mongodb://${user}:${pass}@${hasPort ? authority : `${authority}:27017`}/admin?authSource=admin`;
     };
     if (mongo.connection_string) {
       try {

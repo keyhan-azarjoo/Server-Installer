@@ -3018,25 +3018,223 @@ def start_live_job(title, runner):
 
 
 def page_login(message=""):
-    msg = f"<p style='color:#b42318'>{html.escape(message)}</p>" if message else ""
+    msg = f'<div class="alert">{html.escape(message)}</div>' if message else ""
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>Server Installer Login</title>
 <style>
-body{{font-family:Segoe UI,Arial,sans-serif;background:#f4f7fb;margin:0;padding:40px}}
-.card{{max-width:420px;margin:auto;background:#fff;border-radius:12px;padding:20px;box-shadow:0 8px 30px rgba(2,32,71,.08)}}
-input{{width:100%;padding:10px;margin:6px 0 12px;border:1px solid #d0d7e2;border-radius:8px}}
+:root{{
+  --bg:#f4f8fc;
+  --panel:#ffffff;
+  --ink:#0f172a;
+  --muted:#475569;
+  --line:#d9e4f2;
+  --brand:#0f766e;
+  --brand-deep:#115e59;
+  --brand-soft:#dff7f3;
+  --danger:#b42318;
+  --danger-bg:#fff1f1;
+}}
+*{{box-sizing:border-box}}
+body{{
+  margin:0;
+  min-height:100vh;
+  font-family:"Segoe UI",Tahoma,Arial,sans-serif;
+  color:var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(15,118,110,.18), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(37,99,235,.14), transparent 24%),
+    linear-gradient(135deg, #eef5fb 0%, #f8fbff 45%, #eef7f5 100%);
+}}
+.shell{{
+  min-height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:32px 20px;
+}}
+.frame{{
+  width:min(1080px, 100%);
+  display:grid;
+  grid-template-columns:1.08fr .92fr;
+  background:rgba(255,255,255,.78);
+  border:1px solid rgba(217,228,242,.95);
+  border-radius:28px;
+  overflow:hidden;
+  box-shadow:0 28px 80px rgba(15,23,42,.16);
+  backdrop-filter:blur(14px);
+}}
+.hero{{
+  position:relative;
+  padding:56px 48px;
+  background:
+    linear-gradient(160deg, rgba(15,118,110,.94), rgba(14,89,118,.9)),
+    linear-gradient(135deg, #0f766e, #1d4ed8);
+  color:#fff;
+}}
+.hero::before,
+.hero::after{{
+  content:"";
+  position:absolute;
+  border-radius:999px;
+  background:rgba(255,255,255,.09);
+}}
+.hero::before{{width:260px;height:260px;top:-80px;right:-60px}}
+.hero::after{{width:220px;height:220px;bottom:-110px;left:-90px}}
+.eyebrow{{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:7px 12px;
+  border:1px solid rgba(255,255,255,.18);
+  border-radius:999px;
+  background:rgba(255,255,255,.08);
+  font-size:12px;
+  letter-spacing:.08em;
+  text-transform:uppercase;
+}}
+.hero h1{{
+  margin:18px 0 14px;
+  font-size:40px;
+  line-height:1.06;
+}}
+.hero p{{
+  margin:0;
+  max-width:520px;
+  color:rgba(255,255,255,.84);
+  font-size:16px;
+  line-height:1.7;
+}}
+.points{{margin:32px 0 0;padding:0;list-style:none;display:grid;gap:14px}}
+.points li{{
+  padding:14px 16px;
+  border-radius:16px;
+  background:rgba(255,255,255,.1);
+  border:1px solid rgba(255,255,255,.12);
+  line-height:1.5;
+}}
+.points strong{{display:block;margin-bottom:4px;font-size:14px}}
+.card{{
+  padding:48px 42px;
+  background:linear-gradient(180deg, rgba(255,255,255,.96), rgba(252,253,255,.92));
+  display:flex;
+  align-items:center;
+}}
+.card-inner{{width:min(420px, 100%);margin:0 auto}}
+.kicker{{
+  margin:0 0 10px;
+  color:var(--brand);
+  font-size:12px;
+  font-weight:700;
+  letter-spacing:.12em;
+  text-transform:uppercase;
+}}
+.card h2{{margin:0 0 10px;font-size:32px;line-height:1.1}}
+.lead{{margin:0 0 26px;color:var(--muted);line-height:1.65}}
+.alert{{
+  margin:0 0 18px;
+  padding:12px 14px;
+  border-radius:14px;
+  border:1px solid rgba(180,35,24,.14);
+  background:var(--danger-bg);
+  color:var(--danger);
+  font-size:14px;
+}}
+form{{display:grid;gap:16px}}
+.field{{display:grid;gap:8px}}
+label{{font-size:14px;font-weight:700;color:#1e293b}}
+input{{
+  width:100%;
+  padding:14px 16px;
+  border:1px solid var(--line);
+  border-radius:14px;
+  background:#fff;
+  color:var(--ink);
+  font-size:15px;
+  outline:none;
+  transition:border-color .18s ease, box-shadow .18s ease, transform .18s ease;
+}}
+input:focus{{
+  border-color:rgba(15,118,110,.55);
+  box-shadow:0 0 0 4px rgba(15,118,110,.12);
+  transform:translateY(-1px);
+}}
+input::placeholder{{color:#94a3b8}}
 .password-wrap{{position:relative}}
-.password-wrap input{{padding-right:74px}}
-.password-toggle{{position:absolute;right:8px;top:50%;transform:translateY(-56%);background:#fff;color:#0f172a;border:1px solid #cbd5e1;padding:6px 10px;border-radius:8px;font-size:12px}}
-button{{background:#0f766e;color:#fff;border:0;padding:10px 14px;border-radius:8px}}
+.password-wrap input{{padding-right:84px}}
+.password-toggle{{
+  position:absolute;
+  right:10px;
+  top:50%;
+  transform:translateY(-50%);
+  min-width:62px;
+  background:#fff;
+  color:#0f172a;
+  border:1px solid var(--line);
+  padding:7px 10px;
+  border-radius:10px;
+  font-size:12px;
+  font-weight:700;
+  cursor:pointer;
+}}
+.password-toggle:hover{{background:#f8fafc}}
+.submit{{
+  margin-top:4px;
+  padding:14px 18px;
+  border:0;
+  border-radius:14px;
+  background:linear-gradient(135deg, var(--brand), var(--brand-deep));
+  color:#fff;
+  font-size:15px;
+  font-weight:700;
+  letter-spacing:.01em;
+  cursor:pointer;
+  box-shadow:0 14px 28px rgba(15,118,110,.22);
+  transition:transform .18s ease, box-shadow .18s ease, filter .18s ease;
+}}
+.submit:hover{{transform:translateY(-1px);box-shadow:0 18px 34px rgba(15,118,110,.28);filter:saturate(1.05)}}
+.footnote{{margin:18px 0 0;color:#64748b;font-size:13px;line-height:1.6}}
+@media (max-width: 900px) {{
+  .frame{{grid-template-columns:1fr}}
+  .hero{{padding:36px 28px}}
+  .card{{padding:34px 24px 36px}}
+  .hero h1{{font-size:32px}}
+}}
 </style></head>
-<body><div class="card"><h2>Server Installer</h2>{msg}
-<p>Remote access requires this computer's OS username/password.</p>
-<form method="post" action="/login">
-<label>Server Username</label><input name="username" required>
-<label>Server Password</label><div class="password-wrap"><input type="password" name="password" required><button type="button" class="password-toggle" data-password-toggle>Show</button></div>
-<button type="submit">Open Dashboard</button>
-</form></div>
+<body><div class="shell"><div class="frame">
+<section class="hero">
+  <div class="eyebrow">Secure Remote Access</div>
+  <h1>Server Installer Dashboard</h1>
+  <p>Manage IIS, .NET hosting, S3 services, and Mongo deployments from one place with a cleaner, safer remote sign-in experience.</p>
+  <ul class="points">
+    <li><strong>System-backed authentication</strong>Use this machine's operating system account to access the dashboard remotely.</li>
+    <li><strong>Operational visibility</strong>Track service state, resource usage, and installer output from a single control surface.</li>
+    <li><strong>Built for administration</strong>Fast access to the tools you need without exposing a separate dashboard password store.</li>
+  </ul>
+</section>
+<section class="card">
+  <div class="card-inner">
+    <p class="kicker">Administrator Sign In</p>
+    <h2>Open the dashboard</h2>
+    <p class="lead">Remote access requires the OS username and password for this computer.</p>
+    {msg}
+    <form method="post" action="/login" autocomplete="on">
+      <div class="field">
+        <label for="username">Server Username</label>
+        <input id="username" name="username" placeholder="DOMAIN\\username or local account" autocomplete="username" required>
+      </div>
+      <div class="field">
+        <label for="password">Server Password</label>
+        <div class="password-wrap">
+          <input id="password" type="password" name="password" autocomplete="current-password" placeholder="Enter your OS password" required>
+          <button type="button" class="password-toggle" data-password-toggle>Show</button>
+        </div>
+      </div>
+      <button type="submit" class="submit">Open Dashboard</button>
+    </form>
+    <p class="footnote">Localhost access does not require this sign-in screen. This login is only for remote dashboard access.</p>
+  </div>
+</section>
+</div></div>
 <script>
 document.querySelectorAll('[data-password-toggle]').forEach(function(btn) {{
   btn.addEventListener('click', function() {{
@@ -3048,6 +3246,8 @@ document.querySelectorAll('[data-password-toggle]').forEach(function(btn) {{
     btn.textContent = show ? 'Hide' : 'Show';
   }});
 }});
+var firstInput = document.getElementById('username');
+if (firstInput) firstInput.focus();
 </script>
 </body></html>"""
 
