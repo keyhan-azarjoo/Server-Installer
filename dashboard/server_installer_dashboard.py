@@ -520,6 +520,7 @@ def get_mongo_info():
         "web_version": "",
         "https_url": "",
         "connection_string": "",
+        "auth_enabled": False,
     }
     preferred_host = choose_service_host()
 
@@ -537,6 +538,7 @@ def get_mongo_info():
             info["connection_string"] = f"mongodb://{preferred_host}:{int(port)}/"
         if native.get("mode") == "native":
             info["web_version"] = str(native.get("web_version") or "native")
+        info["auth_enabled"] = bool(native.get("auth_enabled"))
 
     if command_exists("docker"):
         for name in ("localmongo-mongodb", "localmongo-web", "localmongo-https"):
@@ -743,7 +745,7 @@ def get_windows_native_mongo_info():
         "$meta=Join-Path $root 'install-info.json'; "
         "$cfg=Join-Path $root 'config\\mongod.cfg'; "
         "$svc=Get-Service -Name 'LocalMongoDB' -ErrorAction SilentlyContinue; "
-        "$obj=[ordered]@{installed=$false;version='';connection='';port='';mode='';web_version=''}; "
+        "$obj=[ordered]@{installed=$false;version='';connection='';port='';mode='';web_version='';auth_enabled=$false}; "
         "if($svc){$obj.installed=$true}; "
         "if(Test-Path $meta){ "
         "  try { "
@@ -753,6 +755,7 @@ def get_windows_native_mongo_info():
         "    if($m.mongo_port){$obj.port=[string]$m.mongo_port}; "
         "    if($m.mode){$obj.mode=[string]$m.mode}; "
         "    if($m.web_version){$obj.web_version=[string]$m.web_version}; "
+        "    if($null -ne $m.auth_enabled){$obj.auth_enabled=[bool]$m.auth_enabled}; "
         "    $obj.installed=$true; "
         "  } catch {} "
         "} "

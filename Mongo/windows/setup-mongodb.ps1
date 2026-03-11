@@ -615,7 +615,7 @@ function Remove-ExistingNativeLocalMongo {
   }
 }
 
-function Write-LocalMongoMetadata([string]$mode, [string]$mongodExe, [string]$hostValue, [int]$mongoPort, [string]$version, [string]$connectionString, [string]$webVersion) {
+function Write-LocalMongoMetadata([string]$mode, [string]$mongodExe, [string]$hostValue, [int]$mongoPort, [string]$version, [string]$connectionString, [string]$webVersion, [bool]$authEnabled) {
   $primaryHost = if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") { $hostValue } else { "localhost" }
   $metadata = [ordered]@{
     mode = $mode
@@ -626,6 +626,7 @@ function Write-LocalMongoMetadata([string]$mode, [string]$mongodExe, [string]$ho
     connection_string = $connectionString
     version = $version
     web_version = $webVersion
+    auth_enabled = $authEnabled
   }
   $json = $metadata | ConvertTo-Json -Depth 4
   [System.IO.File]::WriteAllText((Get-LocalMongoMetadataPath), $json, (New-Object System.Text.UTF8Encoding($false)))
@@ -693,7 +694,7 @@ function Install-NativeLocalMongo([string]$hostValue, [int]$mongoPort, [string]$
   }
 
   $primaryConnection = if ($hostValue -and $hostValue -ne "localhost" -and $hostValue -ne "127.0.0.1") { "mongodb://${hostValue}:$mongoPort/" } else { "mongodb://localhost:$mongoPort/" }
-  Write-LocalMongoMetadata -mode "native" -mongodExe $mongodExe -hostValue $hostValue -mongoPort $mongoPort -version $version -connectionString $primaryConnection -webVersion "native-service"
+  Write-LocalMongoMetadata -mode "native" -mongodExe $mongodExe -hostValue $hostValue -mongoPort $mongoPort -version $version -connectionString $primaryConnection -webVersion "native-service" -authEnabled $authEnabled
 
   Write-Host ""
   Write-Host "===== INSTALLATION COMPLETE ====="

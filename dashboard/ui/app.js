@@ -615,10 +615,15 @@ function App() {
   }, [clientOs]);
   const mongoCompassUri = React.useMemo(() => {
     const buildMongoUri = (baseHost) => {
+      const authority = String(baseHost || "").trim().replace(/\/+$/, "");
+      const normalized = !authority ? "localhost:27017" : (
+        /^\[[^\]]+\](?::\d+)?$/.test(authority)
+          ? (/\]:\d+$/.test(authority) ? authority : `${authority}:27017`)
+          : (/:\d+$/.test(authority) ? authority : `${authority}:27017`)
+      );
+      if (!mongo.auth_enabled) return `mongodb://${normalized}/`;
       const user = encodeURIComponent("admin");
       const pass = encodeURIComponent("StrongPassword123");
-      const authority = String(baseHost || "").trim().replace(/\/+$/, "");
-      if (!authority) return `mongodb://${user}:${pass}@localhost:27017/admin?authSource=admin`;
       const hasPort = /^\[[^\]]+\](?::\d+)?$/.test(authority)
         ? /\]:\d+$/.test(authority)
         : /:\d+$/.test(authority);
@@ -633,7 +638,7 @@ function App() {
     }
     const host = (systemInfo?.public_ip || (systemInfo?.ips || []).find((ip) => !String(ip).startsWith("127.")) || "localhost");
     return buildMongoUri(host);
-  }, [mongo.connection_string, systemInfo]);
+  }, [mongo.auth_enabled, mongo.connection_string, systemInfo]);
   const mongoServiceUrls = React.useMemo(() => uniqUrls((mongoServices || []).flatMap((svc) => svc?.urls || [])), [mongoServices]);
   const mongoWebsiteUrl = React.useMemo(() => {
     if (mongo.https_url) return String(mongo.https_url).trim();
