@@ -108,6 +108,28 @@ function Get-DockerOsType {
   return (($out | Out-String).Trim())
 }
 
+function Find-DockerSwitchCli {
+  foreach ($name in @("DockerCli.exe","com.docker.cli.exe","com.docker.cli")) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source -and (Test-Path $cmd.Source)) {
+      return $cmd.Source
+    }
+  }
+
+  foreach ($candidate in @(
+    "C:\Program Files\Docker\Docker\DockerCli.exe",
+    "C:\Program Files\Docker\Docker\com.docker.cli.exe",
+    "C:\Program Files\Docker\Docker\resources\bin\com.docker.cli.exe",
+    "C:\Program Files\Docker\Docker\resources\bin\docker.exe"
+  )) {
+    if (Test-Path $candidate) {
+      return $candidate
+    }
+  }
+
+  return ""
+}
+
 function Ensure-DockerLinuxEngine {
   $osType = Get-DockerOsType
   if ($osType -eq "linux") {
@@ -121,12 +143,13 @@ function Ensure-DockerLinuxEngine {
     Warn "Docker Engine type is unknown. Attempting to switch Docker Desktop to Linux containers..."
   }
 
-  $dockerCli = "C:\Program Files\Docker\Docker\DockerCli.exe"
-  if (-not (Test-Path $dockerCli)) {
-    Err "DockerCli.exe not found at $dockerCli"
+  $dockerCli = Find-DockerSwitchCli
+  if (-not $dockerCli) {
+    Err "Docker Desktop switch CLI not found."
     Warn "Open Docker Desktop manually and switch to Linux containers, then rerun."
     exit 1
   }
+  Info "Using Docker switch CLI: $dockerCli"
 
   $prev = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
