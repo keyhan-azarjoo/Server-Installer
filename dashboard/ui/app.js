@@ -525,7 +525,20 @@ function App() {
     });
   }, [services]);
 
-  const mongoCompassDownloadUrl = "https://www.mongodb.com/try/download/compass";
+  const clientOs = React.useMemo(() => {
+    const raw = `${navigator.userAgent || ""} ${(navigator.platform || "")}`.toLowerCase();
+    if (raw.includes("win")) return "windows";
+    if (raw.includes("mac")) return "macos";
+    if (raw.includes("linux")) return "linux";
+    return "unknown";
+  }, []);
+
+  const mongoCompassDownloadUrl = React.useMemo(() => {
+    if (clientOs === "windows") return "https://www.mongodb.com/try/download/compass";
+    if (clientOs === "macos") return "https://www.mongodb.com/try/download/compass";
+    if (clientOs === "linux") return "https://www.mongodb.com/try/download/compass";
+    return "https://www.mongodb.com/try/download/compass";
+  }, [clientOs]);
   const mongoCompassUri = React.useMemo(() => {
     const buildMongoUri = (baseHost) => {
       const user = encodeURIComponent("admin");
@@ -563,11 +576,20 @@ function App() {
 
   const tryOpenCompass = () => {
     try {
-      window.location.href = mongoCompassUri;
-      if (cfg.os === "linux") {
-        setInfoMessage("Tried to open Compass via mongodb:// URI. Linux browser handlers are usually not registered automatically.");
+      const link = document.createElement("a");
+      link.href = mongoCompassUri;
+      link.style.display = "none";
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      if (clientOs === "windows") {
+        setInfoMessage("Tried to open Compass on Windows using the registered mongodb:// handler.");
+      } else if (clientOs === "macos") {
+        setInfoMessage("Tried to open Compass on macOS using the registered mongodb:// handler.");
+      } else if (clientOs === "linux") {
+        setInfoMessage("Tried to open Compass on Linux using the registered mongodb:// handler.");
       } else {
-        setInfoMessage("Tried to open Compass via mongodb:// URI. This works only if Compass is installed and registered as the URL handler.");
+        setInfoMessage("Tried to open Compass using the registered mongodb:// handler.");
       }
     } catch (err) {
       setInfoMessage(`Could not launch Compass: ${err}`);
