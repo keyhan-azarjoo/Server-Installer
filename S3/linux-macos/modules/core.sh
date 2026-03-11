@@ -223,7 +223,7 @@ install_minio_binary() {
 }
 
 configure_minio_linux() {
-  local root="$1" api_port="$2" ui_port="$3"
+  local root="$1" api_port="$2" ui_port="$3" public_url="$4" console_browser_url="$5"
   local bin="/usr/local/bin/minio"
   local data="${root}/data"
   local envf="/etc/default/locals3-minio"
@@ -234,6 +234,8 @@ configure_minio_linux() {
   cat > "$envf" <<EOF
 MINIO_ROOT_USER=admin
 MINIO_ROOT_PASSWORD=StrongPassword123
+MINIO_SERVER_URL=${public_url}
+MINIO_BROWSER_REDIRECT_URL=${console_browser_url}
 EOF
 
   cat > /etc/systemd/system/locals3-minio.service <<EOF
@@ -255,7 +257,7 @@ EOF
 }
 
 configure_minio_macos() {
-  local root="$1" api_port="$2" ui_port="$3"
+  local root="$1" api_port="$2" ui_port="$3" public_url="$4" console_browser_url="$5"
   local bin="/usr/local/bin/minio"
   [ -d /opt/homebrew/bin ] && bin="/opt/homebrew/bin/minio"
   local data="${root}/data"
@@ -276,6 +278,8 @@ configure_minio_macos() {
   <key>EnvironmentVariables</key><dict>
     <key>MINIO_ROOT_USER</key><string>admin</string>
     <key>MINIO_ROOT_PASSWORD</key><string>StrongPassword123</string>
+    <key>MINIO_SERVER_URL</key><string>$public_url</string>
+    <key>MINIO_BROWSER_REDIRECT_URL</key><string>$console_browser_url</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
@@ -397,7 +401,7 @@ trust_cert() {
 
 main() {
   relaunch_elevated "$@"
-  local os root cert_dir https_port api_port ui_port domain lan_ans enable_lan lan_ip public_ip use_public_ip proxy_host
+  local os root cert_dir https_port api_port ui_port domain lan_ans enable_lan lan_ip public_ip use_public_ip proxy_host proxy_url
   os="$(detect_os)"
   [ "$os" = "unknown" ] && { err "Unsupported OS."; exit 1; }
   info "===== Local S3 Storage Installer (${os}) - Native Mode ====="
@@ -432,6 +436,16 @@ main() {
   [ -z "$api_port" ] && { err "No free API port."; exit 1; }
   [ -z "$ui_port" ] && { err "No free UI port."; exit 1; }
 
+  proxy_host="$domain"
+  if [ "$proxy_host" = "localhost" ] && [ -n "$lan_ip" ]; then
+    proxy_host="$lan_ip"
+  fi
+  if [ "$https_port" -eq 443 ]; then
+    proxy_url="https://${proxy_host}"
+  else
+    proxy_url="https://${proxy_host}:${https_port}"
+  fi
+
   root="/opt/locals3"
   [ "$os" = "macos" ] && root="/usr/local/locals3"
   cert_dir="${root}/certs"
@@ -439,10 +453,10 @@ main() {
 
   if [ "$os" = "linux" ]; then
     ensure_prereqs_linux
-    configure_minio_linux "$root" "$api_port" "$ui_port"
+    configure_minio_linux "$root" "$api_port" "$ui_port" "$proxy_url" "$proxy_url"
   else
     ensure_prereqs_macos
-    configure_minio_macos "$root" "$api_port" "$ui_port"
+    configure_minio_macos "$root" "$api_port" "$ui_port" "$proxy_url" "$proxy_url"
   fi
 
   ensure_hosts_entry "$domain" "127.0.0.1"
@@ -462,15 +476,7 @@ main() {
   echo "===== INSTALLATION COMPLETE ====="
   echo "MinIO Console (direct): http://localhost:${ui_port}"
   echo "MinIO API (direct):     http://localhost:${api_port}"
-  proxy_host="$domain"
-  if [ "$proxy_host" = "localhost" ] && [ -n "$lan_ip" ]; then
-    proxy_host="$lan_ip"
-  fi
-  if [ "$https_port" -eq 443 ]; then
-    echo "Proxy URL:              https://${proxy_host}"
-  else
-    echo "Proxy URL:              https://${proxy_host}:${https_port}"
-  fi
+  echo "Proxy URL:              ${proxy_url}"
   if [ "$enable_lan" = true ] && [ -n "$lan_ip" ]; then
     if [ "$https_port" -eq 443 ]; then
       echo "LAN URL:                https://${lan_ip}"
