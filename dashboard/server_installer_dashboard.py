@@ -37,6 +37,7 @@ WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.p
 LINUX_INSTALLER = ROOT / "DotNet" / "linux" / "install-linux-dotnet-runner.sh"
 S3_WINDOWS_INSTALLER = ROOT / "S3" / "windows" / "setup-storage.ps1"
 S3_LINUX_INSTALLER = ROOT / "S3" / "linux-macos" / "setup-storage.sh"
+MONGO_WINDOWS_INSTALLER = ROOT / "Mongo" / "windows" / "setup-mongodb.ps1"
 REPO_RAW_BASE = os.environ.get(
     "SERVER_INSTALLER_REPO_BASE",
     "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main",
@@ -65,6 +66,10 @@ S3_LINUX_FILES = [
     "S3/linux-macos/modules/core.sh",
     "S3/linux-macos/modules/cleanup.sh",
     "S3/linux-macos/modules/platform.sh",
+]
+
+MONGO_WINDOWS_FILES = [
+    "Mongo/windows/setup-mongodb.ps1",
 ]
 
 SESSIONS = set()
@@ -313,6 +318,49 @@ def _parse_docker_ports(ports_text):
     return ports
 
 
+def _get_docker_container_details(name):
+    details = {
+        "ports": [],
+        "labels": {},
+        "restart_policy": "",
+        "image": "",
+        "state": "",
+    }
+    rc, out = run_capture(["docker", "inspect", name], timeout=30)
+    if rc != 0 or not out:
+        return details
+    try:
+        raw = json.loads(out)
+        obj = raw[0] if isinstance(raw, list) and raw else {}
+        config = obj.get("Config", {}) or {}
+        host_config = obj.get("HostConfig", {}) or {}
+        network = obj.get("NetworkSettings", {}) or {}
+        ports = []
+        bindings = network.get("Ports", {}) or {}
+        for container_port, host_bindings in bindings.items():
+            proto = "tcp"
+            if "/" in str(container_port):
+                proto = str(container_port).split("/")[-1].strip().lower() or "tcp"
+            if not host_bindings:
+                continue
+            for binding in host_bindings:
+                host_port = str((binding or {}).get("HostPort", "")).strip()
+                if host_port.isdigit():
+                    ports.append({"port": int(host_port), "protocol": proto})
+        details["ports"] = sorted(
+            {(p["port"], p["protocol"]) for p in ports},
+            key=lambda item: (item[0], item[1]),
+        )
+        details["ports"] = [{"port": p, "protocol": proto} for p, proto in details["ports"]]
+        details["labels"] = config.get("Labels", {}) or {}
+        details["restart_policy"] = str(((host_config.get("RestartPolicy", {}) or {}).get("Name", "")) or "").strip()
+        details["image"] = str(config.get("Image", "") or "").strip()
+        details["state"] = str(((obj.get("State", {}) or {}).get("Status", "")) or "").strip()
+    except Exception:
+        return details
+    return details
+
+
 def get_network_totals():
     if os.name == "nt":
         rc, out = run_capture(["netstat", "-e"], timeout=15)
@@ -458,6 +506,45 @@ def get_iis_info():
     )
     if rc_ver == 0 and out_ver:
         info["version"] = out_ver.strip().splitlines()[0]
+    return info
+
+
+def get_mongo_info():
+    info = {
+        "installed": False,
+        "server_version": "",
+        "web_version": "",
+        "https_url": "",
+        "connection_string": "",
+    }
+    preferred_host = choose_service_host()
+
+    if command_exists("docker"):
+        for name in ("localmongo-mongodb", "localmongo-web", "localmongo-https"):
+            details = _get_docker_container_details(name)
+            if details.get("image"):
+                info["installed"] = True
+            if name == "localmongo-mongodb" and details.get("image"):
+                image = details["image"]
+                if ":" in image:
+                    info["server_version"] = image.rsplit(":", 1)[1]
+                for p in details.get("ports", []):
+                    if int(p.get("port", 0)) > 0:
+                        info["connection_string"] = (
+                            f"mongodb://{preferred_host}:{int(p['port'])}/"
+                        )
+                        break
+            if name == "localmongo-web" and details.get("image"):
+                image = details["image"]
+                if ":" in image:
+                    info["web_version"] = image.rsplit(":", 1)[1]
+            if name == "localmongo-https":
+                for p in details.get("ports", []):
+                    port = int(p.get("port", 0))
+                    if port <= 0:
+                        continue
+                    info["https_url"] = f"https://{preferred_host}" if port == 443 else f"https://{preferred_host}:{port}"
+                    break
     return info
 
 
@@ -609,7 +696,10 @@ def get_port_usage(port, protocol="tcp"):
     owner_hint = ""
     if proto == "tcp" and len(listeners) > 0:
         try:
-            if _linux_locals3_owns_port(p):
+            if os.name == "nt" and _windows_localmongo_owns_port(p):
+                managed_owner = True
+                owner_hint = "localmongo-managed"
+            elif _linux_locals3_owns_port(p):
                 managed_owner = True
                 owner_hint = "locals3-managed"
         except Exception:
@@ -628,7 +718,10 @@ def _safe_service_name(name):
 
 def get_service_items():
     items = []
-    managed_patterns = re.compile(r"(locals3|minio|dotnet-app|dotnet|aspnet|kestrel|dotnetapp)", re.IGNORECASE)
+    managed_patterns = re.compile(
+        r"(locals3|minio|dotnet-app|dotnet|aspnet|kestrel|dotnetapp|localmongo|mongodb|mongo-express|mongod)",
+        re.IGNORECASE,
+    )
     preferred_host = choose_service_host()
 
     if os.name == "nt":
@@ -856,17 +949,22 @@ def get_service_items():
                 if not name:
                     continue
                 managed = ("com.locals3.installer=true" in labels) or managed_patterns.search(f"{name} {image}") is not None
+                if not managed and "com.localmongo.installer=true" in labels:
+                    managed = True
                 if not managed:
                     continue
-                restart_policy = ""
-                rc_inspect, out_inspect = run_capture(["docker", "inspect", "-f", "{{.HostConfig.RestartPolicy.Name}}", name], timeout=20)
-                if rc_inspect == 0 and out_inspect:
-                    restart_policy = out_inspect.strip()
-                ports = _parse_docker_ports(parts[1] if len(parts) > 1 else "")
+                details = _get_docker_container_details(name)
+                restart_policy = details.get("restart_policy", "")
+                ports = details.get("ports", [])
                 urls = []
                 for p in ports:
-                    scheme = "https" if p.get("port") == 443 else "http"
+                    scheme = "https" if (
+                        p.get("port") == 443 or
+                        details.get("labels", {}).get("com.localmongo.role") == "https"
+                    ) else "http"
                     host = preferred_host
+                    if details.get("labels", {}).get("com.localmongo.role") == "mongodb":
+                        continue
                     if p.get("port") in (80, 443):
                         urls.append(f"{scheme}://{host}")
                     else:
@@ -875,8 +973,8 @@ def get_service_items():
                     {
                         "kind": "docker",
                         "name": name,
-                        "display_name": image,
-                        "status": status,
+                        "display_name": details.get("image") or image,
+                        "status": details.get("state") or status,
                         "autostart": restart_policy in ("always", "unless-stopped"),
                         "platform": "docker",
                         "urls": sorted(set(urls)),
@@ -894,6 +992,10 @@ def _is_locals3_name(name):
 
 def _is_dotnet_name(name):
     return bool(re.search(r"dotnet|aspnet|kestrel|dotnetapp", str(name or ""), re.IGNORECASE))
+
+
+def _is_mongo_name(name):
+    return bool(re.search(r"localmongo|mongodb|mongo-express|mongod", str(name or ""), re.IGNORECASE))
 
 
 def _safe_linux_app_path(path_value, svc_name=""):
@@ -914,6 +1016,32 @@ def _safe_linux_app_path(path_value, svc_name=""):
     if _is_locals3_name(svc_name) and ("locals3" in low):
         return p
     return ""
+
+
+def _windows_cleanup_localmongo():
+    if not is_windows_admin():
+        return False, "Administrator is required."
+    ps = r"""
+$ErrorActionPreference='SilentlyContinue'
+Import-Module WebAdministration -ErrorAction SilentlyContinue
+if (Test-Path "IIS:\Sites\LocalMongoDB") {
+  Stop-Website -Name 'LocalMongoDB' | Out-Null
+  Remove-Website -Name 'LocalMongoDB' | Out-Null
+}
+$bindings = @('0.0.0.0:9445','127.0.0.1:9445')
+foreach($binding in $bindings){
+  netsh http delete sslcert ipport=$binding 1>$null 2>$null | Out-Null
+}
+if(Get-Command docker -ErrorAction SilentlyContinue){
+  docker rm -f localmongo-https localmongo-web localmongo-mongodb 1>$null 2>$null | Out-Null
+  docker network rm localmongo-net 1>$null 2>$null | Out-Null
+  docker volume rm -f localmongo-data 1>$null 2>$null | Out-Null
+}
+$root = Join-Path $env:ProgramData 'LocalMongoDB'
+if(Test-Path $root){ Remove-Item -Recurse -Force -Path $root -ErrorAction SilentlyContinue }
+"""
+    rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=150)
+    return rc == 0, (out or "LocalMongoDB managed files cleaned.")
 
 
 def _linux_cleanup_locals3(prefix):
@@ -1005,6 +1133,8 @@ foreach($p in @("$env:ProgramData\LocalS3","$env:ProgramData\LocalS3\storage-ser
 def _windows_remove_iis_site_and_path(site_name):
     if not is_windows_admin():
         return False, "Administrator is required."
+    if _is_mongo_name(site_name):
+        return _windows_cleanup_localmongo()
     ps = (
         "Import-Module WebAdministration -ErrorAction SilentlyContinue; "
         f"$s=Get-Website -Name '{site_name}' -ErrorAction SilentlyContinue; "
@@ -1019,6 +1149,8 @@ def _windows_remove_iis_site_and_path(site_name):
 def _windows_remove_service_and_files(svc_name):
     if not is_windows_admin():
         return False, "Administrator is required."
+    if _is_mongo_name(svc_name):
+        return _windows_cleanup_localmongo()
     ps = (
         f"$s=Get-CimInstance Win32_Service -Filter \"Name='{svc_name}'\" -ErrorAction SilentlyContinue; "
         "$bin=''; if($s){$bin=$s.PathName}; "
@@ -1060,6 +1192,8 @@ def manage_service(action, name, kind):
                     _windows_cleanup_locals3()
                 else:
                     _linux_cleanup_locals3(_sudo_prefix())
+            if _is_mongo_name(svc_name) and os.name == "nt":
+                _windows_cleanup_localmongo()
             return rc == 0, (out or f"Docker container '{svc_name}' deleted.")
         if action in ("start", "stop", "restart"):
             rc, out = run_capture(["docker", action, svc_name], timeout=60)
@@ -1107,6 +1241,8 @@ def manage_service(action, name, kind):
         if action == "delete":
             if _is_locals3_name(svc_name):
                 return _windows_cleanup_locals3()
+            if _is_mongo_name(svc_name):
+                return _windows_cleanup_localmongo()
             return _windows_remove_iis_site_and_path(svc_name)
         if action in ("autostart_on", "autostart_off"):
             val = "$true" if action == "autostart_on" else "$false"
@@ -1120,6 +1256,8 @@ def manage_service(action, name, kind):
         if action == "delete":
             if _is_locals3_name(svc_name):
                 return _windows_cleanup_locals3()
+            if _is_mongo_name(svc_name):
+                return _windows_cleanup_localmongo()
             return _windows_remove_service_and_files(svc_name)
         ps_map = {
             "start": f"Start-Service -Name '{svc_name}' -ErrorAction Stop",
@@ -1211,6 +1349,7 @@ def get_system_status():
             "dotnet": get_dotnet_info(),
             "docker": get_docker_info(),
             "iis": get_iis_info(),
+            "mongo": get_mongo_info(),
         },
     }
     return status
@@ -1615,6 +1754,41 @@ def _windows_locals3_iis_owns_port(port):
                 return True
     except Exception:
         return False
+
+
+def _windows_localmongo_owns_port(port):
+    if os.name != "nt":
+        return False
+    try:
+        target = int(str(port).strip())
+    except Exception:
+        return False
+
+    details = _get_docker_container_details("localmongo-https")
+    for item in details.get("ports", []):
+        if int(item.get("port", 0)) == target:
+            return True
+    try:
+        cmd = [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            (
+                "Import-Module WebAdministration -ErrorAction SilentlyContinue; "
+                "$site='LocalMongoDB'; "
+                "if (Test-Path \"IIS:\\Sites\\$site\") { "
+                "Get-WebBinding -Name $site | ForEach-Object { $_.bindingInformation } }"
+            ),
+        ]
+        rc, out = run_capture(cmd, timeout=20)
+        if rc == 0 and out:
+            for line in out.splitlines():
+                if parse_port_from_addr(line) == target:
+                    return True
+    except Exception:
+        return False
     return False
 
 
@@ -1892,6 +2066,61 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
         return code, output
 
     return code, output
+
+
+def run_windows_mongo_installer(form, live_cb=None):
+    if os.name != "nt":
+        return 1, "Windows MongoDB installer can only run on Windows hosts."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    ensure_repo_files(MONGO_WINDOWS_FILES, live_cb=live_cb, refresh=False)
+
+    env = os.environ.copy()
+    for key in [
+        "LOCALMONGO_HOST",
+        "LOCALMONGO_HOST_IP",
+        "LOCALMONGO_HTTPS_PORT",
+        "LOCALMONGO_MONGO_PORT",
+        "LOCALMONGO_WEB_PORT",
+        "LOCALMONGO_ADMIN_USER",
+        "LOCALMONGO_ADMIN_PASSWORD",
+        "LOCALMONGO_UI_USER",
+        "LOCALMONGO_UI_PASSWORD",
+    ]:
+        value = (form.get(key, [""])[0] or "").strip()
+        if value:
+            env[key] = value
+
+    requested_host = env.get("LOCALMONGO_HOST", "").strip()
+    requested_ip = env.get("LOCALMONGO_HOST_IP", "").strip()
+    if (not requested_host) and requested_ip:
+        env["LOCALMONGO_HOST"] = requested_ip
+    elif not requested_host:
+        env["LOCALMONGO_HOST"] = choose_service_host()
+
+    for port_key in ("LOCALMONGO_HTTPS_PORT", "LOCALMONGO_MONGO_PORT", "LOCALMONGO_WEB_PORT"):
+        port_value = env.get(port_key, "").strip()
+        if port_value and (not port_value.isdigit()):
+            return 1, f"{port_key} must be numeric."
+
+    requested_https = env.get("LOCALMONGO_HTTPS_PORT", "").strip()
+    if requested_https and is_local_tcp_port_listening(requested_https):
+        usage = get_port_usage(requested_https, "tcp")
+        if not usage.get("managed_owner"):
+            return 1, f"Requested HTTPS port {requested_https} is already in use. Choose another port."
+
+    return run_process(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(MONGO_WINDOWS_INSTALLER),
+        ],
+        env=env,
+        live_cb=live_cb,
+    )
 
 
 def run_linux_s3_installer(form=None, live_cb=None):
@@ -3413,6 +3642,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_windows_s3_installer(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/mongo_windows":
+            title = "MongoDB Installer (Windows)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_mongo_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_mongo_installer(form)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/s3_windows_stop":

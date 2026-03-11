@@ -6,6 +6,7 @@ import re
 import os
 import platform
 import signal
+import shutil
 import socket
 import subprocess
 import sys
@@ -55,10 +56,23 @@ def cache_root() -> Path:
     return Path.home() / ".server-installer"
 
 
+def clear_managed_cache(root: Path) -> None:
+    managed_paths = [
+        root / "dashboard",
+        root / "DotNet",
+        root / "S3",
+    ]
+    for path in managed_paths:
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+
+
 def ensure_files(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     local_root = Path(DASHBOARD_LOCAL_ROOT) if DASHBOARD_LOCAL_ROOT else None
     use_local = bool(local_root and is_repo_layout(local_root))
+    if not use_local:
+        clear_managed_cache(root)
     for rel in SYNC_FILES:
         target = root / rel
         target.parent.mkdir(parents=True, exist_ok=True)

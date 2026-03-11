@@ -39,6 +39,7 @@ function Field({ field }) {
     <TextField
       fullWidth
       size="small"
+      type={field.type === "password" ? "password" : "text"}
       name={field.name}
       label={field.label}
       defaultValue={field.defaultValue || ""}
