@@ -110,6 +110,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <system.webServer>
+    <webSocket enabled="true" />
     <security>
       <requestFiltering allowDoubleEscaping="true">
         <requestLimits maxAllowedContentLength="4294967295" maxUrl="16384" maxQueryString="16384" />
@@ -126,6 +127,8 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
             <set name="HTTP_X_FORWARDED_PROTO" value="https" />
             <set name="HTTP_X_FORWARDED_HOST" value="{HTTP_HOST}" />
             <set name="HTTP_X_FORWARDED_FOR" value="{REMOTE_ADDR}" />
+            <set name="HTTP_UPGRADE" value="{HTTP_UPGRADE}" />
+            <set name="HTTP_CONNECTION" value="{HTTP_CONNECTION}" />
           </serverVariables>
           <action type="Rewrite" url="http://127.0.0.1:$uiPort/{R:1}" />
         </rule>
@@ -184,7 +187,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
 
   try {
     $allowedVars = Get-WebConfigurationProperty -PSPath 'MACHINE/WEBROOT/APPHOST' -Filter "system.webServer/rewrite/allowedServerVariables" -Name "." -ErrorAction Stop
-    foreach ($varName in @("HTTP_X_FORWARDED_PROTO","HTTP_X_FORWARDED_HOST","HTTP_X_FORWARDED_FOR")) {
+    foreach ($varName in @("HTTP_X_FORWARDED_PROTO","HTTP_X_FORWARDED_HOST","HTTP_X_FORWARDED_FOR","HTTP_UPGRADE","HTTP_CONNECTION")) {
       $alreadyAllowed = $false
       if ($allowedVars -and $allowedVars.Collection) {
         $alreadyAllowed = $null -ne ($allowedVars.Collection | Where-Object { $_.Attributes["name"].Value -eq $varName } | Select-Object -First 1)
@@ -194,7 +197,7 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
       }
     }
   } catch {
-    Warn "Could not update IIS Rewrite allowed server variables automatically. If proxy requests fail, allow HTTP_X_FORWARDED_PROTO/HOST/FOR in IIS Rewrite settings."
+    Warn "Could not update IIS Rewrite allowed server variables automatically. If proxy requests fail, allow HTTP_X_FORWARDED_PROTO/HOST/FOR and HTTP_UPGRADE/CONNECTION in IIS Rewrite settings."
   }
 
   # Remove legacy LocalS3 certs before generating a fresh trust chain.
