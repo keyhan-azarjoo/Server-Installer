@@ -137,6 +137,39 @@ function Get-DockerOsType {
   return $osType
 }
 
+function Get-DockerContextNames {
+  $prev = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  $contexts = @(& docker context ls --format "{{.Name}}" 2>$null)
+  $ErrorActionPreference = $prev
+  return @($contexts | ForEach-Object { "$_".Trim() } | Where-Object { $_ })
+}
+
+function Resolve-DockerContext([string[]]$preferredContexts) {
+  $seen = New-Object System.Collections.Generic.HashSet[string]([System.StringComparer]::OrdinalIgnoreCase)
+  $candidates = New-Object System.Collections.Generic.List[string]
+
+  foreach ($ctx in @($preferredContexts + (Get-DockerContextNames) + @("desktop-linux", "default"))) {
+    $trimmed = "$ctx".Trim()
+    if ([string]::IsNullOrWhiteSpace($trimmed)) { continue }
+    if ($seen.Add($trimmed)) {
+      $candidates.Add($trimmed) | Out-Null
+    }
+  }
+
+  foreach ($ctx in $candidates) {
+    $osType = Get-DockerOsType -dockerCtx $ctx
+    if ($osType) {
+      return $ctx
+    }
+  }
+
+  if ($candidates.Count -gt 0) {
+    return $candidates[0]
+  }
+  return "default"
+}
+
 function Switch-DockerToLinuxContainers {
   $dockerCli = "C:\Program Files\Docker\Docker\DockerCli.exe"
   if (-not (Test-Path $dockerCli)) {
@@ -173,18 +206,26 @@ function Switch-DockerToLinuxContainers {
 }
 
 function Ensure-DockerLinuxEngine([string]$dockerCtx) {
-  $osType = Get-DockerOsType -dockerCtx $dockerCtx
+  $resolvedCtx = Resolve-DockerContext @($dockerCtx, (Get-ActiveDockerContext))
+  $osType = Get-DockerOsType -dockerCtx $resolvedCtx
   if ($osType -eq "linux") {
+    if ($resolvedCtx -ne $dockerCtx) {
+      Info "Using Docker context: $resolvedCtx"
+    }
     Info "Docker engine mode: linux"
-    return
+    return $resolvedCtx
   }
   if ($osType -eq "windows") {
     $switched = Switch-DockerToLinuxContainers
     if ($switched) {
-      $osType = Get-DockerOsType -dockerCtx $dockerCtx
+      $resolvedCtx = Resolve-DockerContext @((Get-ActiveDockerContext), "desktop-linux", $dockerCtx)
+      $osType = Get-DockerOsType -dockerCtx $resolvedCtx
       if ($osType -eq "linux") {
+        if ($resolvedCtx -ne $dockerCtx) {
+          Info "Using Docker context: $resolvedCtx"
+        }
         Info "Docker engine mode: linux"
-        return
+        return $resolvedCtx
       }
     }
     Err "Docker Desktop is running Windows containers. MongoDB installer requires Linux containers."
@@ -192,6 +233,7 @@ function Ensure-DockerLinuxEngine([string]$dockerCtx) {
     exit 1
   }
   Warn "Could not determine Docker engine mode reliably (reported '$osType'). Continuing."
+  return $resolvedCtx
 }
 
 function Main {
@@ -226,7 +268,7 @@ function Main {
   Sanitize-DockerEnv
   $dockerCtx = Get-ActiveDockerContext
   Info "Using Docker context: $dockerCtx"
-  Ensure-DockerLinuxEngine -dockerCtx $dockerCtx
+  $dockerCtx = Ensure-DockerLinuxEngine -dockerCtx $dockerCtx
   Info "Clearing previous LocalMongoDB containers, volume, and config..."
   Remove-ExistingLocalMongo -dockerCtx $dockerCtx
 
