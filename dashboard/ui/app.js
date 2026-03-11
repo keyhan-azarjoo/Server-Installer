@@ -560,6 +560,55 @@ function App() {
     }
   };
 
+  const batchServiceAction = async (items, label, action) => {
+    const isRunning = (svc) => /running|active|up/i.test(String(svc?.status || ""));
+    const list = (items || []).filter((x) => x && x.name && (action === "start" ? !isRunning(x) : isRunning(x)));
+    if (list.length === 0) {
+      setInfoMessage(`No ${action === "start" ? "stopped" : "running"} ${label} services found to ${action}.`);
+      return;
+    }
+    const ok = window.confirm(`Do you want to ${action} all ${label} services (${list.length})?`);
+    if (!ok) return;
+    setServiceBusy(true);
+    try {
+      let okCount = 0;
+      let failCount = 0;
+      const failed = [];
+      for (const svc of list) {
+        try {
+          const body = new URLSearchParams();
+          body.set("action", action);
+          body.set("name", svc.name);
+          body.set("kind", svc.kind || "service");
+          const r = await fetch("/api/system/service", {
+            method: "POST",
+            headers: { "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString(),
+          });
+          const j = await r.json();
+          if (j.ok) okCount += 1;
+          else { failCount += 1; failed.push(`${svc.name}: ${j.message || "failed"}`); }
+        } catch (_) {
+          failCount += 1;
+          failed.push(`${svc.name}: request failed`);
+        }
+      }
+      if (failed.length > 0) {
+        setInfoMessage(`${actionLabel(action)} ${label}: ${okCount} success, ${failCount} failed. ${failed.slice(0, 3).join(" | ")}`);
+      } else {
+        setInfoMessage(`${actionLabel(action)} ${label}: ${okCount} success, ${failCount} failed.`);
+      }
+      await loadServices.current();
+      loadSystem.current();
+    } finally {
+      setServiceBusy(false);
+    }
+  };
+
+  const hasStoppedServices = React.useCallback((items) => {
+    return (items || []).some((svc) => !isServiceRunningStatus(svc?.status, svc?.sub_status));
+  }, []);
+
   const actionLabel = (action) => {
     if (action === "autostart_on") return "Auto-start ON";
     if (action === "autostart_off") return "Auto-start OFF";
@@ -673,8 +722,9 @@ function App() {
   const mongoServiceUrls = React.useMemo(() => uniqUrls((mongoServices || []).flatMap((svc) => svc?.urls || [])), [mongoServices]);
   const mongoWebsiteUrl = React.useMemo(() => {
     if (mongo.https_url) return String(mongo.https_url).trim();
+    if (cfg.os === "windows" && mongo.web_version === "native-service") return "/mongo/native-ui";
     return mongoServiceUrls.find((url) => /^https?:\/\//i.test(String(url || ""))) || "";
-  }, [mongo.https_url, mongoServiceUrls]);
+  }, [cfg.os, mongo.https_url, mongo.web_version, mongoServiceUrls]);
 
   const s3ServiceUrls = React.useMemo(() => uniqUrls((s3Services || []).flatMap((svc) => svc?.urls || [])), [s3Services]);
   const s3ConsoleUrl = React.useMemo(() => {
@@ -874,16 +924,15 @@ function App() {
                           <Chip size="small" color={isServiceRunningStatus(status, svc.sub_status) ? "success" : "default"} label={formatServiceState(status, svc.sub_status)} />
                           <Chip size="small" color={autostart ? "primary" : "default"} label={autostart ? "autostart:on" : "autostart:off"} />
                           <Box sx={{ flexGrow: 1 }} />
-                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("start", svc)} sx={{ textTransform: "none" }}>{actionLabel("start")}</Button>
                           <Button
                             size="small"
                             variant="outlined"
-                            color="error"
-                            disabled={stopDisabled}
-                            onClick={() => onServiceAction("stop", svc)}
+                            color={isServiceRunningStatus(status, svc.sub_status) ? "error" : "success"}
+                            disabled={serviceBusy}
+                            onClick={() => onServiceAction(isServiceRunningStatus(status, svc.sub_status) ? "stop" : "start", svc)}
                             sx={{ textTransform: "none" }}
                           >
-                            Stop
+                            {isServiceRunningStatus(status, svc.sub_status) ? "Stop" : "Start"}
                           </Button>
                           <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>{actionLabel("restart")}</Button>
                           <Button size="small" variant="outlined" disabled={serviceBusy || autostart} onClick={() => onServiceAction("autostart_on", svc)} sx={{ textTransform: "none" }}>{actionLabel("autostart_on")}</Button>
@@ -952,7 +1001,15 @@ function App() {
                       <ActionIcon title="Copy S3 Login" onClick={() => copyText(s3LoginText, "S3 login details")} IconComp={CopyCompassIcon} fallback="CP" />
                     )}
                     <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
-                    <Button variant="outlined" color="error" disabled={serviceBusy || s3Services.length === 0} onClick={() => stopServicesBatch(s3Services, "S3")} sx={{ textTransform: "none" }}>Stop All S3</Button>
+                    <Button
+                      variant="outlined"
+                      color={hasStoppedServices(s3Services) ? "success" : "error"}
+                      disabled={serviceBusy || s3Services.length === 0}
+                      onClick={() => batchServiceAction(s3Services, "S3", hasStoppedServices(s3Services) ? "start" : "stop")}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {hasStoppedServices(s3Services) ? "Start All S3" : "Stop All S3"}
+                    </Button>
                   </Stack>
                   {(!!s3ConsoleUrl || !!s3ApiUrl) && (
                     <Box sx={{ mt: 1 }}>
@@ -975,7 +1032,7 @@ function App() {
                           <Button
                             size="small"
                             variant="outlined"
-                            color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "primary"}
+                            color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
                             disabled={serviceBusy}
                             onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
                             sx={{ textTransform: "none" }}
@@ -1029,7 +1086,15 @@ function App() {
                       <ActionIcon title="Copy S3 Login" onClick={() => copyText(s3LoginText, "S3 login details")} IconComp={CopyCompassIcon} fallback="CP" />
                     )}
                     <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
-                    <Button variant="outlined" color="error" disabled={serviceBusy || s3Services.length === 0} onClick={() => stopServicesBatch(s3Services, "S3")} sx={{ textTransform: "none" }}>Stop All S3</Button>
+                    <Button
+                      variant="outlined"
+                      color={hasStoppedServices(s3Services) ? "success" : "error"}
+                      disabled={serviceBusy || s3Services.length === 0}
+                      onClick={() => batchServiceAction(s3Services, "S3", hasStoppedServices(s3Services) ? "start" : "stop")}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {hasStoppedServices(s3Services) ? "Start All S3" : "Stop All S3"}
+                    </Button>
                   </Stack>
                   {(!!s3ConsoleUrl || !!s3ApiUrl) && (
                     <Box sx={{ mt: 1 }}>
@@ -1052,7 +1117,7 @@ function App() {
                           <Button
                             size="small"
                             variant="outlined"
-                            color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "primary"}
+                            color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
                             disabled={serviceBusy}
                             onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
                             sx={{ textTransform: "none" }}
@@ -1122,7 +1187,15 @@ function App() {
                       <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={() => window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
                     )}
                     <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
-                    <Button variant="outlined" color="error" disabled={serviceBusy || mongoServices.length === 0} onClick={() => stopServicesBatch(mongoServices, "MongoDB")} sx={{ textTransform: "none" }}>Stop All MongoDB</Button>
+                    <Button
+                      variant="outlined"
+                      color={hasStoppedServices(mongoServices) ? "success" : "error"}
+                      disabled={serviceBusy || mongoServices.length === 0}
+                      onClick={() => batchServiceAction(mongoServices, "MongoDB", hasStoppedServices(mongoServices) ? "start" : "stop")}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {hasStoppedServices(mongoServices) ? "Start All MongoDB" : "Stop All MongoDB"}
+                    </Button>
                   </Stack>
                   <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
                     {mongoServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}
@@ -1136,8 +1209,16 @@ function App() {
                           </Box>
                           <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
                           <Box sx={{ flexGrow: 1 }} />
-                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("start", svc)} sx={{ textTransform: "none" }}>Start</Button>
-                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                            disabled={serviceBusy}
+                            onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                            sx={{ textTransform: "none" }}
+                          >
+                            {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                          </Button>
                           <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
                         </Stack>
@@ -1197,7 +1278,15 @@ function App() {
                       <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={() => window.open(mongoWebsiteUrl, "_blank", "noopener,noreferrer")} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
                     )}
                     <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
-                    <Button variant="outlined" color="error" disabled={serviceBusy || mongoServices.length === 0} onClick={() => stopServicesBatch(mongoServices, "MongoDB")} sx={{ textTransform: "none" }}>Stop All MongoDB</Button>
+                    <Button
+                      variant="outlined"
+                      color={hasStoppedServices(mongoServices) ? "success" : "error"}
+                      disabled={serviceBusy || mongoServices.length === 0}
+                      onClick={() => batchServiceAction(mongoServices, "MongoDB", hasStoppedServices(mongoServices) ? "start" : "stop")}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {hasStoppedServices(mongoServices) ? "Start All MongoDB" : "Stop All MongoDB"}
+                    </Button>
                   </Stack>
                   <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
                     {mongoServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}
@@ -1211,8 +1300,16 @@ function App() {
                           </Box>
                           <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
                           <Box sx={{ flexGrow: 1 }} />
-                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("start", svc)} sx={{ textTransform: "none" }}>Start</Button>
-                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                            disabled={serviceBusy}
+                            onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                            sx={{ textTransform: "none" }}
+                          >
+                            {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                          </Button>
                           <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
                         </Stack>
@@ -1245,7 +1342,15 @@ function App() {
                     <Typography variant="h6" fontWeight={800}>DotNet Services</Typography>
                     <Box sx={{ flexGrow: 1 }} />
                     <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
-                    <Button variant="outlined" color="error" disabled={serviceBusy || dotnetServices.length === 0} onClick={() => stopServicesBatch(dotnetServices, "DotNet")} sx={{ textTransform: "none" }}>Stop All DotNet</Button>
+                    <Button
+                      variant="outlined"
+                      color={hasStoppedServices(dotnetServices) ? "success" : "error"}
+                      disabled={serviceBusy || dotnetServices.length === 0}
+                      onClick={() => batchServiceAction(dotnetServices, "DotNet", hasStoppedServices(dotnetServices) ? "start" : "stop")}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {hasStoppedServices(dotnetServices) ? "Start All DotNet" : "Stop All DotNet"}
+                    </Button>
                   </Stack>
                   <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
                     {dotnetServices.length === 0 && <Typography variant="body2">No DotNet-related services found.</Typography>}
@@ -1259,7 +1364,16 @@ function App() {
                           </Box>
                           <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
                           <Box sx={{ flexGrow: 1 }} />
-                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                            disabled={serviceBusy}
+                            onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                            sx={{ textTransform: "none" }}
+                          >
+                            {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                          </Button>
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
                         </Stack>
                       </Paper>
@@ -1287,7 +1401,15 @@ function App() {
                     <Typography variant="h6" fontWeight={800}>DotNet Services</Typography>
                     <Box sx={{ flexGrow: 1 }} />
                     <Button variant="outlined" disabled={servicesLoading} onClick={() => loadServices.current()} sx={{ textTransform: "none" }}>Refresh</Button>
-                    <Button variant="outlined" color="error" disabled={serviceBusy || dotnetServices.length === 0} onClick={() => stopServicesBatch(dotnetServices, "DotNet")} sx={{ textTransform: "none" }}>Stop All DotNet</Button>
+                    <Button
+                      variant="outlined"
+                      color={hasStoppedServices(dotnetServices) ? "success" : "error"}
+                      disabled={serviceBusy || dotnetServices.length === 0}
+                      onClick={() => batchServiceAction(dotnetServices, "DotNet", hasStoppedServices(dotnetServices) ? "start" : "stop")}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {hasStoppedServices(dotnetServices) ? "Start All DotNet" : "Stop All DotNet"}
+                    </Button>
                   </Stack>
                   <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
                     {dotnetServices.length === 0 && <Typography variant="body2">No DotNet-related services found.</Typography>}
@@ -1301,7 +1423,16 @@ function App() {
                           </Box>
                           <Chip size="small" color={/running|active|up/i.test(String(svc.status || "")) ? "success" : "default"} label={svc.status || "-"} />
                           <Box sx={{ flexGrow: 1 }} />
-                          <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("stop", svc)} sx={{ textTransform: "none" }}>Stop</Button>
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                            disabled={serviceBusy}
+                            onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                            sx={{ textTransform: "none" }}
+                          >
+                            {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                          </Button>
                           <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
                         </Stack>
                       </Paper>

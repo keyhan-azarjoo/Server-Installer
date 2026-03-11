@@ -3831,6 +3831,46 @@ def page_output(title, output, code):
 </head><body><h2>{html.escape(title)} (exit {code})</h2><pre>{html.escape(output)}</pre><a href="/">Back</a></body></html>"""
 
 
+def page_mongo_native_ui():
+    info = get_windows_native_mongo_info() if os.name == "nt" else {}
+    connection = str(info.get("connection") or "")
+    version = str(info.get("version") or "")
+    web_version = str(info.get("web_version") or "native-service")
+    auth_enabled = bool(info.get("auth_enabled"))
+    host = choose_service_host()
+    port = str(info.get("port") or "27017")
+    if not connection and port.isdigit():
+        connection = f"mongodb://{host}:{int(port)}/"
+    auth_text = "enabled" if auth_enabled else "not initialized"
+    tls_text = "disabled"
+    return f"""<!doctype html><html><head><meta charset="utf-8"><title>MongoDB Web</title>
+<style>
+body{{font-family:Segoe UI,Arial,sans-serif;background:#0b1220;color:#e5eefc;padding:24px;margin:0}}
+.card{{max-width:920px;margin:0 auto;background:#111a2e;border:1px solid #243454;border-radius:16px;padding:24px}}
+.muted{{color:#a9b9d5}}
+.row{{margin:10px 0}}
+.pill{{display:inline-block;padding:6px 10px;border-radius:999px;background:#1d4ed8;color:#fff;font-size:12px;margin-right:8px}}
+a{{color:#93c5fd}}
+code{{background:#0a1020;padding:3px 6px;border-radius:6px;color:#dbeafe}}
+.actions{{margin-top:18px;display:flex;gap:12px;flex-wrap:wrap}}
+.btn{{display:inline-block;padding:10px 14px;border-radius:10px;text-decoration:none;background:#2563eb;color:#fff}}
+.btn.secondary{{background:#334155}}
+</style>
+</head><body><div class="card">
+<div class="pill">MongoDB</div><div class="pill">Windows Native</div><div class="pill">{html.escape(web_version)}</div>
+<h2>MongoDB Web</h2>
+<p class="muted">Windows native MongoDB does not include the Linux Docker web admin UI. This page keeps the same dashboard action available and exposes the live connection details.</p>
+<div class="row">Connection: <code>{html.escape(connection or "mongodb://localhost:27017/")}</code></div>
+<div class="row">Version: <code>{html.escape(version or "unknown")}</code></div>
+<div class="row">Authentication: <code>{html.escape(auth_text)}</code></div>
+<div class="row">TLS/SSL: <code>{html.escape(tls_text)}</code></div>
+<div class="actions">
+<a class="btn" href="/">Back To Dashboard</a>
+<a class="btn secondary" href="https://www.mongodb.com/try/download/compass" target="_blank" rel="noreferrer noopener">Download Compass</a>
+</div>
+</div></body></html>"""
+
+
 class Handler(BaseHTTPRequestHandler):
     def is_local_client(self):
         try:
@@ -4077,6 +4117,12 @@ class Handler(BaseHTTPRequestHandler):
                 print(f"Service list error: {ex}")
                 traceback.print_exc()
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
+        if self.path == "/mongo/native-ui":
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_html("Unauthorized", HTTPStatus.UNAUTHORIZED)
+                return
+            self.write_html(page_mongo_native_ui())
             return
         if self.path == "/":
             if self.is_local_client() or self.is_auth():
