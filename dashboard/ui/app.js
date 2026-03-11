@@ -558,29 +558,7 @@ function App() {
 
   const launchCompassProtocol = React.useCallback((uri) => {
     if (!uri) return;
-
-    const iframe = document.createElement("iframe");
-    iframe.style.display = "none";
-    iframe.setAttribute("aria-hidden", "true");
-    iframe.src = uri;
-    document.body.appendChild(iframe);
-
-    const link = document.createElement("a");
-    link.href = uri;
-    link.style.display = "none";
-    document.body.appendChild(link);
-    link.click();
-
-    window.setTimeout(() => {
-      try {
-        window.location.assign(uri);
-      } catch (_) {}
-    }, 120);
-
-    window.setTimeout(() => {
-      try { document.body.removeChild(link); } catch (_) {}
-      try { document.body.removeChild(iframe); } catch (_) {}
-    }, 2000);
+    window.location.href = uri;
   }, []);
 
   const copyText = async (text, label) => {
