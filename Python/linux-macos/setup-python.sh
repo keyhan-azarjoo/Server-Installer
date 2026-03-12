@@ -23,6 +23,7 @@ JUPYTER_AUTH_DIR="/etc/nginx/auth"
 JUPYTER_AUTH_FILE="${JUPYTER_AUTH_DIR}/${JUPYTER_SERVICE_NAME}.htpasswd"
 JUPYTER_LOG_FILE="${STATE_DIR}/jupyter.log"
 JUPYTER_INTERNAL_PORT=""
+NGINX_RUN_USER=""
 
 mkdir -p "${STATE_DIR}"
 
@@ -206,6 +207,36 @@ ensure_auth_file() {
   fi
 }
 
+detect_nginx_user() {
+  local configured_user=""
+  configured_user="$(awk '/^[[:space:]]*user[[:space:]]+/ {gsub(/;/, "", $2); print $2; exit}' /etc/nginx/nginx.conf 2>/dev/null || true)"
+  if [[ -n "${configured_user}" ]]; then
+    echo "${configured_user}"
+    return 0
+  fi
+  for candidate in www-data nginx nobody; do
+    if id -u "${candidate}" >/dev/null 2>&1; then
+      echo "${candidate}"
+      return 0
+    fi
+  done
+  echo ""
+}
+
+ensure_nginx_can_read_auth_file() {
+  local nginx_user="$1"
+  if [[ -z "${nginx_user}" || ! -f "${JUPYTER_AUTH_FILE}" ]]; then
+    return 0
+  fi
+
+  chown root:"${nginx_user}" "${JUPYTER_AUTH_FILE}" >/dev/null 2>&1 || true
+  chmod 640 "${JUPYTER_AUTH_FILE}" >/dev/null 2>&1 || true
+
+  if ! su -s /bin/sh -c "test -r '${JUPYTER_AUTH_FILE}'" "${nginx_user}" >/dev/null 2>&1; then
+    chmod 644 "${JUPYTER_AUTH_FILE}" >/dev/null 2>&1 || true
+  fi
+}
+
 write_systemd_service() {
   cat > "${JUPYTER_SERVICE_FILE}" <<EOF
 [Unit]
@@ -217,7 +248,7 @@ Type=simple
 User=root
 WorkingDirectory=${NOTEBOOK_DIR}
 Environment=PATH=${VENV_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=${VENV_PYTHON} -m jupyter lab --allow-root --no-browser --ServerApp.ip=127.0.0.1 --ServerApp.port=${JUPYTER_INTERNAL_PORT} --ServerApp.token= --ServerApp.password= --ServerApp.root_dir=${NOTEBOOK_DIR}
+ExecStart=${VENV_PYTHON} -m jupyter lab --allow-root --no-browser --ServerApp.ip=127.0.0.1 --ServerApp.port=${JUPYTER_INTERNAL_PORT} --ServerApp.token= --ServerApp.password= --ServerApp.allow_remote_access=True --ServerApp.trust_xheaders=True --ServerApp.root_dir=${NOTEBOOK_DIR}
 Restart=always
 RestartSec=5
 StandardOutput=append:${JUPYTER_LOG_FILE}
@@ -230,6 +261,11 @@ EOF
 
 write_nginx_config() {
   cat > "${JUPYTER_NGINX_CONF}" <<EOF
+map \$http_upgrade \$connection_upgrade {
+    default upgrade;
+    '' close;
+}
+
 server {
     listen ${JUPYTER_PORT} ssl;
     server_name _;
@@ -246,11 +282,15 @@ server {
         proxy_pass http://127.0.0.1:${JUPYTER_INTERNAL_PORT};
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection \$connection_upgrade;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Scheme https;
+        proxy_buffering off;
+        proxy_request_buffering off;
+        proxy_redirect off;
         proxy_read_timeout 86400;
         proxy_send_timeout 86400;
     }
@@ -365,6 +405,8 @@ fi
 JUPYTER_INTERNAL_PORT="$(pick_internal_port)"
 ensure_tls_material
 ensure_auth_file
+NGINX_RUN_USER="$(detect_nginx_user)"
+ensure_nginx_can_read_auth_file "${NGINX_RUN_USER}"
 write_systemd_service
 write_nginx_config
 
