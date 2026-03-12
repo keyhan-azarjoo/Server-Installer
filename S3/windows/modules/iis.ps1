@@ -129,6 +129,9 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
   $webConfig = @"
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
+  <system.web>
+    <httpRuntime maxUrlLength="16384" maxQueryStringLength="16384" />
+  </system.web>
   <system.webServer>
     <security>
       <requestFiltering allowDoubleEscaping="true">
