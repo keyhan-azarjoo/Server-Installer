@@ -59,6 +59,22 @@ function Ensure-Pip {
     }
 }
 
+function Ensure-JupyterKernel {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PythonExe
+    )
+
+    & $PythonExe -m pip install --upgrade ipykernel
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to install ipykernel."
+    }
+    & $PythonExe -m ipykernel install --sys-prefix --name python3 --display-name "Python 3"
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to register Jupyter kernel."
+    }
+}
+
 $requestedVersion = ($env:PYTHON_VERSION | ForEach-Object { $_.Trim() })
 if (-not $requestedVersion) {
     $requestedVersion = "3.12"
@@ -92,6 +108,7 @@ if ($installJupyter) {
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to install Jupyter packages."
     }
+    Ensure-JupyterKernel -PythonExe $pythonInfo.Executable
 }
 
 $scriptsDir = Join-Path (Split-Path -Parent $pythonInfo.Executable) "Scripts"

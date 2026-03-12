@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-BUILD_ID = "python-jupyter-service-2026-03-12-1515"
+BUILD_ID = "python-jupyter-service-2026-03-12-1705"
 
 
 def _server_installer_data_dir():
@@ -257,7 +257,12 @@ def _python_scripts_dir(python_exe):
 
 
 def _default_python_notebook_dir():
-    preferred = PYTHON_STATE_DIR / "notebooks"
+    if os.name == "nt":
+        preferred = Path(os.environ.get("SystemDrive", "C:")) / "ServerInstaller-Notebooks"
+    elif hasattr(os, "geteuid") and os.geteuid() == 0:
+        preferred = Path("/root") / "notebooks"
+    else:
+        preferred = Path.home() / "notebooks"
     try:
         preferred.mkdir(parents=True, exist_ok=True)
         return str(preferred)
@@ -770,6 +775,13 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
         if not usage.get("managed_owner"):
             return 1, f"Requested Jupyter port {port} is already in use. Choose another port."
     notebook_dir = _resolve_python_notebook_dir(notebook_dir)
+    bind_host = host
+    if os.name == "nt":
+        if host not in ("127.0.0.1", "localhost", "::1"):
+            bind_host = "0.0.0.0"
+        ok_fw, _ = manage_firewall_port("open", port, "tcp")
+        if not ok_fw and live_cb:
+            live_cb(f"[WARN] Failed to open Windows Firewall for TCP {port}. Jupyter may be unreachable from other devices.\n")
     PYTHON_JUPYTER_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     log_path = PYTHON_STATE_DIR / "jupyter.log"
     args = [
@@ -778,10 +790,12 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
         "jupyter",
         "lab",
         "--no-browser",
-        f"--ServerApp.ip={host}",
+        f"--ServerApp.ip={bind_host}",
         f"--ServerApp.port={port}",
+        "--ServerApp.port_retries=0",
         "--ServerApp.token=",
         "--ServerApp.password=",
+        "--ServerApp.allow_remote_access=True",
         f"--ServerApp.root_dir={notebook_dir}",
     ]
     env = _python_env(python_executable)
@@ -799,6 +813,21 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
             kwargs["start_new_session"] = True
         proc = subprocess.Popen(args, **kwargs)
         url = f"http://{host}:{port}/lab"
+        deadline = time.time() + 20
+        while time.time() < deadline:
+            if is_local_tcp_port_listening(port):
+                break
+            if proc.poll() is not None:
+                break
+            time.sleep(0.5)
+        if not is_local_tcp_port_listening(port):
+            try:
+                log_text = log_path.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                log_text = ""
+            if proc.poll() is not None:
+                return 1, (log_text.strip() or f"Jupyter Lab exited early with code {proc.returncode}.")
+            return 1, (log_text.strip() or f"Jupyter Lab did not start listening on port {port}.")
         state = _read_json_file(PYTHON_STATE_FILE)
         state["host"] = host
         state["jupyter_port"] = port

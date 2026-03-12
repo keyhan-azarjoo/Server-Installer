@@ -403,7 +403,7 @@ fi
 
 VENV_PYTHON="${VENV_DIR}/bin/python"
 SCRIPTS_DIR="${VENV_DIR}/bin"
-NOTEBOOK_DIR="${NOTEBOOK_DIR_INPUT:-${STATE_DIR}/notebooks}"
+NOTEBOOK_DIR="${NOTEBOOK_DIR_INPUT:-${HOME}/notebooks}"
 mkdir -p "${NOTEBOOK_DIR}"
 
 "${VENV_PYTHON}" -m ensurepip --upgrade >/dev/null 2>&1 || true
