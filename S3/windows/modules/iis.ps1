@@ -110,7 +110,6 @@ function Ensure-IISProxyMode([string]$domain,[string]$siteRoot,[string]$certPath
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
   <system.webServer>
-    <webSocket enabled="true" />
     <security>
       <requestFiltering allowDoubleEscaping="true">
         <requestLimits maxAllowedContentLength="4294967295" maxUrl="16384" maxQueryString="16384" />
