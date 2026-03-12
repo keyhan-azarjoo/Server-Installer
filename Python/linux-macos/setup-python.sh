@@ -8,6 +8,7 @@ HOST_IP="${PYTHON_HOST_IP:-}"
 BASE_STATE_DIR="${SERVER_INSTALLER_DATA_DIR:-${HOME}/.server-installer}"
 STATE_DIR="${BASE_STATE_DIR}/python"
 STATE_FILE="${STATE_DIR}/python-state.json"
+VENV_DIR="${STATE_DIR}/venv"
 
 mkdir -p "${STATE_DIR}"
 
@@ -69,13 +70,19 @@ fi
 
 PYTHON_EXE="$("${PYTHON_CMD}" -c 'import sys; print(sys.executable)')"
 PYTHON_VERSION_REAL="$("${PYTHON_CMD}" -c 'import sys; print(sys.version.split()[0])')"
-SCRIPTS_DIR="$(dirname "${PYTHON_EXE}")"
+if [[ ! -x "${VENV_DIR}/bin/python" ]]; then
+  rm -rf "${VENV_DIR}"
+  "${PYTHON_EXE}" -m venv "${VENV_DIR}"
+fi
 
-"${PYTHON_EXE}" -m ensurepip --upgrade >/dev/null 2>&1 || true
-"${PYTHON_EXE}" -m pip install --upgrade pip
+VENV_PYTHON="${VENV_DIR}/bin/python"
+SCRIPTS_DIR="${VENV_DIR}/bin"
+
+"${VENV_PYTHON}" -m ensurepip --upgrade >/dev/null 2>&1 || true
+"${VENV_PYTHON}" -m pip install --upgrade pip setuptools wheel
 
 if [[ "${INSTALL_JUPYTER,,}" =~ ^(1|true|yes|y|on)$ ]]; then
-  "${PYTHON_EXE}" -m pip install --upgrade jupyterlab notebook
+  "${VENV_PYTHON}" -m pip install --upgrade jupyterlab notebook
   JUPYTER_INSTALLED=true
 else
   JUPYTER_INSTALLED=false
@@ -85,7 +92,9 @@ cat > "${STATE_FILE}" <<EOF
 {
   "requested_version": "${REQUESTED_VERSION}",
   "python_version": "${PYTHON_VERSION_REAL}",
-  "python_executable": "${PYTHON_EXE}",
+  "python_executable": "${VENV_PYTHON}",
+  "base_python_executable": "${PYTHON_EXE}",
+  "venv_dir": "${VENV_DIR}",
   "scripts_dir": "${SCRIPTS_DIR}",
   "jupyter_installed": ${JUPYTER_INSTALLED},
   "jupyter_port": "${JUPYTER_PORT}",
@@ -94,7 +103,8 @@ cat > "${STATE_FILE}" <<EOF
 }
 EOF
 
-echo "Python ready: ${PYTHON_EXE}"
+echo "Python ready: ${VENV_PYTHON}"
+echo "Base Python: ${PYTHON_EXE}"
 if [[ "${JUPYTER_INSTALLED}" == "true" ]]; then
   echo "Jupyter packages installed."
 fi

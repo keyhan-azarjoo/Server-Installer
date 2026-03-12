@@ -228,6 +228,9 @@ def _python_scripts_dir(python_exe):
     scripts_dir = exe_path.parent / "Scripts"
     if scripts_dir.exists():
         return str(scripts_dir)
+    bin_dir = exe_path.parent / "bin"
+    if bin_dir.exists():
+        return str(bin_dir)
     return ""
 
 
