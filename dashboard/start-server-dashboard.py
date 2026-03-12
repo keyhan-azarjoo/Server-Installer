@@ -102,6 +102,10 @@ def preferred_host(arg_host: str) -> str:
     return "127.0.0.1"
 
 
+def command_exists(command: str) -> bool:
+    return shutil.which(command) is not None
+
+
 def can_bind(host: str, port: int):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:

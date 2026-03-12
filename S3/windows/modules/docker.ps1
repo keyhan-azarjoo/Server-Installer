@@ -604,6 +604,7 @@ function Assert-UniquePortSet([hashtable]$ports) {
 
 function Write-FilesAndUp {
   $project = Join-Path $env:ProgramData "LocalS3\storage-server"
+  $stateFile = Join-Path $project "install-state.json"
   $ngconf = Join-Path $project "nginx\conf"
   $ngcerts = Join-Path $project "nginx\certs"
   $data = Join-Path $project "data"
@@ -662,6 +663,24 @@ function Write-FilesAndUp {
   New-Item -ItemType Directory -Force -Path $project,$ngconf,$ngcerts,$data | Out-Null
   Run-PreflightChecks -DataPath $data
   Info "Project folder: $project"
+  try {
+    $state = [ordered]@{
+      mode = "docker"
+      selected_host = $domain
+      display_host = $displayHost
+      lan_ip = $lanIp
+      public_url = $publicUrl
+      console_url = $consoleBrowserUrl
+      https_port = $httpsPort
+      console_port = $consoleHttpsPort
+      minio_api_port = $minioApi
+      minio_ui_port = $minioUI
+      updated_at = (Get-Date).ToString("o")
+    }
+    $state | ConvertTo-Json -Depth 4 | Set-Content -Path $stateFile -Encoding ASCII
+  } catch {
+    Warn "Could not persist LocalS3 install state: $($_.Exception.Message)"
+  }
 
   $compose = @"
 services:
@@ -923,7 +942,7 @@ server {
   if ($enableLan -and $lanIp) {
     Write-Host ""
     Write-Host "For other computers on the LAN:"
-    if ($domain -ne "localhost") {
+    if ($domain -ne "localhost" -and -not (Test-IPv4Literal $domain)) {
       Write-Host "  Add hosts entry: $lanIp $domain"
       if ($consoleHttpsPort -eq 80) { Write-Host "  Then open: http://$domain" } else { Write-Host "  Then open: http://${domain}:$consoleHttpsPort" }
       if ($httpsPort -eq 443) { Write-Host "  S3 API: https://$domain" } else { Write-Host "  S3 API: https://${domain}:$httpsPort" }

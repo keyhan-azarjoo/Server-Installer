@@ -60,6 +60,7 @@ PROXY_WINDOWS_STATE = SERVER_INSTALLER_DATA / "proxy" / "proxy-wsl.json"
 PYTHON_STATE_DIR = SERVER_INSTALLER_DATA / "python"
 PYTHON_STATE_FILE = PYTHON_STATE_DIR / "python-state.json"
 PYTHON_JUPYTER_STATE_FILE = PYTHON_STATE_DIR / "jupyter-state.json"
+WINDOWS_LOCALS3_STATE = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "LocalS3" / "storage-server" / "install-state.json"
 REPO_RAW_BASE = os.environ.get(
     "SERVER_INSTALLER_REPO_BASE",
     "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main",
@@ -740,6 +741,19 @@ def choose_service_host():
     return choose_s3_host("")
 
 
+def get_windows_locals3_config():
+    return _read_json_file(WINDOWS_LOCALS3_STATE)
+
+
+def get_windows_locals3_host():
+    state = get_windows_locals3_config()
+    for key in ("display_host", "selected_host", "lan_ip"):
+        value = str(state.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
 def _parse_nginx_listen_and_server(conf_text):
     listens = []
     server_names = []
@@ -1117,7 +1131,7 @@ def _urls_from_windows_locals3_log(preferred_host=""):
             continue
         try:
             parsed = urlparse(url)
-            host = preferred_host or parsed.hostname or choose_service_host()
+            host = preferred_host or get_windows_locals3_host() or parsed.hostname or choose_service_host()
             scheme = parsed.scheme or "https"
             port = parsed.port or (443 if scheme == "https" else 80)
             normalized = f"{scheme}://{host}" if port in (80, 443) else f"{scheme}://{host}:{port}"
@@ -1515,7 +1529,7 @@ def get_service_items():
         r"(locals3|minio|dotnet-app|dotnet|aspnet|kestrel|dotnetapp|localmongo|mongodb|mongo-express|mongod|docker|dockerd|containerd|com\.docker\.service|docker desktop service|docker engine|python|jupyter|serverinstaller-pythonjupyter)",
         re.IGNORECASE,
     )
-    preferred_host = choose_service_host()
+    preferred_host = get_windows_locals3_host() or choose_service_host()
     native_mongo = get_windows_native_mongo_info() if os.name == "nt" else {}
     mongo_info = get_mongo_info()
     python_info = get_python_info()
