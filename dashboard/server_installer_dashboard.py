@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-BUILD_ID = "proxy-layout-fix-2026-03-12-0948"
+BUILD_ID = "docker-service-page-2026-03-12-1215"
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
@@ -1084,7 +1084,7 @@ const db = globalThis.db.getSiblingDB({json.dumps(db_name)});
 def get_service_items():
     items = []
     managed_patterns = re.compile(
-        r"(locals3|minio|dotnet-app|dotnet|aspnet|kestrel|dotnetapp|localmongo|mongodb|mongo-express|mongod)",
+        r"(locals3|minio|dotnet-app|dotnet|aspnet|kestrel|dotnetapp|localmongo|mongodb|mongo-express|mongod|docker|dockerd|containerd|com\.docker\.service|docker desktop service|docker engine)",
         re.IGNORECASE,
     )
     preferred_host = choose_service_host()
@@ -1450,6 +1450,10 @@ def _is_proxy_name(name):
     return bool(re.search(r"proxy-panel|serverinstaller-proxywsl|xray|stunnel4|stunnel|nginx|ssh", str(name or ""), re.IGNORECASE))
 
 
+def _is_docker_name(name):
+    return bool(re.search(r"docker|dockerd|containerd|com\.docker\.service|docker desktop service|docker engine", str(name or ""), re.IGNORECASE))
+
+
 def _read_json_file(path_value):
     try:
         path = Path(path_value)
@@ -1557,6 +1561,8 @@ def filter_service_items(scope):
     items = get_service_items()
     if scope == "all":
         return items
+    if scope == "docker":
+        return [x for x in items if x.get("kind") == "docker" or _is_docker_name(x.get("name", "")) or _is_docker_name(x.get("display_name", ""))]
     if scope == "mongo":
         return [x for x in items if _is_mongo_name(x.get("name", "")) or _is_mongo_name(x.get("display_name", ""))]
     if scope == "s3":
@@ -1858,6 +1864,8 @@ def manage_service(action, name, kind):
     if os.name == "nt":
         if not is_windows_admin():
             return False, "Stopping services on Windows requires Administrator."
+        if action == "delete" and _is_docker_name(svc_name):
+            return False, "Delete is not supported for Docker engine services from the dashboard."
         if action == "delete":
             if _is_locals3_name(svc_name):
                 return _windows_cleanup_locals3()
@@ -1882,6 +1890,8 @@ def manage_service(action, name, kind):
             candidates.append(f"{svc_name}.service")
 
         for unit in candidates:
+            if action == "delete" and _is_docker_name(unit):
+                return False, "Delete is not supported for Docker engine services from the dashboard."
             if action == "autostart_on":
                 rc, out = run_capture(prefix + ["systemctl", "enable", unit], timeout=60)
                 if rc == 0:
@@ -1936,6 +1946,8 @@ def get_system_status(scope="all"):
     software = {}
     if scope in ("all", "dotnet"):
         software["dotnet"] = get_dotnet_info()
+    if scope in ("all", "docker"):
+        software["docker"] = get_docker_info()
     if scope in ("all", "mongo"):
         software["docker"] = get_docker_info()
         software["mongo"] = get_mongo_info()
@@ -2687,8 +2699,11 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
     requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
     requested_mode = (form.get("LOCALS3_HOST_MODE", [""])[0] or "").strip().lower()
     requested_ip = (form.get("LOCALS3_HOST_IP", [""])[0] or "").strip()
+    available_ips = [ip for ip in get_ip_addresses() if ip and not ip.startswith("127.")]
     if (requested_mode in ("", "lan")) and requested_ip:
         form["LOCALS3_HOST"] = [requested_ip]
+    elif requested_mode in ("", "lan") and len(available_ips) > 1:
+        return 1, "Select an IP address before starting S3 setup."
     elif requested_mode == "custom" and requested_host:
         form["LOCALS3_HOST"] = [requested_host]
     elif requested_mode == "public":
@@ -2696,6 +2711,8 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
             resolved_host = choose_s3_host(requested_host)
             form["LOCALS3_HOST"] = [resolved_host]
     elif not requested_host or requested_host in ("localhost", "127.0.0.1"):
+        if len(available_ips) > 1:
+            return 1, "Select an IP address before starting S3 setup."
         resolved_host = choose_s3_host(requested_host)
         form["LOCALS3_HOST"] = [resolved_host]
     requested_https = (form.get("LOCALS3_HTTPS_PORT", [""])[0] or "").strip()
@@ -2768,9 +2785,12 @@ def run_windows_mongo_installer(form, live_cb=None):
 
     requested_host = env.get("LOCALMONGO_HOST", "").strip()
     requested_ip = env.get("LOCALMONGO_HOST_IP", "").strip()
+    available_ips = [ip for ip in get_ip_addresses() if ip and not ip.startswith("127.")]
     if (not requested_host) and requested_ip:
         env["LOCALMONGO_HOST"] = requested_ip
     elif not requested_host:
+        if len(available_ips) > 1:
+            return 1, "Select an IP address before starting MongoDB setup."
         env["LOCALMONGO_HOST"] = choose_service_host()
 
     windows_mode = (env.get("LOCALMONGO_WINDOWS_MODE", "native") or "native").strip().lower()
@@ -2835,9 +2855,12 @@ def run_unix_mongo_installer(form=None, live_cb=None):
 
     requested_host = env.get("LOCALMONGO_HOST", "").strip()
     requested_ip = env.get("LOCALMONGO_HOST_IP", "").strip()
+    available_ips = [ip for ip in get_ip_addresses() if ip and not ip.startswith("127.")]
     if (not requested_host) and requested_ip:
         env["LOCALMONGO_HOST"] = requested_ip
     elif not requested_host:
+        if len(available_ips) > 1:
+            return 1, "Select an IP address before starting MongoDB setup."
         env["LOCALMONGO_HOST"] = choose_service_host()
 
     for port_key in ("LOCALMONGO_HTTPS_PORT", "LOCALMONGO_MONGO_PORT", "LOCALMONGO_WEB_PORT"):

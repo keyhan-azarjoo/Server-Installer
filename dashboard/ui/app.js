@@ -203,17 +203,19 @@ function App() {
   const [portProtocol, setPortProtocol] = React.useState("tcp");
   const [portBusy, setPortBusy] = React.useState(false);
   const [serviceBusy, setServiceBusy] = React.useState(false);
-  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false, proxy: false });
-  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "", proxy: "" });
+  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false, docker: false, proxy: false });
+  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "", docker: "", proxy: "" });
   const [serviceFilter, setServiceFilter] = React.useState("");
   const [services, setServices] = React.useState([]);
   const [mongoPageServices, setMongoPageServices] = React.useState([]);
   const [s3PageServices, setS3PageServices] = React.useState([]);
   const [dotnetPageServices, setDotnetPageServices] = React.useState([]);
+  const [dockerPageServices, setDockerPageServices] = React.useState([]);
   const [proxyPageServices, setProxyPageServices] = React.useState([]);
   const [mongoInfoState, setMongoInfoState] = React.useState(null);
   const [s3InfoState, setS3InfoState] = React.useState(null);
   const [dotnetInfoState, setDotnetInfoState] = React.useState(null);
+  const [dockerInfoState, setDockerInfoState] = React.useState(null);
   const [proxyInfoState, setProxyInfoState] = React.useState(null);
   const [netRate, setNetRate] = React.useState({ rxBps: 0, txBps: 0 });
   const prevNetRef = React.useRef(null);
@@ -306,10 +308,12 @@ function App() {
   const loadMongoServices = React.useRef(async () => {});
   const loadS3Services = React.useRef(async () => {});
   const loadDotnetServices = React.useRef(async () => {});
+  const loadDockerServices = React.useRef(async () => {});
   const loadProxyServices = React.useRef(async () => {});
   const loadMongoInfo = React.useRef(async () => {});
   const loadS3Info = React.useRef(async () => {});
   const loadDotnetInfo = React.useRef(async () => {});
+  const loadDockerInfo = React.useRef(async () => {});
   const loadProxyInfo = React.useRef(async () => {});
 
   const loadServiceScope = React.useCallback(async (scope, setter) => {
@@ -347,16 +351,19 @@ function App() {
   loadMongoServices.current = async () => loadServiceScope("mongo", setMongoPageServices);
   loadS3Services.current = async () => loadServiceScope("s3", setS3PageServices);
   loadDotnetServices.current = async () => loadServiceScope("dotnet", setDotnetPageServices);
+  loadDockerServices.current = async () => loadServiceScope("docker", setDockerPageServices);
   loadProxyServices.current = async () => loadServiceScope("proxy", setProxyPageServices);
   loadMongoInfo.current = async () => loadScopedStatus("mongo", setMongoInfoState);
   loadS3Info.current = async () => loadScopedStatus("s3", setS3InfoState);
   loadDotnetInfo.current = async () => loadScopedStatus("dotnet", setDotnetInfoState);
+  loadDockerInfo.current = async () => loadScopedStatus("docker", setDockerInfoState);
   loadProxyInfo.current = async () => loadScopedStatus("proxy", setProxyInfoState);
 
   const refreshPageServices = React.useCallback((targetPage) => {
     if (targetPage === "services") return loadServices.current();
     if (targetPage === "mongo") return loadMongoServices.current();
     if (targetPage === "s3") return loadS3Services.current();
+    if (targetPage === "docker") return loadDockerServices.current();
     if (targetPage === "proxy") return loadProxyServices.current();
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetServices.current();
     return Promise.resolve();
@@ -365,6 +372,7 @@ function App() {
   const refreshPageStatus = React.useCallback((targetPage) => {
     if (targetPage === "mongo") return loadMongoInfo.current();
     if (targetPage === "s3") return loadS3Info.current();
+    if (targetPage === "docker") return loadDockerInfo.current();
     if (targetPage === "proxy") return loadProxyInfo.current();
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetInfo.current();
     if (targetPage === "home" || targetPage === "sysinfo" || targetPage === "ports" || targetPage === "services") return loadSystem.current();
@@ -376,13 +384,13 @@ function App() {
   }, [refreshPageServices, refreshPageStatus]);
 
   React.useEffect(() => {
-    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "proxy" || String(page).startsWith("dotnet-")) {
+    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || String(page).startsWith("dotnet-")) {
       refreshPageContext(page);
     }
   }, [page, refreshPageContext]);
 
   React.useEffect(() => {
-    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "proxy" || String(page).startsWith("dotnet-"))) {
+    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || String(page).startsWith("dotnet-"))) {
       return undefined;
     }
     const t = setInterval(() => {
@@ -445,10 +453,19 @@ function App() {
     setTermOpen(true);
     setTermMin(false);
     const isS3Install = action === "/run/s3_linux" || action === "/run/s3_windows" || action === "/run/s3_windows_iis" || action === "/run/s3_windows_docker";
+    const isMongoInstall = action === "/run/mongo_windows" || action === "/run/mongo_unix";
     setRunError("");
     if (isS3Install) {
       const selectedIp = String(body.get("LOCALS3_HOST_IP") || "").trim();
-      const resolvedHost = selectedIp || selectableIps[0] || "localhost";
+      if (!selectedIp && selectableIps.length > 1) {
+        const msg = "Select an IP address before starting S3 setup.";
+        setRunError(msg);
+        setInfoMessage(msg);
+        setTermState("Error");
+        append(msg);
+        return;
+      }
+      const resolvedHost = selectedIp || (selectableIps.length === 1 ? selectableIps[0] : "localhost");
       body.set("LOCALS3_HOST", resolvedHost);
       if (selectedIp) {
         body.set("LOCALS3_HOST_IP", selectedIp);
@@ -478,6 +495,22 @@ function App() {
           setInfoMessage(ownMsg);
           append(ownMsg);
         }
+      }
+    }
+    if (isMongoInstall) {
+      const selectedIp = String(body.get("LOCALMONGO_HOST_IP") || "").trim();
+      if (!selectedIp && selectableIps.length > 1) {
+        const msg = "Select an IP address before starting MongoDB setup.";
+        setRunError(msg);
+        setInfoMessage(msg);
+        setTermState("Error");
+        append(msg);
+        return;
+      }
+      if (selectedIp) {
+        body.set("LOCALMONGO_HOST", selectedIp);
+      } else if (selectableIps.length === 1) {
+        body.set("LOCALMONGO_HOST", selectableIps[0]);
       }
     }
     try {
@@ -534,8 +567,8 @@ function App() {
   };
 
   const goBack = () => {
-    if (page === "home") return;
-    if (page === "dotnet" || page === "s3" || page === "mongo" || page === "proxy" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
+      if (page === "home") return;
+      if (page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
     else if (page.startsWith("dotnet-")) setPage("dotnet");
     else setPage("home");
   };
@@ -545,6 +578,7 @@ function App() {
     if (page === "dotnet") return "DotNet";
     if (page === "s3") return "S3";
     if (page === "mongo") return "MongoDB";
+    if (page === "docker") return "Docker";
     if (page === "proxy") return "Proxy";
     if (page === "sysinfo") return "SysInfo";
     if (page === "ports") return "Port Management";
@@ -656,6 +690,8 @@ function App() {
         loadProxyServices.current(),
         loadDotnetInfo.current(),
         loadDotnetServices.current(),
+        loadDockerInfo.current(),
+        loadDockerServices.current(),
       ]);
       loadSystem.current();
     } catch (err) {
@@ -713,6 +749,8 @@ function App() {
         loadProxyServices.current(),
         loadDotnetInfo.current(),
         loadDotnetServices.current(),
+        loadDockerInfo.current(),
+        loadDockerServices.current(),
       ]);
       loadSystem.current();
     } finally {
@@ -768,6 +806,8 @@ function App() {
         loadProxyServices.current(),
         loadDotnetInfo.current(),
         loadDotnetServices.current(),
+        loadDockerInfo.current(),
+        loadDockerServices.current(),
       ]);
       loadSystem.current();
     } finally {
@@ -815,12 +855,14 @@ function App() {
   const software = systemInfo?.software || {};
   const mongoStatusInfo = mongoInfoState || systemInfo || {};
   const dotnetStatusInfo = dotnetInfoState || systemInfo || {};
+  const dockerStatusInfo = dockerInfoState || systemInfo || {};
   const proxyStatusInfo = proxyInfoState || systemInfo || {};
   const mongoSoftware = mongoStatusInfo?.software || {};
   const dotnetSoftware = dotnetStatusInfo?.software || {};
+  const dockerSoftware = dockerStatusInfo?.software || {};
   const proxySoftware = proxyStatusInfo?.software || {};
   const dotnet = dotnetSoftware.dotnet || software.dotnet || {};
-  const docker = software.docker || {};
+  const docker = dockerSoftware.docker || software.docker || {};
   const mongoDocker = mongoSoftware.docker || software.docker || {};
   const iis = software.iis || {};
   const mongo = mongoSoftware.mongo || software.mongo || {};
@@ -834,7 +876,7 @@ function App() {
   const apiAddressList = React.useMemo(() => {
     const ips = systemInfo?.ips || [];
     const portSet = new Set((listeningPorts || []).map((p) => Number(p.port)));
-    const common = [80, 443, 5000, 5001, 8080, 8090, 8443, 9000];
+    const common = [80, 443, 2375, 2376, 5000, 5001, 8080, 8090, 8443, 9000];
     const found = common.filter((p) => portSet.has(p));
     const urls = [];
     ips.forEach((ip) => {
@@ -886,6 +928,14 @@ function App() {
   const proxyServices = React.useMemo(() => {
     return Array.isArray(proxyPageServices) ? proxyPageServices : [];
   }, [proxyPageServices]);
+  const dockerServices = React.useMemo(() => {
+    const patt = /(docker|dockerd|containerd|com\.docker\.service|docker desktop service|docker engine)/i;
+    return (dockerPageServices || []).filter((s) => {
+      if (String(s?.kind || "").toLowerCase() === "docker") return true;
+      const text = `${s.name || ""} ${s.display_name || ""} ${s.status || ""}`;
+      return patt.test(text);
+    });
+  }, [dockerPageServices]);
   const mongoDisplayServices = React.useMemo(() => {
     if ((mongoServices || []).length > 0) return mongoServices;
     const hasMongoSignal = !!(
@@ -1001,6 +1051,47 @@ function App() {
       "Password: StrongPassword123",
     ].join("\n");
   }, [s3ApiUrl, s3ConsoleUrl]);
+  const dockerServiceUrls = React.useMemo(() => uniqUrls((dockerServices || []).flatMap((svc) => svc?.urls || [])), [dockerServices]);
+  const dockerDaemonPorts = React.useMemo(() => {
+    const direct = (systemInfo?.listening_ports || [])
+      .filter((p) => {
+        const port = Number(p?.port);
+        return port === 2375 || port === 2376;
+      })
+      .map((p) => ({ port: Number(p.port), protocol: String(p.protocol || p.proto || "tcp").toLowerCase() }));
+    const fallback = [];
+    (dockerServices || []).forEach((svc) => {
+      (svc?.ports || []).forEach((p) => {
+        const port = Number(p?.port);
+        if (port === 2375 || port === 2376) fallback.push({ port, protocol: String(p.protocol || "tcp").toLowerCase() });
+      });
+    });
+    return uniqUrls([...direct, ...fallback].map((item) => `${item.protocol}:${item.port}`)).map((key) => {
+      const [protocol, portText] = key.split(":");
+      return { protocol, port: Number(portText) };
+    });
+  }, [dockerServices, systemInfo]);
+  const dockerManageEndpoints = React.useMemo(() => {
+    const hosts = uniqUrls([
+      ...(selectableIps || []),
+      dockerStatusInfo?.public_ip,
+      systemInfo?.public_ip,
+    ].filter(Boolean));
+    const values = [];
+    dockerDaemonPorts.forEach((item) => {
+      const scheme = Number(item.port) === 2376 ? "https" : "tcp";
+      hosts.forEach((host) => {
+        values.push(`${scheme}://${host}:${item.port}`);
+      });
+    });
+    return values;
+  }, [dockerDaemonPorts, dockerStatusInfo?.public_ip, selectableIps, systemInfo?.public_ip]);
+  const dockerConnectionHelp = React.useMemo(() => {
+    if (dockerManageEndpoints.length > 0) {
+      return `Docker remote API detected. Use one of these endpoints in Docker CLI/IDE.`;
+    }
+    return "Docker remote API port is not open. If you enable Docker TCP API on 2375 or 2376, the dashboard will show IP-based endpoints here.";
+  }, [dockerManageEndpoints]);
 
   const launchCompassProtocol = React.useCallback((uri) => {
     if (!uri) return;
@@ -1070,6 +1161,9 @@ function App() {
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
             <NavCard title="DotNet" text="Open .NET installer/deployment pages." onClick={() => setPage("dotnet")} />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="Docker" text="Install Docker and manage Docker services/containers." onClick={() => setPage("docker")} outlined />
           </Grid>
           <Grid item xs={12} md={6}>
             <NavCard title="S3" text="Open S3 installer pages." onClick={() => setPage("s3")} outlined />
@@ -1423,6 +1517,141 @@ function App() {
         );
       }
       return <Alert severity="info">S3 installer is not configured for this OS.</Alert>;
+    }
+
+    if (page === "docker") {
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={6}>
+            {cfg.os === "windows" ? (
+              <ActionCard
+                title="Install Docker (Windows)"
+                description="Install Docker Desktop prerequisites on Windows. Reuses the existing Windows Docker setup flow."
+                action="/run/windows_setup_docker"
+                fields={[{ name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]}
+                onRun={run}
+                color="#1f2937"
+              />
+            ) : (
+              <ActionCard
+                title="Install Docker (Linux)"
+                description="Install Docker Engine on Linux/macOS-compatible hosts."
+                action="/run/linux_setup_docker"
+                fields={[]}
+                onRun={run}
+                color="#1f2937"
+              />
+            )}
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Docker Engine</Typography>
+                <Typography variant="body2">Installed: {docker.installed ? "Yes" : "No"}</Typography>
+                <Typography variant="body2">CLI: {docker.version || "-"}</Typography>
+                <Typography variant="body2">Engine: {docker.server_version || "-"}</Typography>
+                <Typography variant="body2">Running: {docker.running ? "Yes" : "No"}</Typography>
+                <Typography variant="body2">OS Type: {docker.os_type || "-"}</Typography>
+                <Typography variant="body2" sx={{ mt: 1.5 }}>
+                  For app deployment, use the existing DotNet Docker page.
+                </Typography>
+                <Button variant="outlined" sx={{ mt: 1.5, textTransform: "none" }} onClick={() => setPage("dotnet-docker")}>
+                  Open DotNet Docker
+                </Button>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                  <Typography variant="h6" fontWeight={800}>Docker Management</Typography>
+                  <Box sx={{ flexGrow: 1 }} />
+                  <Button variant="outlined" disabled={isScopeLoading("docker")} onClick={() => Promise.all([loadDockerInfo.current(), loadDockerServices.current()])} sx={{ textTransform: "none" }}>
+                    {isScopeLoading("docker") ? "Refreshing..." : "Refresh"}
+                  </Button>
+                  <Button
+                    variant="outlined"
+                    color={hasStoppedServices(dockerServices) ? "success" : "error"}
+                    disabled={serviceBusy || dockerServices.length === 0}
+                    onClick={() => batchServiceAction(dockerServices, "Docker", hasStoppedServices(dockerServices) ? "start" : "stop")}
+                    sx={{ textTransform: "none" }}
+                  >
+                    {hasStoppedServices(dockerServices) ? "Start All Docker" : "Stop All Docker"}
+                  </Button>
+                </Stack>
+                {scopeErrors.docker && <Alert severity="error" sx={{ mt: 1 }}>{scopeErrors.docker}</Alert>}
+                <Box sx={{ mt: 1.25 }}>
+                  <Typography variant="body2">{dockerConnectionHelp}</Typography>
+                  {dockerManageEndpoints.map((endpoint) => (
+                    <Stack key={endpoint} direction="row" spacing={0.75} alignItems="center" sx={{ mt: 0.75 }}>
+                      <Typography variant="caption" sx={{ color: "text.secondary", wordBreak: "break-all" }}>{endpoint}</Typography>
+                      <Button size="small" variant="outlined" onClick={() => copyText(endpoint, "Docker endpoint")} sx={{ textTransform: "none", minWidth: 56 }}>
+                        Copy
+                      </Button>
+                    </Stack>
+                  ))}
+                  {dockerManageEndpoints.length === 0 && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                      Common Docker remote ports: `2375` (plain TCP) and `2376` (TLS).
+                    </Typography>
+                  )}
+                </Box>
+                {!!dockerServiceUrls.length && (
+                  <Box sx={{ mt: 1.5 }}>
+                    {dockerServiceUrls.map((u) => (
+                      <Stack key={u} direction="row" spacing={0.75} alignItems="center" sx={{ mb: 0.4 }}>
+                        <Typography variant="caption" sx={{ color: "text.secondary", wordBreak: "break-all" }}>{u}</Typography>
+                        <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => window.open(u, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none", minWidth: 56 }}>
+                          Open
+                        </Button>
+                      </Stack>
+                    ))}
+                  </Box>
+                )}
+                <Box sx={{ mt: 1.5, maxHeight: 460, overflow: "auto" }}>
+                  {dockerServices.length === 0 && <Typography variant="body2">No Docker services or containers found.</Typography>}
+                  {dockerServices.map((svc) => {
+                    const running = isServiceRunningStatus(svc.status, svc.sub_status);
+                    const autostart = !!svc.autostart;
+                    const deleteDisabled = serviceBusy || (String(svc.kind || "").toLowerCase() !== "docker");
+                    return (
+                      <Paper key={`${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                          <Box sx={{ minWidth: 280 }}>
+                            <Typography variant="body2" fontWeight={700}>{svc.name}</Typography>
+                            <Typography variant="caption" color="text.secondary">{svc.display_name || "-"}</Typography>
+                          </Box>
+                          <Chip size="small" label={svc.kind || "service"} />
+                          <Chip size="small" color={running ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
+                          <Chip size="small" color={autostart ? "primary" : "default"} label={autostart ? "autostart:on" : "autostart:off"} />
+                          <Box sx={{ flexGrow: 1 }} />
+                          <Button
+                            size="small"
+                            variant="outlined"
+                            color={running ? "error" : "success"}
+                            disabled={serviceBusy}
+                            onClick={() => onServiceAction(running ? "stop" : "start", svc)}
+                            sx={{ textTransform: "none" }}
+                          >
+                            {running ? "Stop" : "Start"}
+                          </Button>
+                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
+                          <Button size="small" variant="outlined" disabled={serviceBusy || autostart} onClick={() => onServiceAction("autostart_on", svc)} sx={{ textTransform: "none" }}>Auto-start ON</Button>
+                          <Button size="small" variant="outlined" disabled={serviceBusy || !autostart} onClick={() => onServiceAction("autostart_off", svc)} sx={{ textTransform: "none" }}>Auto-start OFF</Button>
+                          <Button size="small" variant="outlined" color="error" disabled={deleteDisabled} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
+                        </Stack>
+                        {renderServiceUrls(svc)}
+                        {renderServicePorts(svc)}
+                      </Paper>
+                    );
+                  })}
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      );
     }
 
     if (page === "proxy") {
