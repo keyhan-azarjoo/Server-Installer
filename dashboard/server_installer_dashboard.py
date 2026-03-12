@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-BUILD_ID = "docker-service-page-2026-03-12-1215"
+BUILD_ID = "python-jupyter-service-2026-03-12-1515"
 
 
 def _server_installer_data_dir():
@@ -60,6 +60,7 @@ PROXY_WINDOWS_STATE = SERVER_INSTALLER_DATA / "proxy" / "proxy-wsl.json"
 PYTHON_STATE_DIR = SERVER_INSTALLER_DATA / "python"
 PYTHON_STATE_FILE = PYTHON_STATE_DIR / "python-state.json"
 PYTHON_JUPYTER_STATE_FILE = PYTHON_STATE_DIR / "jupyter-state.json"
+JUPYTER_SYSTEMD_SERVICE = "serverinstaller-jupyter.service"
 WINDOWS_LOCALS3_STATE = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "LocalS3" / "storage-server" / "install-state.json"
 REPO_RAW_BASE = os.environ.get(
     "SERVER_INSTALLER_REPO_BASE",
@@ -337,22 +338,103 @@ def _python_process_running(pid):
         return False
 
 
+def _linux_systemd_unit_status(unit_name):
+    unit = str(unit_name or "").strip()
+    if not unit or os.name == "nt" or not command_exists("systemctl"):
+        return {}
+    rc_active, out_active = run_capture(["systemctl", "is-active", unit], timeout=15)
+    rc_enabled, out_enabled = run_capture(["systemctl", "is-enabled", unit], timeout=15)
+    active = str(out_active or "").strip()
+    enabled = str(out_enabled or "").strip()
+    return {
+        "active": active,
+        "enabled": enabled,
+        "running": rc_active == 0 and active == "active",
+        "autostart": enabled in ("enabled", "static", "indirect"),
+    }
+
+
+def _detect_python_versions():
+    versions = []
+    seen = set()
+
+    def add_candidate(cmd, managed=False):
+        rc, out = run_capture(cmd, timeout=20)
+        if rc != 0 or not out:
+            return
+        lines = [line.strip() for line in str(out).splitlines() if line.strip()]
+        if len(lines) < 2:
+            return
+        exe = lines[0]
+        version = _normalize_python_version(lines[1])
+        if not exe or not version:
+            return
+        key = (exe.lower(), version)
+        if key in seen:
+            return
+        seen.add(key)
+        versions.append({
+            "version": version,
+            "python_executable": exe,
+            "managed": bool(managed),
+        })
+
+    state = _read_json_file(PYTHON_STATE_FILE)
+    managed_exe = str(state.get("python_executable") or "").strip()
+    managed_ver = str(state.get("python_version") or "").strip()
+    if managed_exe and Path(managed_exe).exists():
+        add_candidate([managed_exe, "-c", "import sys; print(sys.executable); print(sys.version.split()[0])"], managed=True)
+    if os.name == "nt" and command_exists("py"):
+        for version in ("3.13", "3.12", "3.11", "3.10", ""):
+            cmd = ["py"]
+            if version:
+                cmd.append(f"-{version}")
+            cmd += ["-c", "import sys; print(sys.executable); print(sys.version.split()[0])"]
+            add_candidate(cmd, managed=(managed_ver and _python_version_key(version) == _python_version_key(managed_ver)))
+    else:
+        for name in ("python3.13", "python3.12", "python3.11", "python3.10", "python3", "python"):
+            resolved = shutil.which(name)
+            if not resolved:
+                continue
+            add_candidate([resolved, "-c", "import sys; print(sys.executable); print(sys.version.split()[0])"], managed=(managed_exe and str(Path(resolved)) == managed_exe))
+    versions.sort(key=lambda item: tuple(int(part) if part.isdigit() else 0 for part in (_normalize_python_version(item.get("version") or "").split("."))), reverse=True)
+    return versions
+
+
 def _python_state_service_item(info):
     if not info.get("installed"):
         return []
+    items = []
+    for runtime in info.get("python_versions") or []:
+        items.append({
+            "kind": "python_version",
+            "name": f"python-{runtime.get('version') or 'unknown'}",
+            "display_name": "Managed Python" if runtime.get("managed") else "Detected Python",
+            "status": "installed",
+            "sub_status": runtime.get("python_executable") or "",
+            "autostart": False,
+            "platform": "windows" if os.name == "nt" else "linux",
+            "urls": [],
+            "ports": [],
+            "manageable": False,
+        })
     port_text = str(info.get("jupyter_port") or "").strip()
     ports = [{"port": int(port_text), "protocol": "tcp"}] if port_text.isdigit() else []
-    return [{
-        "kind": "python_runtime",
-        "name": "serverinstaller-python-jupyter",
+    service_kind = "service" if os.name != "nt" and info.get("service_mode") else "python_runtime"
+    service_name = JUPYTER_SYSTEMD_SERVICE if service_kind == "service" else "serverinstaller-python-jupyter"
+    items.append({
+        "kind": service_kind,
+        "name": service_name,
         "display_name": "Managed Jupyter Lab",
         "status": "running" if info.get("jupyter_running") else "stopped",
-        "sub_status": "running" if info.get("jupyter_running") else "stopped",
-        "autostart": False,
+        "sub_status": str(info.get("service_sub_status") or ("running" if info.get("jupyter_running") else "stopped")),
+        "autostart": bool(info.get("service_autostart")),
         "platform": "windows" if os.name == "nt" else "linux",
         "urls": [info.get("jupyter_url")] if info.get("jupyter_url") else [],
         "ports": ports,
-    }]
+        "manageable": True,
+    })
+    return items
 
 
 def get_python_info():
@@ -367,15 +449,22 @@ def get_python_info():
         "installed": bool(python_executable and Path(python_executable).exists()),
         "python_executable": python_executable,
         "python_version": _normalize_python_version(python_version),
+        "python_versions": _detect_python_versions(),
         "requested_version": str(state.get("requested_version") or "").strip(),
         "jupyter_installed": False,
         "jupyter_running": False,
         "jupyter_url": "",
         "jupyter_port": str(state.get("jupyter_port") or "").strip(),
+        "jupyter_username": str(state.get("jupyter_username") or "").strip(),
+        "jupyter_auth_enabled": bool(state.get("jupyter_auth_enabled")),
+        "jupyter_https_enabled": bool(state.get("jupyter_https_enabled")),
         "host": str(state.get("host") or "").strip(),
         "scripts_dir": _python_scripts_dir(python_executable),
         "default_notebook_dir": default_notebook_dir,
         "notebook_dir": default_notebook_dir,
+        "service_mode": bool(state.get("service_mode")),
+        "service_sub_status": "",
+        "service_autostart": False,
         "services": [],
     }
     if info["installed"]:
@@ -388,29 +477,48 @@ def get_python_info():
         if out_j:
             info["jupyter_version"] = out_j.splitlines()[0].strip()
         jupyter_state = _read_json_file(PYTHON_JUPYTER_STATE_FILE)
-        pid = jupyter_state.get("pid")
-        if pid and _python_process_running(pid):
-            info["jupyter_running"] = True
-            info["jupyter_port"] = str(jupyter_state.get("port") or info["jupyter_port"] or "").strip()
-            info["host"] = str(jupyter_state.get("host") or info["host"] or "").strip()
-            info["jupyter_url"] = str(jupyter_state.get("url") or "").strip()
+        if os.name != "nt" and (info["service_mode"] or jupyter_state.get("service_name") == JUPYTER_SYSTEMD_SERVICE):
+            service_status = _linux_systemd_unit_status(JUPYTER_SYSTEMD_SERVICE)
+            info["service_mode"] = True
+            info["service_sub_status"] = str(service_status.get("active") or "")
+            info["service_autostart"] = bool(service_status.get("autostart"))
+            info["jupyter_running"] = bool(service_status.get("running"))
+            info["jupyter_port"] = str(jupyter_state.get("port") or state.get("jupyter_port") or info["jupyter_port"] or "").strip()
+            info["host"] = str(jupyter_state.get("host") or state.get("host") or info["host"] or "").strip()
+            info["jupyter_url"] = str(jupyter_state.get("url") or state.get("jupyter_url") or "").strip()
             info["notebook_dir"] = _resolve_python_notebook_dir(
-                jupyter_state.get("notebook_dir") or info["default_notebook_dir"]
+                jupyter_state.get("notebook_dir") or state.get("notebook_dir") or info["default_notebook_dir"]
             )
-            info["jupyter_pid"] = pid
-        else:
-            if jupyter_state:
-                jupyter_state["pid"] = None
-                jupyter_state["running"] = False
-                _write_json_file(PYTHON_JUPYTER_STATE_FILE, jupyter_state)
-            if info["jupyter_installed"]:
+            info["jupyter_username"] = str(jupyter_state.get("username") or state.get("jupyter_username") or info["jupyter_username"] or "").strip()
+            info["jupyter_auth_enabled"] = bool(jupyter_state.get("auth_enabled") or state.get("jupyter_auth_enabled"))
+            info["jupyter_https_enabled"] = bool(jupyter_state.get("https_enabled") or state.get("jupyter_https_enabled"))
+            if info["jupyter_installed"] and not info["jupyter_url"] and info["jupyter_port"].isdigit():
                 host = info["host"] or choose_service_host()
-                port = info["jupyter_port"] or "8888"
-                if port.isdigit():
-                    info["jupyter_url"] = f"http://{host}:{port}/lab"
-            info["notebook_dir"] = _resolve_python_notebook_dir(
-                jupyter_state.get("notebook_dir") if jupyter_state else info["default_notebook_dir"]
-            )
+                info["jupyter_url"] = f"https://{host}:{info['jupyter_port']}/lab"
+        else:
+            pid = jupyter_state.get("pid")
+            if pid and _python_process_running(pid):
+                info["jupyter_running"] = True
+                info["jupyter_port"] = str(jupyter_state.get("port") or info["jupyter_port"] or "").strip()
+                info["host"] = str(jupyter_state.get("host") or info["host"] or "").strip()
+                info["jupyter_url"] = str(jupyter_state.get("url") or "").strip()
+                info["notebook_dir"] = _resolve_python_notebook_dir(
+                    jupyter_state.get("notebook_dir") or info["default_notebook_dir"]
+                )
+                info["jupyter_pid"] = pid
+            else:
+                if jupyter_state:
+                    jupyter_state["pid"] = None
+                    jupyter_state["running"] = False
+                    _write_json_file(PYTHON_JUPYTER_STATE_FILE, jupyter_state)
+                if info["jupyter_installed"]:
+                    host = info["host"] or choose_service_host()
+                    port = info["jupyter_port"] or "8888"
+                    if port.isdigit():
+                        info["jupyter_url"] = f"http://{host}:{port}/lab"
+                info["notebook_dir"] = _resolve_python_notebook_dir(
+                    jupyter_state.get("notebook_dir") if jupyter_state else info["default_notebook_dir"]
+                )
     info["services"] = _python_state_service_item(info)
     return info
 
@@ -427,7 +535,6 @@ def run_windows_python_installer(form=None, live_cb=None):
     install_jupyter = (form.get("PYTHON_INSTALL_JUPYTER", ["yes"])[0] or "yes").strip().lower()
     host_ip = (form.get("PYTHON_HOST_IP", [""])[0] or "").strip()
     jupyter_port = (form.get("PYTHON_JUPYTER_PORT", ["8888"])[0] or "8888").strip()
-    start_jupyter = (form.get("PYTHON_START_JUPYTER", ["no"])[0] or "no").strip().lower()
     notebook_dir = _resolve_python_notebook_dir((form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip())
     env["PYTHON_VERSION"] = version
     env["PYTHON_INSTALL_JUPYTER"] = "1" if install_jupyter in ("1", "true", "yes", "y", "on") else "0"
@@ -450,7 +557,7 @@ def run_windows_python_installer(form=None, live_cb=None):
     state["default_notebook_dir"] = notebook_dir
     state["notebook_dir"] = notebook_dir
     _write_json_file(PYTHON_STATE_FILE, state)
-    if start_jupyter in ("1", "true", "yes", "y", "on"):
+    if install_jupyter in ("1", "true", "yes", "y", "on"):
         start_code, start_output = start_python_jupyter(
             host=host_ip or str(state.get("host") or choose_service_host()),
             port=jupyter_port,
@@ -471,21 +578,27 @@ def run_unix_python_installer(form=None, live_cb=None):
     ensure_repo_files(PYTHON_UNIX_FILES, live_cb=live_cb)
     env = os.environ.copy()
     version = (form.get("PYTHON_VERSION", ["3.12"])[0] or "3.12").strip()
-    install_jupyter = (form.get("PYTHON_INSTALL_JUPYTER", ["yes"])[0] or "yes").strip().lower()
+    install_jupyter = "yes"
     host_ip = (form.get("PYTHON_HOST_IP", [""])[0] or "").strip()
     jupyter_port = (form.get("PYTHON_JUPYTER_PORT", ["8888"])[0] or "8888").strip()
-    start_jupyter = (form.get("PYTHON_START_JUPYTER", ["no"])[0] or "no").strip().lower()
     notebook_dir = _resolve_python_notebook_dir((form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip())
+    jupyter_user = (form.get("PYTHON_JUPYTER_USER", [""])[0] or "").strip()
+    jupyter_password = (form.get("PYTHON_JUPYTER_PASSWORD", [""])[0] or "").strip()
     env["PYTHON_VERSION"] = version
-    env["PYTHON_INSTALL_JUPYTER"] = "1" if install_jupyter in ("1", "true", "yes", "y", "on") else "0"
+    env["PYTHON_INSTALL_JUPYTER"] = "1"
     env["PYTHON_JUPYTER_PORT"] = jupyter_port
     env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
+    env["PYTHON_NOTEBOOK_DIR"] = notebook_dir
     if host_ip:
         env["PYTHON_HOST_IP"] = host_ip
+    if jupyter_user:
+        env["PYTHON_JUPYTER_USER"] = jupyter_user
+    if jupyter_password:
+        env["PYTHON_JUPYTER_PASSWORD"] = jupyter_password
     cmd = ["bash", str(PYTHON_UNIX_INSTALLER)]
     if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
         cmd = ["sudo", "env"]
-        for key in ("PYTHON_VERSION", "PYTHON_INSTALL_JUPYTER", "PYTHON_JUPYTER_PORT", "PYTHON_HOST_IP", "SERVER_INSTALLER_DATA_DIR"):
+        for key in ("PYTHON_VERSION", "PYTHON_INSTALL_JUPYTER", "PYTHON_JUPYTER_PORT", "PYTHON_HOST_IP", "PYTHON_NOTEBOOK_DIR", "PYTHON_JUPYTER_USER", "PYTHON_JUPYTER_PASSWORD", "SERVER_INSTALLER_DATA_DIR"):
             value = env.get(key, "").strip()
             if value:
                 cmd.append(f"{key}={value}")
@@ -498,20 +611,18 @@ def run_unix_python_installer(form=None, live_cb=None):
         state["host"] = host_ip
     if jupyter_port:
         state["jupyter_port"] = jupyter_port
+        state["jupyter_url"] = f"https://{host_ip or str(state.get('host') or choose_service_host())}:{jupyter_port}/lab"
     state["default_notebook_dir"] = notebook_dir
     state["notebook_dir"] = notebook_dir
+    if host_ip:
+        state["host"] = host_ip
+    if jupyter_user:
+        state["jupyter_username"] = jupyter_user
+    if jupyter_user or state.get("jupyter_username"):
+        state["jupyter_auth_enabled"] = True
+    state["jupyter_https_enabled"] = True
+    state["service_mode"] = True
     _write_json_file(PYTHON_STATE_FILE, state)
-    if start_jupyter in ("1", "true", "yes", "y", "on"):
-        start_code, start_output = start_python_jupyter(
-            host=host_ip or str(state.get("host") or choose_service_host()),
-            port=jupyter_port,
-            notebook_dir=notebook_dir,
-            live_cb=live_cb,
-        )
-        if start_output:
-            output = f"{output.rstrip()}\n{start_output}".strip()
-        if start_code != 0:
-            return start_code, output
     return 0, output
 
 
@@ -532,6 +643,17 @@ def run_python_command(form=None, live_cb=None):
 
 
 def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
+    if os.name != "nt":
+        state = _read_json_file(PYTHON_STATE_FILE)
+        if state.get("service_mode") and command_exists("systemctl"):
+            rc, out = run_capture(["systemctl", "restart", JUPYTER_SYSTEMD_SERVICE], timeout=60)
+            if rc == 0:
+                url = str(state.get("jupyter_url") or f"https://{state.get('host') or choose_service_host()}:{state.get('jupyter_port') or port or '8888'}/lab").strip()
+                message = out or f"Jupyter Lab service restarted at {url}."
+                if live_cb:
+                    live_cb(message + "\n")
+                return 0, message
+            return 1, (out or f"Failed to restart {JUPYTER_SYSTEMD_SERVICE}.")
     resolved = _resolve_any_python()
     python_executable = str(resolved.get("python_executable") or "").strip()
     if not python_executable:
@@ -602,6 +724,19 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
 
 
 def stop_python_jupyter(live_cb=None):
+    state = _read_json_file(PYTHON_STATE_FILE)
+    if os.name != "nt" and state.get("service_mode") and command_exists("systemctl"):
+        rc, out = run_capture(["systemctl", "stop", JUPYTER_SYSTEMD_SERVICE], timeout=60)
+        if rc != 0:
+            return 1, (out or f"Failed to stop {JUPYTER_SYSTEMD_SERVICE}.")
+        jupyter_state = _read_json_file(PYTHON_JUPYTER_STATE_FILE)
+        if jupyter_state:
+            jupyter_state["running"] = False
+            _write_json_file(PYTHON_JUPYTER_STATE_FILE, jupyter_state)
+        message = "Jupyter Lab service stopped."
+        if live_cb:
+            live_cb(message + "\n")
+        return 0, message
     state = _read_json_file(PYTHON_JUPYTER_STATE_FILE)
     pid = state.get("pid")
     if not pid:
@@ -3588,23 +3723,65 @@ def run_windows_proxy_installer(form=None, live_cb=None):
 def manage_proxy_service(action, name):
     action = (action or "").strip().lower()
     svc_name = _safe_service_name(name)
-    if action not in ("start", "stop", "restart"):
-        return False, "Supported actions: start, stop, restart."
+    if action not in ("start", "stop", "restart", "delete"):
+        return False, "Supported actions: start, stop, restart, delete."
     if not svc_name:
         return False, "Invalid proxy service name."
     if os.name == "nt":
         state = _read_json_file(PROXY_WINDOWS_STATE)
         distro = str(state.get("distro") or os.environ.get("PROXY_WSL_DISTRO", "Ubuntu")).strip()
         if svc_name.lower() == "serverinstaller-proxywsl":
+            if action == "delete":
+                rc, out = run_capture(["schtasks", "/Delete", "/TN", "ServerInstaller-ProxyWSL", "/F"], timeout=30)
+                try:
+                    PROXY_WINDOWS_STATE.unlink(missing_ok=True)
+                except Exception:
+                    pass
+                return rc == 0, (out or "ServerInstaller-ProxyWSL task deleted.")
             task_action = {"start": "/Run", "stop": "/End", "restart": "/Run"}[action]
             if action == "restart":
                 run_capture(["schtasks", "/End", "/TN", "ServerInstaller-ProxyWSL"], timeout=15)
             rc, out = run_capture(["schtasks", task_action, "/TN", "ServerInstaller-ProxyWSL"], timeout=30)
             return rc == 0, (out or f"Action '{action}' requested for ServerInstaller-ProxyWSL.")
+        if action == "delete":
+            if svc_name.lower() != "proxy-panel":
+                return False, "Delete is only supported for the managed Proxy stack entry."
+            cleanup_script = """
+set -e
+if [ -f /opt/proxy-panel/repo/common/uninstall.sh ]; then
+  bash /opt/proxy-panel/repo/common/uninstall.sh || true
+fi
+systemctl stop proxy-panel >/dev/null 2>&1 || true
+systemctl disable proxy-panel >/dev/null 2>&1 || true
+rm -f /etc/systemd/system/proxy-panel.service || true
+systemctl daemon-reload >/dev/null 2>&1 || true
+rm -rf /opt/proxy-panel || true
+"""
+            rc, out = run_capture(["wsl.exe", "-d", distro, "--user", "root", "--", "bash", "-lc", cleanup_script], timeout=120)
+            run_capture(["schtasks", "/Delete", "/TN", "ServerInstaller-ProxyWSL", "/F"], timeout=30)
+            try:
+                PROXY_WINDOWS_STATE.unlink(missing_ok=True)
+            except Exception:
+                pass
+            return rc == 0, (out or "Proxy stack removed from WSL.")
         linux_action = f"systemctl {action} {shlex.quote(svc_name)}"
         rc, out = run_capture(["wsl.exe", "-d", distro, "--user", "root", "--", "bash", "-lc", linux_action], timeout=60)
         return rc == 0, (out or f"Action '{action}' requested for WSL service '{svc_name}'.")
     prefix = _sudo_prefix()
+    if action == "delete":
+        if svc_name != "proxy-panel":
+            return False, "Delete is only supported for the managed Proxy stack entry."
+        cleanup_script = (
+            "set -e; "
+            "if [ -f /opt/proxy-panel/repo/common/uninstall.sh ]; then bash /opt/proxy-panel/repo/common/uninstall.sh || true; fi; "
+            "systemctl stop proxy-panel >/dev/null 2>&1 || true; "
+            "systemctl disable proxy-panel >/dev/null 2>&1 || true; "
+            "rm -f /etc/systemd/system/proxy-panel.service || true; "
+            "systemctl daemon-reload >/dev/null 2>&1 || true; "
+            "rm -rf /opt/proxy-panel || true"
+        )
+        rc, out = run_capture(prefix + ["bash", "-lc", cleanup_script], timeout=120)
+        return rc == 0, (out or "Proxy stack removed.")
     rc, out = run_capture(prefix + ["systemctl", action, svc_name], timeout=60)
     if rc == 0:
         return True, (out or f"Action '{action}' requested for {svc_name}.")

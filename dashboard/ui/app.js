@@ -223,7 +223,6 @@ function App() {
   const prevNetRef = React.useRef(null);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
   const selectableIps = React.useMemo(() => getSelectableIps(systemInfo), [systemInfo]);
-  const pendingOpenRef = React.useRef(null);
 
   React.useEffect(() => {
     const onMove = (e) => {
@@ -433,27 +432,10 @@ function App() {
         append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code})`);
         if (Number(j.exit_code) !== 0) {
           setRunError(`${title} failed (exit ${j.exit_code}). Check Web Terminal output for details.`);
-          pendingOpenRef.current = null;
         }
         setTermState("Idle");
         refreshPageContext(page);
         loadSystem.current();
-        if (Number(j.exit_code) === 0 && pendingOpenRef.current) {
-          const openRequest = pendingOpenRef.current;
-          pendingOpenRef.current = null;
-          try {
-            const statusResp = await fetch(`/api/system/status?scope=${encodeURIComponent(openRequest.scope)}`, { headers: { "X-Requested-With": "fetch" } });
-            const statusJson = await statusResp.json();
-            const resolvedUrl = String(statusJson?.status?.jupyter_url || openRequest.url || "").trim();
-            if (resolvedUrl) {
-              window.open(resolvedUrl, "_blank", "noopener,noreferrer");
-            }
-          } catch (_) {
-            if (openRequest.url) {
-              window.open(openRequest.url, "_blank", "noopener,noreferrer");
-            }
-          }
-        }
         return;
       }
       setTimeout(() => poll(jobId, title, next), 300);
@@ -481,9 +463,7 @@ function App() {
     const isS3Install = action === "/run/s3_linux" || action === "/run/s3_windows" || action === "/run/s3_windows_iis" || action === "/run/s3_windows_docker";
     const isMongoInstall = action === "/run/mongo_windows" || action === "/run/mongo_unix";
     const isPythonInstall = action === "/run/python_install";
-    const isJupyterStart = action === "/run/python_jupyter_start";
     setRunError("");
-    pendingOpenRef.current = null;
     if (isS3Install) {
       const selectedIp = String(body.get("LOCALS3_HOST_IP") || "").trim();
       if (!selectedIp && selectableIps.length > 1) {
@@ -540,18 +520,6 @@ function App() {
         body.set("LOCALMONGO_HOST", selectedIp);
       } else if (selectableIps.length === 1) {
         body.set("LOCALMONGO_HOST", selectableIps[0]);
-      }
-    }
-    if (isPythonInstall || isJupyterStart) {
-      const hostValue = String(body.get("PYTHON_HOST_IP") || "").trim() || pythonService.host || selectableIps[0] || "127.0.0.1";
-      const portValueResolved = String(body.get("PYTHON_JUPYTER_PORT") || pythonService.jupyter_port || "8888").trim() || "8888";
-      const openRequestedRaw = isPythonInstall ? body.get("PYTHON_OPEN_JUPYTER_TAB") : body.get("PYTHON_OPEN_IN_NEW_TAB");
-      const openRequested = /^(1|true|yes|y|on)$/i.test(String(openRequestedRaw || ""));
-      if (openRequested) {
-        pendingOpenRef.current = {
-          scope: "python",
-          url: `http://${hostValue}:${portValueResolved}/lab`,
-        };
       }
     }
     try {
@@ -869,8 +837,9 @@ function App() {
 
   const onProxyServiceAction = async (action, svc) => {
     if (!svc?.name) return;
-    if (action === "stop") {
-      const ok = window.confirm(`Do you want to stop '${svc.name}'?`);
+    if (action === "stop" || action === "delete") {
+      const verb = action === "delete" ? "delete" : "stop";
+      const ok = window.confirm(`Do you want to ${verb} '${svc.name}'?`);
       if (!ok) return;
     }
     setServiceBusy(true);
@@ -1792,24 +1761,30 @@ function App() {
                   </Stack>
                   <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
                     {proxyServices.length === 0 && <Typography variant="body2">No proxy services detected yet.</Typography>}
-                    {proxyServices.map((svc) => (
-                      <Paper key={`proxy-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                          <Box sx={{ minWidth: 260 }}>
-                            <Typography variant="body2"><b>{svc.name}</b> ({svc.kind || "service"})</Typography>
-                            <Typography variant="caption" color="text.secondary">{svc.display_name || "-"}</Typography>
-                          </Box>
-                          <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
-                          <Box sx={{ flexGrow: 1 }} />
-                          <Button size="small" variant="outlined" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"} disabled={serviceBusy} onClick={() => onProxyServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
-                            {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                          </Button>
-                          <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onProxyServiceAction("restart", svc)} sx={{ textTransform: "none" }}>
-                            Restart
-                          </Button>
-                        </Stack>
-                      </Paper>
-                    ))}
+                    {proxyServices.map((svc) => {
+                      const deleteDisabled = serviceBusy || !["proxy-panel", "ServerInstaller-ProxyWSL"].includes(String(svc.name || ""));
+                      return (
+                        <Paper key={`proxy-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                            <Box sx={{ minWidth: 260 }}>
+                              <Typography variant="body2"><b>{svc.name}</b> ({svc.kind || "service"})</Typography>
+                              <Typography variant="caption" color="text.secondary">{svc.display_name || "-"}</Typography>
+                            </Box>
+                            <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
+                            <Box sx={{ flexGrow: 1 }} />
+                            <Button size="small" variant="outlined" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"} disabled={serviceBusy} onClick={() => onProxyServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
+                              {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                            </Button>
+                            <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onProxyServiceAction("restart", svc)} sx={{ textTransform: "none" }}>
+                              Restart
+                            </Button>
+                            <Button size="small" variant="outlined" color="error" disabled={deleteDisabled} onClick={() => onProxyServiceAction("delete", svc)} sx={{ textTransform: "none" }}>
+                              Delete
+                            </Button>
+                          </Stack>
+                        </Paper>
+                      );
+                    })}
                   </Box>
                 </CardContent>
               </Card>
@@ -1835,15 +1810,16 @@ function App() {
           <Grid item xs={12} md={8}>
             <ActionCard
               title={`Install Python (${installOsLabel})`}
-              description="Select a Python version, optionally install Jupyter, and prepare the managed interpreter."
+              description="Install the managed Python runtime and keep Jupyter running as a background service."
               action="/run/python_install"
               fields={[
                 { name: "PYTHON_VERSION", label: "Python Version", type: "select", options: ["3.13", "3.12", "3.11", "3.10"], defaultValue: pythonService.requested_version || "3.12", required: true },
                 ...(selectableIps.length > 0 ? [{ name: "PYTHON_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: pythonHost, required: true, placeholder: "Select IP" }] : []),
-                { name: "PYTHON_INSTALL_JUPYTER", label: "Install Jupyter", type: "select", options: ["yes", "no"], defaultValue: pythonService.jupyter_installed ? "yes" : "yes", required: true },
-                { name: "PYTHON_START_JUPYTER", label: "Start Jupyter Now", type: "select", options: ["no", "yes"], defaultValue: pythonService.jupyter_running ? "yes" : "no", required: true },
-                { name: "PYTHON_OPEN_JUPYTER_TAB", label: "Open Jupyter In New Tab", type: "select", options: ["no", "yes"], defaultValue: "yes", required: true },
                 { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
+                ...(cfg.os !== "windows" ? [
+                  { name: "PYTHON_JUPYTER_USER", label: "Jupyter Username", defaultValue: pythonService.jupyter_username || "", required: !pythonService.jupyter_auth_enabled, placeholder: "admin" },
+                  { name: "PYTHON_JUPYTER_PASSWORD", label: "Jupyter Password", type: "password", defaultValue: "", required: !pythonService.jupyter_auth_enabled, placeholder: pythonService.jupyter_auth_enabled ? "Leave blank to keep current password" : "Required" },
+                ] : []),
                 { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: "Managed default notebook directory." },
               ]}
               onRun={run}
@@ -1860,6 +1836,8 @@ function App() {
                 <Typography variant="body2">Notebook Directory: {pythonNotebookDir || "-"}</Typography>
                 <Typography variant="body2">Jupyter: {pythonService.jupyter_installed ? "Installed" : "Not installed"}</Typography>
                 <Typography variant="body2">Jupyter Status: {pythonService.jupyter_running ? "Running" : "Stopped"}</Typography>
+                {cfg.os !== "windows" && <Typography variant="body2">HTTPS: {pythonService.jupyter_https_enabled ? "Enabled" : "Disabled"}</Typography>}
+                {cfg.os !== "windows" && <Typography variant="body2">Auth User: {pythonService.jupyter_username || "-"}</Typography>}
                 {!!pythonUrl && <Typography variant="body2" sx={{ mt: 1 }}>URL: {pythonUrl}</Typography>}
               </CardContent>
             </Card>
@@ -1875,35 +1853,6 @@ function App() {
               onRun={run}
               color="#0f766e"
             />
-          </Grid>
-          <Grid item xs={12} md={6}>
-            <Grid container spacing={2}>
-              <Grid item xs={12}>
-                <ActionCard
-                  title="Start Jupyter"
-                  description="Start managed Jupyter Lab with no browser and no token on the selected host/port."
-                  action="/run/python_jupyter_start"
-                  fields={[
-                    ...(selectableIps.length > 0 ? [{ name: "PYTHON_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: pythonHost, required: true, placeholder: "Select IP" }] : []),
-                    { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
-                    { name: "PYTHON_OPEN_IN_NEW_TAB", label: "Open In New Tab", type: "select", options: ["yes", "no"], defaultValue: "yes", required: true },
-                    { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: "Managed default notebook directory." },
-                  ]}
-                  onRun={run}
-                  color="#7c3aed"
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <ActionCard
-                  title="Stop Jupyter"
-                  description="Stop the managed Jupyter Lab process."
-                  action="/run/python_jupyter_stop"
-                  fields={[]}
-                  onRun={run}
-                  color="#991b1b"
-                />
-              </Grid>
-            </Grid>
           </Grid>
           <Grid item xs={12}>
             <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
@@ -1928,22 +1877,27 @@ function App() {
                       <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                         <Box sx={{ minWidth: 250 }}>
                           <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
+                          {svc.display_name && <Typography variant="caption" color="text.secondary">{svc.display_name}</Typography>}
                           {renderServiceUrls(svc)}
                           {renderServicePorts(svc)}
                         </Box>
                         <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
                         <Box sx={{ flexGrow: 1 }} />
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
-                          disabled={serviceBusy}
-                          onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
-                          sx={{ textTransform: "none" }}
-                        >
-                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                        </Button>
-                        <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
+                        {svc.manageable !== false && (
+                          <>
+                            <Button
+                              size="small"
+                              variant="outlined"
+                              color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                              disabled={serviceBusy}
+                              onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                              sx={{ textTransform: "none" }}
+                            >
+                              {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                            </Button>
+                            <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
+                          </>
+                        )}
                       </Stack>
                     </Paper>
                   ))}
