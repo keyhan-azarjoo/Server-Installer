@@ -178,6 +178,458 @@ function Get-EnvOrDefault([string]$name, [string]$defaultValue) {
   return $value.Trim()
 }
 
+function Has-Cmd([string]$name) {
+  return [bool](Get-Command $name -ErrorAction SilentlyContinue)
+}
+
+function Try-EnableDockerCliFromDefaultPath {
+  if (Has-Cmd "docker") { return }
+
+  foreach ($dockerBin in @(
+    "C:\Program Files\Docker\Docker\resources\bin",
+    "C:\Program Files\Docker\Docker",
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker\resources\bin"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker")
+  )) {
+    if (-not $dockerBin) { continue }
+    $dockerExe = Join-Path $dockerBin "docker.exe"
+    if (-not (Test-Path $dockerExe)) { continue }
+    if ($env:Path -notlike "*$dockerBin*") {
+      $env:Path = "$dockerBin;$env:Path"
+    }
+    return
+  }
+}
+
+function Download-FileFast([string[]]$urls, [string]$outFile) {
+  $outDir = Split-Path -Parent $outFile
+  New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+
+  foreach ($url in $urls) {
+    try {
+      if (Has-Cmd "curl.exe") {
+        & curl.exe -L --fail --retry 4 --retry-delay 2 --connect-timeout 20 -C - -o $outFile $url
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $outFile) -and ((Get-Item $outFile).Length -gt 104857600)) { return $true }
+      }
+    } catch {}
+
+    try {
+      if (Get-Command Start-BitsTransfer -ErrorAction SilentlyContinue) {
+        Start-BitsTransfer -Source $url -Destination $outFile -DisplayName "ProxyDockerInstaller"
+        if ((Test-Path $outFile) -and ((Get-Item $outFile).Length -gt 104857600)) { return $true }
+      }
+    } catch {}
+
+    try {
+      Invoke-WebRequest -Uri $url -OutFile $outFile
+      if ((Test-Path $outFile) -and ((Get-Item $outFile).Length -gt 104857600)) { return $true }
+    } catch {}
+  }
+
+  return $false
+}
+
+function Install-DockerDesktopDirect {
+  $cacheDir = Join-Path $env:ProgramData "Server-Installer\proxy\downloads"
+  $exe = Join-Path $cacheDir "DockerDesktopInstaller.exe"
+  $urls = @(
+    "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe",
+    "https://desktop.docker.com/win/stable/amd64/Docker%20Desktop%20Installer.exe"
+  )
+
+  $useCached = $false
+  if (Test-Path $exe) {
+    $size = (Get-Item $exe).Length
+    if ($size -gt 104857600) {
+      $useCached = $true
+      Info "Using cached Docker installer: $exe"
+    }
+  }
+
+  if (-not $useCached) {
+    Info "Downloading Docker Desktop installer..."
+    if (-not (Download-FileFast -urls $urls -outFile $exe)) {
+      return $false
+    }
+  }
+
+  Start-Process -FilePath $exe -ArgumentList @("install", "--quiet", "--accept-license") -Wait
+  return $true
+}
+
+function Find-DockerDesktopExe {
+  foreach ($candidate in @(
+    "C:\Program Files\Docker\Docker\Docker Desktop.exe",
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker\Docker Desktop.exe")
+  )) {
+    if ($candidate -and (Test-Path $candidate)) {
+      return $candidate
+    }
+  }
+
+  foreach ($root in @(
+    "C:\Program Files\Docker\Docker",
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker")
+  )) {
+    if (-not $root -or -not (Test-Path $root)) { continue }
+    try {
+      $match = Get-ChildItem -Path $root -Recurse -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -eq "Docker Desktop.exe" } |
+        Select-Object -First 1
+      if ($match -and $match.FullName) {
+        return $match.FullName
+      }
+    } catch {}
+  }
+
+  return ""
+}
+
+function Find-DockerSwitchCli {
+  foreach ($name in @("DockerCli.exe", "com.docker.cli.exe", "com.docker.cli")) {
+    $cmd = Get-Command $name -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source -and (Test-Path $cmd.Source)) {
+      return $cmd.Source
+    }
+  }
+
+  foreach ($candidate in @(
+    "C:\Program Files\Docker\Docker\DockerCli.exe",
+    "C:\Program Files\Docker\Docker\com.docker.cli.exe",
+    "C:\Program Files\Docker\Docker\resources\bin\com.docker.cli.exe",
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker\DockerCli.exe"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker\com.docker.cli.exe")
+  )) {
+    if ($candidate -and (Test-Path $candidate)) {
+      return $candidate
+    }
+  }
+
+  return ""
+}
+
+function Start-DockerDesktop {
+  try {
+    $running = Get-Process -Name "Docker Desktop" -ErrorAction SilentlyContinue
+    if ($running) {
+      return
+    }
+  } catch {}
+
+  $exe = Find-DockerDesktopExe
+  if ($exe -and (Test-Path $exe)) {
+    Info "Starting Docker Desktop..."
+    Start-Process $exe | Out-Null
+  }
+}
+
+function Test-DockerEngine {
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  docker info 2>&1 | Out-Null
+  $ok = ($LASTEXITCODE -eq 0)
+  $ErrorActionPreference = $previous
+  return $ok
+}
+
+function Get-DockerOsType {
+  $previous = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  $out = docker info --format "{{.OSType}}" 2>$null
+  $exitCode = $LASTEXITCODE
+  $ErrorActionPreference = $previous
+  if ($exitCode -ne 0) {
+    return ""
+  }
+  return (($out | Out-String).Trim())
+}
+
+function Ensure-DockerInstalled {
+  Try-EnableDockerCliFromDefaultPath
+  if (Has-Cmd "docker") {
+    return
+  }
+
+  Info "Docker CLI not found. Attempting automatic Docker Desktop installation..."
+  if (-not (Install-DockerDesktopDirect)) {
+    Fail "Automatic Docker Desktop installation failed."
+  }
+
+  Try-EnableDockerCliFromDefaultPath
+  if (-not (Has-Cmd "docker")) {
+    $dockerExe = Join-Path "C:\Program Files\Docker\Docker\resources\bin" "docker.exe"
+    if (Test-Path $dockerExe) {
+      $env:Path = "C:\Program Files\Docker\Docker\resources\bin;$env:Path"
+    }
+  }
+
+  if (-not (Has-Cmd "docker")) {
+    Fail "Docker Desktop was installed but docker.exe is still unavailable."
+  }
+}
+
+function Repair-DockerEngine {
+  try {
+    $wslOut = wsl --list --quiet 2>$null
+    if ($wslOut) {
+      $distros = $wslOut | Where-Object { ($_ -replace '[^\x20-\x7E]', '').Trim() -match "docker-desktop" }
+      foreach ($distroName in $distros) {
+        $trimmed = ($distroName -replace '[^\x20-\x7E]', '').Trim()
+        if ($trimmed) {
+          wsl --terminate $trimmed 2>$null | Out-Null
+        }
+      }
+    }
+  } catch {}
+
+  try {
+    Get-Process "Docker Desktop" -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  } catch {}
+  Start-Sleep -Seconds 5
+  Start-DockerDesktop
+}
+
+function Wait-DockerEngine {
+  if (Test-DockerEngine) {
+    return
+  }
+
+  Start-DockerDesktop
+  $elapsed = 0
+  while ($elapsed -lt 120) {
+    Start-Sleep -Seconds 5
+    $elapsed += 5
+    if (Test-DockerEngine) {
+      return
+    }
+  }
+
+  Warn "Docker Engine did not become ready. Attempting repair..."
+  Repair-DockerEngine
+
+  $elapsed = 0
+  while ($elapsed -lt 120) {
+    Start-Sleep -Seconds 5
+    $elapsed += 5
+    if (Test-DockerEngine) {
+      return
+    }
+  }
+
+  Fail "Docker Engine is not reachable."
+}
+
+function Ensure-DockerLinuxEngine {
+  $osType = Get-DockerOsType
+  if ($osType -eq "linux") {
+    return
+  }
+
+  $dockerCli = Find-DockerSwitchCli
+  if (-not $dockerCli) {
+    Fail "Docker Desktop switch CLI not found."
+  }
+
+  Info "Switching Docker Desktop to Linux containers..."
+  & $dockerCli -SwitchLinuxEngine 2>&1 | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Fail "Failed to switch Docker Desktop to Linux containers."
+  }
+
+  $elapsed = 0
+  while ($elapsed -lt 120) {
+    Start-Sleep -Seconds 5
+    $elapsed += 5
+    if ((Get-DockerOsType) -eq "linux") {
+      return
+    }
+  }
+
+  Fail "Docker Desktop did not switch to Linux containers in time."
+}
+
+function ConvertTo-SingleQuotedBash([string]$value) {
+  if ($null -eq $value) { $value = "" }
+  $replacement = [string][char]39 + [string][char]34 + [string][char]39 + [string][char]34 + [string][char]39
+  return "'" + $value.Replace("'", $replacement) + "'"
+}
+
+function Invoke-Docker([string[]]$Arguments) {
+  $output = & docker @Arguments 2>&1
+  $exitCode = $LASTEXITCODE
+  $text = (($output | ForEach-Object { "$_" }) -join "`n")
+  $text = $text.Replace([string][char]0, '').Replace([string][char]0xFEFF, '').Trim()
+  return [pscustomobject]@{
+    ExitCode = $exitCode
+    Output = $text
+  }
+}
+
+function Invoke-DockerOrFail([string[]]$Arguments, [string]$failureMessage) {
+  $result = Invoke-Docker $Arguments
+  if ($result.ExitCode -ne 0) {
+    $detail = if ($result.Output) { "`n$result.Output" } else { "" }
+    Fail "$failureMessage$detail"
+  }
+  return $result.Output
+}
+
+function Get-ProxyDockerAdminPassword([string]$stateFile) {
+  if (Test-Path $stateFile) {
+    try {
+      $existing = Get-Content -Path $stateFile -Raw -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+      if ($existing -and $existing.admin_password) {
+        return "$($existing.admin_password)"
+      }
+    } catch {}
+  }
+
+  $alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*-_=+"
+  $chars = 1..24 | ForEach-Object { $alphabet[(Get-Random -Minimum 0 -Maximum $alphabet.Length)] }
+  return (-join $chars)
+}
+
+function Get-DockerContainerStatus([string]$name) {
+  $status = Invoke-Docker @("container", "inspect", "--format", "{{.State.Status}}", $name)
+  if ($status.ExitCode -ne 0) {
+    return ""
+  }
+  return $status.Output.Trim()
+}
+
+function Ensure-ProxyDockerImage([string]$imageName) {
+  $inspect = Invoke-Docker @("image", "inspect", $imageName)
+  if ($inspect.ExitCode -eq 0) {
+    return
+  }
+
+  $bootstrapName = "server-installer-proxy-bootstrap"
+  Invoke-Docker @("rm", "-f", $bootstrapName) | Out-Null
+
+  Info "Preparing Ubuntu image for Docker-based Proxy install..."
+  Invoke-DockerOrFail @("run", "-d", "--name", $bootstrapName, "ubuntu:24.04", "sleep", "infinity") "Failed to start Docker bootstrap container."
+
+  try {
+    $bootstrapCommand = @"
+set -e
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y systemd systemd-sysv dbus sudo curl ca-certificates gnupg lsb-release python3 openssl openssh-server iptables iproute2 procps ufw cron vnstat net-tools iputils-ping nginx stunnel4 jq
+mkdir -p /run/sshd
+systemd-machine-id-setup >/dev/null 2>&1 || true
+apt-get clean
+rm -rf /var/lib/apt/lists/*
+"@
+    Invoke-DockerOrFail @("exec", $bootstrapName, "bash", "-lc", $bootstrapCommand) "Failed to prepare Ubuntu image for Proxy Docker fallback."
+    Invoke-DockerOrFail @("commit", $bootstrapName, $imageName) "Failed to save prepared Proxy Docker image."
+  } finally {
+    Invoke-Docker @("rm", "-f", $bootstrapName) | Out-Null
+  }
+}
+
+function Wait-ProxyDockerSystemd([string]$containerName) {
+  $probe = @'
+for i in $(seq 1 90); do
+  state=$(systemctl is-system-running 2>/dev/null || true)
+  if [ "$state" = "running" ] || [ "$state" = "degraded" ]; then
+    exit 0
+  fi
+  sleep 2
+done
+exit 1
+'@
+  Invoke-DockerOrFail @("exec", $containerName, "bash", "-lc", $probe) "Proxy Docker container did not finish booting systemd."
+}
+
+function Ensure-ProxyDockerContainer([string]$containerName, [string]$imageName, [string]$proxyRootWindows, [int]$panelPort) {
+  $status = Get-DockerContainerStatus $containerName
+  if ($status -eq "running") {
+    return
+  }
+
+  if ($status) {
+    Invoke-DockerOrFail @("start", $containerName) "Failed to start Proxy Docker container."
+    return
+  }
+
+  $mountSpec = "${proxyRootWindows}:/srv/proxy:ro"
+  $arguments = @(
+    "run", "-d",
+    "--name", $containerName,
+    "--hostname", "server-installer-proxy",
+    "--privileged",
+    "--cgroupns=host",
+    "--restart", "unless-stopped",
+    "--tmpfs", "/run",
+    "--tmpfs", "/run/lock",
+    "-v", "/sys/fs/cgroup:/sys/fs/cgroup:rw",
+    "-v", $mountSpec,
+    "-p", "22:22",
+    "-p", "80:80",
+    "-p", "443:443",
+    "-p", "${panelPort}:8443",
+    $imageName,
+    "/sbin/init"
+  )
+  Invoke-DockerOrFail $arguments "Failed to create Proxy Docker container."
+}
+
+function Install-ProxyViaDocker([string]$proxyRootWindows, [string]$stateFile, [string]$layer, [string]$domain, [string]$email, [string]$duckdns, [string]$panelPort, [string]$panelHost) {
+  Ensure-DockerInstalled
+  Wait-DockerEngine
+  Ensure-DockerLinuxEngine
+
+  $containerName = "server-installer-proxy"
+  $imageName = "server-installer/proxy-base:24.04"
+  $adminPassword = Get-ProxyDockerAdminPassword $stateFile
+  $rootCredential = ConvertTo-SingleQuotedBash ("root:" + $adminPassword)
+  $layerQuoted = ConvertTo-SingleQuotedBash $layer
+  $domainQuoted = ConvertTo-SingleQuotedBash $domain
+  $emailQuoted = ConvertTo-SingleQuotedBash $email
+  $duckdnsQuoted = ConvertTo-SingleQuotedBash $duckdns
+  $panelPortQuoted = ConvertTo-SingleQuotedBash $panelPort
+  $panelHostQuoted = ConvertTo-SingleQuotedBash $panelHost
+  $dashboardPortQuoted = ConvertTo-SingleQuotedBash ([Environment]::GetEnvironmentVariable("SERVER_INSTALLER_DASHBOARD_PORT"))
+
+  Ensure-ProxyDockerImage -imageName $imageName
+  Ensure-ProxyDockerContainer -containerName $containerName -imageName $imageName -proxyRootWindows $proxyRootWindows -panelPort ([int]$panelPort)
+  Wait-ProxyDockerSystemd -containerName $containerName
+
+  $installCommand = @"
+set -e
+export DEBIAN_FRONTEND=noninteractive
+printf '%s\n' $rootCredential | chpasswd
+mkdir -p /run/sshd
+export PROXY_REPO_ROOT='/srv/proxy'
+export PROXY_LAYER=$layerQuoted
+export PROXY_DOMAIN=$domainQuoted
+export PROXY_EMAIL=$emailQuoted
+export PROXY_DUCKDNS_TOKEN=$duckdnsQuoted
+export PROXY_PANEL_PORT=$panelPortQuoted
+export PROXY_HOST_IP=$panelHostQuoted
+export SERVER_INSTALLER_DASHBOARD_PORT=$dashboardPortQuoted
+bash /srv/proxy/linux-macos/setup-proxy.sh
+"@
+  Invoke-DockerOrFail @("exec", $containerName, "bash", "-lc", $installCommand) "Docker-based Proxy installation failed."
+
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $stateFile) | Out-Null
+  @{
+    runtime = "docker"
+    container = $containerName
+    layer = $layer
+    host = $panelHost
+    url = "https://${panelHost}:$panelPort"
+    port = $panelPort
+    admin_username = "root"
+    admin_password = $adminPassword
+    installed_at = (Get-Date).ToString("s")
+  } | ConvertTo-Json | Set-Content -Path $stateFile -Encoding UTF8
+
+  Info "Proxy installation completed inside Docker."
+  Info "Proxy dashboard: https://${panelHost}:$panelPort"
+  Info "Proxy dashboard login: root / $adminPassword"
+}
+
 function Invoke-Wsl([string[]]$Arguments) {
   $output = & wsl.exe @Arguments 2>&1
   $exitCode = $LASTEXITCODE
@@ -253,15 +705,24 @@ if ($panelPortNumber -lt 1 -or $panelPortNumber -gt 65535) {
 }
 
 if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
-  Fail "WSL is not available on this machine."
+  Warn "WSL is not available on this machine. Falling back to Docker-based Linux runtime."
+  Install-ProxyViaDocker -proxyRootWindows $proxyRoot -stateFile $stateFile -layer $layer -domain $domain -email $email -duckdns $duckdns -panelPort $panelPort -panelHost $panelHost
+  exit 0
 }
 
 $wslHelp = Get-WslHelpText
 
 Info "Checking WSL distro '$distro'..."
 if (-not (Test-WslDistroAvailable $distro $wslHelp)) {
-  if (-not (Test-WslSupportsOption "--install" $wslHelp)) {
-    Fail "WSL distro '$distro' is not installed, and this Windows build does not support 'wsl --install'. Install Ubuntu manually or upgrade WSL/Windows, then rerun the Proxy installer."
+  Warn "WSL distro '$distro' is not installed. Trying Docker-based Linux runtime first."
+  try {
+    Install-ProxyViaDocker -proxyRootWindows $proxyRoot -stateFile $stateFile -layer $layer -domain $domain -email $email -duckdns $duckdns -panelPort $panelPort -panelHost $panelHost
+    exit 0
+  } catch {
+    if (-not (Test-WslSupportsOption "--install" $wslHelp)) {
+      throw
+    }
+    Warn "Docker fallback failed. Falling back to WSL distro installation."
   }
 
   Info "Installing WSL distro '$distro'..."
