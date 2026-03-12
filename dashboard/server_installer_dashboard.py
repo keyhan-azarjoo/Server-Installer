@@ -33,15 +33,20 @@ warnings.filterwarnings("ignore", category=DeprecationWarning)
 BUILD_ID = "docker-service-page-2026-03-12-1215"
 
 ROOT = Path(__file__).resolve().parents[1]
+SERVER_INSTALLER_DATA = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer"
 WINDOWS_INSTALLER = ROOT / "DotNet" / "windows" / "install-windows-dotnet-host.ps1"
 LINUX_INSTALLER = ROOT / "DotNet" / "linux" / "install-linux-dotnet-runner.sh"
 S3_WINDOWS_INSTALLER = ROOT / "S3" / "windows" / "setup-storage.ps1"
 S3_LINUX_INSTALLER = ROOT / "S3" / "linux-macos" / "setup-storage.sh"
 MONGO_WINDOWS_INSTALLER = ROOT / "Mongo" / "windows" / "setup-mongodb.ps1"
+PYTHON_WINDOWS_INSTALLER = ROOT / "Python" / "windows" / "setup-python.ps1"
 PROXY_LINUX_INSTALLER = ROOT / "Proxy" / "linux-macos" / "setup-proxy.sh"
 PROXY_WINDOWS_INSTALLER = ROOT / "Proxy" / "windows" / "setup-proxy.ps1"
 PROXY_ROOT = ROOT / "Proxy"
-PROXY_WINDOWS_STATE = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "proxy" / "proxy-wsl.json"
+PROXY_WINDOWS_STATE = SERVER_INSTALLER_DATA / "proxy" / "proxy-wsl.json"
+PYTHON_STATE_DIR = SERVER_INSTALLER_DATA / "python"
+PYTHON_STATE_FILE = PYTHON_STATE_DIR / "python-state.json"
+PYTHON_JUPYTER_STATE_FILE = PYTHON_STATE_DIR / "jupyter-state.json"
 REPO_RAW_BASE = os.environ.get(
     "SERVER_INSTALLER_REPO_BASE",
     "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main",
@@ -76,6 +81,10 @@ MONGO_WINDOWS_FILES = [
 
 MONGO_UNIX_FILES = [
     "Mongo/linux-macos/setup-mongodb.sh",
+]
+
+PYTHON_WINDOWS_FILES = [
+    "Python/windows/setup-python.ps1",
 ]
 
 PROXY_FILES = [
@@ -148,11 +157,363 @@ def resolve_windows_python():
     env_override = os.environ.get("SERVER_INSTALLER_PYTHON", "").strip()
     if env_override and Path(env_override).exists():
         return env_override
-    program_data = Path(os.environ.get("ProgramData", "C:/ProgramData"))
-    embedded = program_data / "Server-Installer" / "python" / "python.exe"
+    state = _read_json_file(PYTHON_STATE_FILE)
+    managed = str(state.get("python_executable") or "").strip()
+    if managed and Path(managed).exists():
+        return managed
+    embedded = SERVER_INSTALLER_DATA / "python" / "python.exe"
     if embedded.exists():
         return str(embedded)
     return sys.executable
+
+
+def _write_json_file(path_value, payload):
+    try:
+        path = Path(path_value)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        return True
+    except Exception:
+        return False
+
+
+def _read_json_file(path_value):
+    try:
+        path = Path(path_value)
+        if path.exists():
+            return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+def _normalize_python_version(version_text):
+    raw = str(version_text or "").strip()
+    if not raw:
+        return ""
+    match = re.search(r"(\d+\.\d+(?:\.\d+)?)", raw)
+    if not match:
+        return raw
+    return match.group(1)
+
+
+def _python_version_key(version_text):
+    normalized = _normalize_python_version(version_text)
+    parts = normalized.split(".")
+    return ".".join(parts[:2]) if len(parts) >= 2 else normalized
+
+
+def _python_scripts_dir(python_exe):
+    exe_path = Path(str(python_exe or "").strip())
+    if not exe_path.exists():
+        return ""
+    scripts_dir = exe_path.parent / "Scripts"
+    if scripts_dir.exists():
+        return str(scripts_dir)
+    return ""
+
+
+def _resolve_python_from_launcher(version_hint=""):
+    version_key = _python_version_key(version_hint)
+    if os.name == "nt" and command_exists("py"):
+        cmd = ["py"]
+        if version_key:
+            cmd.append(f"-{version_key}")
+        cmd += ["-c", "import sys; print(sys.executable); print(sys.version.split()[0])"]
+        rc, out = run_capture(cmd, timeout=20)
+        if rc == 0 and out:
+            lines = [x.strip() for x in out.splitlines() if x.strip()]
+            if lines and Path(lines[0]).exists():
+                return {
+                    "python_executable": lines[0],
+                    "python_version": lines[1] if len(lines) > 1 else "",
+                }
+    return {}
+
+
+def _resolve_any_python():
+    state = _read_json_file(PYTHON_STATE_FILE)
+    managed = str(state.get("python_executable") or "").strip()
+    if managed and Path(managed).exists():
+        return {
+            "python_executable": managed,
+            "python_version": str(state.get("python_version") or "").strip(),
+        }
+    launcher = _resolve_python_from_launcher("")
+    if launcher:
+        return launcher
+    current = resolve_windows_python() if os.name == "nt" else sys.executable
+    if current and Path(current).exists():
+        rc, out = run_capture([current, "--version"], timeout=10)
+        return {
+            "python_executable": current,
+            "python_version": _normalize_python_version(out or ""),
+        }
+    return {}
+
+
+def _python_env(python_executable):
+    env = os.environ.copy()
+    exe = str(python_executable or "").strip()
+    if not exe:
+        return env
+    parts = []
+    exe_dir = str(Path(exe).parent)
+    if exe_dir:
+        parts.append(exe_dir)
+    scripts_dir = _python_scripts_dir(exe)
+    if scripts_dir:
+        parts.append(scripts_dir)
+    if parts:
+        env["PATH"] = os.pathsep.join(parts + [env.get("PATH", "")])
+    env["SERVER_INSTALLER_PYTHON"] = exe
+    return env
+
+
+def _python_run_capture(args, timeout=30):
+    resolved = _resolve_any_python()
+    python_exe = str(resolved.get("python_executable") or "").strip()
+    if not python_exe:
+        return 1, "Managed Python is not installed."
+    return run_capture([python_exe] + list(args), timeout=timeout)
+
+
+def _python_process_running(pid):
+    try:
+        pid_num = int(pid)
+    except Exception:
+        return False
+    if pid_num <= 0:
+        return False
+    if os.name == "nt":
+        rc, out = run_capture(["tasklist", "/FI", f"PID eq {pid_num}"], timeout=15)
+        return rc == 0 and str(pid_num) in str(out or "")
+    try:
+        os.kill(pid_num, 0)
+        return True
+    except Exception:
+        return False
+
+
+def _python_state_service_item(info):
+    if not info.get("installed"):
+        return []
+    port_text = str(info.get("jupyter_port") or "").strip()
+    ports = [{"port": int(port_text), "protocol": "tcp"}] if port_text.isdigit() else []
+    return [{
+        "kind": "python_runtime",
+        "name": "serverinstaller-python-jupyter",
+        "display_name": "Managed Jupyter Lab",
+        "status": "running" if info.get("jupyter_running") else "stopped",
+        "sub_status": "running" if info.get("jupyter_running") else "stopped",
+        "autostart": False,
+        "platform": "windows" if os.name == "nt" else "linux",
+        "urls": [info.get("jupyter_url")] if info.get("jupyter_url") else [],
+        "ports": ports,
+    }]
+
+
+def get_python_info():
+    state = _read_json_file(PYTHON_STATE_FILE)
+    resolved = _resolve_any_python()
+    python_executable = str(resolved.get("python_executable") or state.get("python_executable") or "").strip()
+    python_version = str(resolved.get("python_version") or state.get("python_version") or "").strip()
+    info = {
+        "installed": bool(python_executable and Path(python_executable).exists()),
+        "python_executable": python_executable,
+        "python_version": _normalize_python_version(python_version),
+        "requested_version": str(state.get("requested_version") or "").strip(),
+        "jupyter_installed": False,
+        "jupyter_running": False,
+        "jupyter_url": "",
+        "jupyter_port": str(state.get("jupyter_port") or "").strip(),
+        "host": str(state.get("host") or "").strip(),
+        "scripts_dir": _python_scripts_dir(python_executable),
+        "services": [],
+    }
+    if info["installed"]:
+        env = _python_env(python_executable)
+        rc_ver, out_ver = run_capture([python_executable, "--version"], timeout=10)
+        if rc_ver == 0 and out_ver:
+            info["python_version"] = _normalize_python_version(out_ver)
+        rc_j, out_j = run_capture([python_executable, "-m", "jupyter", "--version"], timeout=20)
+        info["jupyter_installed"] = rc_j == 0 and bool(out_j)
+        if out_j:
+            info["jupyter_version"] = out_j.splitlines()[0].strip()
+        jupyter_state = _read_json_file(PYTHON_JUPYTER_STATE_FILE)
+        pid = jupyter_state.get("pid")
+        if pid and _python_process_running(pid):
+            info["jupyter_running"] = True
+            info["jupyter_port"] = str(jupyter_state.get("port") or info["jupyter_port"] or "").strip()
+            info["host"] = str(jupyter_state.get("host") or info["host"] or "").strip()
+            info["jupyter_url"] = str(jupyter_state.get("url") or "").strip()
+            info["jupyter_pid"] = pid
+        else:
+            if jupyter_state:
+                jupyter_state["pid"] = None
+                jupyter_state["running"] = False
+                _write_json_file(PYTHON_JUPYTER_STATE_FILE, jupyter_state)
+            if info["jupyter_installed"]:
+                host = info["host"] or choose_service_host()
+                port = info["jupyter_port"] or "8888"
+                if port.isdigit():
+                    info["jupyter_url"] = f"http://{host}:{port}/lab"
+    info["services"] = _python_state_service_item(info)
+    return info
+
+
+def run_windows_python_installer(form=None, live_cb=None):
+    form = form or {}
+    if os.name != "nt":
+        return 1, "Python installer is currently configured for Windows hosts."
+    if not is_windows_admin():
+        return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
+    ensure_repo_files(PYTHON_WINDOWS_FILES, live_cb=live_cb)
+    env = os.environ.copy()
+    version = (form.get("PYTHON_VERSION", ["3.12"])[0] or "3.12").strip()
+    install_jupyter = (form.get("PYTHON_INSTALL_JUPYTER", ["yes"])[0] or "yes").strip().lower()
+    host_ip = (form.get("PYTHON_HOST_IP", [""])[0] or "").strip()
+    jupyter_port = (form.get("PYTHON_JUPYTER_PORT", ["8888"])[0] or "8888").strip()
+    start_jupyter = (form.get("PYTHON_START_JUPYTER", ["no"])[0] or "no").strip().lower()
+    env["PYTHON_VERSION"] = version
+    env["PYTHON_INSTALL_JUPYTER"] = "1" if install_jupyter in ("1", "true", "yes", "y", "on") else "0"
+    env["PYTHON_JUPYTER_PORT"] = jupyter_port
+    if host_ip:
+        env["PYTHON_HOST_IP"] = host_ip
+    code, output = run_process(
+        ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(PYTHON_WINDOWS_INSTALLER)],
+        env=env,
+        live_cb=live_cb,
+    )
+    if code != 0:
+        return code, output
+    state = _read_json_file(PYTHON_STATE_FILE)
+    if host_ip:
+        state["host"] = host_ip
+    if jupyter_port:
+        state["jupyter_port"] = jupyter_port
+    _write_json_file(PYTHON_STATE_FILE, state)
+    if start_jupyter in ("1", "true", "yes", "y", "on"):
+        start_code, start_output = start_python_jupyter(
+            host=host_ip or str(state.get("host") or choose_service_host()),
+            port=jupyter_port,
+            notebook_dir=(form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip(),
+            live_cb=live_cb,
+        )
+        if start_output:
+            output = f"{output.rstrip()}\n{start_output}".strip()
+        if start_code != 0:
+            return start_code, output
+    return 0, output
+
+
+def run_python_command(form=None, live_cb=None):
+    form = form or {}
+    command_text = (form.get("PYTHON_CMD", [""])[0] or "").strip()
+    if not command_text:
+        return 1, "PYTHON_CMD is required."
+    resolved = _resolve_any_python()
+    python_executable = str(resolved.get("python_executable") or "").strip()
+    if not python_executable:
+        return 1, "Install Python first."
+    env = _python_env(python_executable)
+    if live_cb:
+        live_cb(f"[INFO] Running command with Python: {python_executable}\n")
+    cmd = ["cmd.exe", "/c", command_text] if os.name == "nt" else ["bash", "-lc", command_text]
+    return run_process(cmd, env=env, live_cb=live_cb)
+
+
+def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
+    resolved = _resolve_any_python()
+    python_executable = str(resolved.get("python_executable") or "").strip()
+    if not python_executable:
+        return 1, "Install Python first."
+    rc_j, out_j = run_capture([python_executable, "-m", "jupyter", "--version"], timeout=20)
+    if rc_j != 0:
+        return 1, "Jupyter is not installed for the managed Python interpreter."
+    stop_python_jupyter()
+    host = (host or choose_service_host()).strip() or "127.0.0.1"
+    port = str(port or "8888").strip() or "8888"
+    if not port.isdigit():
+        return 1, "Jupyter port must be numeric."
+    if is_local_tcp_port_listening(port):
+        usage = get_port_usage(port, "tcp")
+        if not usage.get("managed_owner"):
+            return 1, f"Requested Jupyter port {port} is already in use. Choose another port."
+    notebook_dir = notebook_dir.strip() or str(ROOT)
+    PYTHON_JUPYTER_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    log_path = PYTHON_STATE_DIR / "jupyter.log"
+    args = [
+        python_executable,
+        "-m",
+        "jupyter",
+        "lab",
+        "--no-browser",
+        f"--ServerApp.ip={host}",
+        f"--ServerApp.port={port}",
+        "--ServerApp.token=",
+        "--ServerApp.password=",
+        f"--ServerApp.root_dir={notebook_dir}",
+    ]
+    env = _python_env(python_executable)
+    try:
+        log_handle = open(log_path, "ab")
+        kwargs = {
+            "cwd": notebook_dir,
+            "env": env,
+            "stdout": log_handle,
+            "stderr": subprocess.STDOUT,
+        }
+        if os.name == "nt":
+            kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        else:
+            kwargs["start_new_session"] = True
+        proc = subprocess.Popen(args, **kwargs)
+        url = f"http://{host}:{port}/lab"
+        state = _read_json_file(PYTHON_STATE_FILE)
+        state["host"] = host
+        state["jupyter_port"] = port
+        _write_json_file(PYTHON_STATE_FILE, state)
+        _write_json_file(PYTHON_JUPYTER_STATE_FILE, {
+            "pid": proc.pid,
+            "host": host,
+            "port": port,
+            "url": url,
+            "log_path": str(log_path),
+            "notebook_dir": notebook_dir,
+            "running": True,
+        })
+        message = f"Jupyter Lab started at {url}."
+        if live_cb:
+            live_cb(message + "\n")
+        return 0, message
+    except Exception as ex:
+        return 1, f"Failed to start Jupyter Lab: {ex}"
+
+
+def stop_python_jupyter(live_cb=None):
+    state = _read_json_file(PYTHON_JUPYTER_STATE_FILE)
+    pid = state.get("pid")
+    if not pid:
+        return 0, "Jupyter Lab is not running."
+    try:
+        pid_num = int(pid)
+    except Exception:
+        pid_num = 0
+    if pid_num > 0:
+        if os.name == "nt":
+            rc, out = run_capture(["taskkill", "/PID", str(pid_num), "/F"], timeout=20)
+        else:
+            rc, out = run_capture(["kill", "-TERM", str(pid_num)], timeout=20)
+        if rc != 0 and _python_process_running(pid_num):
+            return 1, (out or f"Failed to stop Jupyter process {pid_num}.")
+    state["pid"] = None
+    state["running"] = False
+    _write_json_file(PYTHON_JUPYTER_STATE_FILE, state)
+    message = "Jupyter Lab stopped."
+    if live_cb:
+        live_cb(message + "\n")
+    return 0, message
 
 
 def run_capture(cmd, timeout=20):
@@ -1084,12 +1445,13 @@ const db = globalThis.db.getSiblingDB({json.dumps(db_name)});
 def get_service_items():
     items = []
     managed_patterns = re.compile(
-        r"(locals3|minio|dotnet-app|dotnet|aspnet|kestrel|dotnetapp|localmongo|mongodb|mongo-express|mongod|docker|dockerd|containerd|com\.docker\.service|docker desktop service|docker engine)",
+        r"(locals3|minio|dotnet-app|dotnet|aspnet|kestrel|dotnetapp|localmongo|mongodb|mongo-express|mongod|docker|dockerd|containerd|com\.docker\.service|docker desktop service|docker engine|python|jupyter|serverinstaller-pythonjupyter)",
         re.IGNORECASE,
     )
     preferred_host = choose_service_host()
     native_mongo = get_windows_native_mongo_info() if os.name == "nt" else {}
     mongo_info = get_mongo_info()
+    python_info = get_python_info()
 
     if os.name == "nt":
         cmd = [
@@ -1186,6 +1548,34 @@ def get_service_items():
                         "platform": "windows",
                         "urls": sorted(set(task_urls)),
                         "ports": task_ports,
+                    }
+                )
+            except Exception:
+                pass
+        rc_py_task, out_py_task = run_capture(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                "$t=Get-ScheduledTask -TaskName 'ServerInstaller-PythonJupyter' -ErrorAction SilentlyContinue; if($t){ $i=Get-ScheduledTaskInfo -TaskName 'ServerInstaller-PythonJupyter' -ErrorAction SilentlyContinue; [PSCustomObject]@{Name='ServerInstaller-PythonJupyter';State=($i.State);Enabled=($t.Settings.Enabled)} | ConvertTo-Json -Depth 2 }",
+            ],
+            timeout=30,
+        )
+        if rc_py_task == 0 and out_py_task:
+            try:
+                task_obj = json.loads(out_py_task)
+                items.append(
+                    {
+                        "kind": "task",
+                        "name": str(task_obj.get("Name", "ServerInstaller-PythonJupyter")),
+                        "display_name": "Managed Python Jupyter Task",
+                        "status": str(task_obj.get("State", "") or ""),
+                        "autostart": bool(task_obj.get("Enabled", True)),
+                        "platform": "windows",
+                        "urls": [python_info.get("jupyter_url")] if python_info.get("jupyter_url") else [],
+                        "ports": ([{"port": int(python_info.get("jupyter_port")), "protocol": "tcp"}] if str(python_info.get("jupyter_port", "")).isdigit() else []),
                     }
                 )
             except Exception:
@@ -1430,6 +1820,10 @@ def get_service_items():
                 }
             )
 
+    has_python_items = any(_is_python_name(x.get("name", "")) or _is_python_name(x.get("display_name", "")) for x in items)
+    if (not has_python_items) and python_info.get("installed"):
+        items.extend(_python_state_service_item(python_info))
+
     items.sort(key=lambda x: (x.get("kind", ""), x.get("name", "").lower()))
     return items
 
@@ -1454,14 +1848,8 @@ def _is_docker_name(name):
     return bool(re.search(r"docker|dockerd|containerd|com\.docker\.service|docker desktop service|docker engine", str(name or ""), re.IGNORECASE))
 
 
-def _read_json_file(path_value):
-    try:
-        path = Path(path_value)
-        if path.exists():
-            return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    return {}
+def _is_python_name(name):
+    return bool(re.search(r"python|jupyter", str(name or ""), re.IGNORECASE))
 
 
 def _proxy_service_probe(units, prefix=None):
@@ -1575,6 +1963,12 @@ def filter_service_items(scope):
         if proxy_items:
             return proxy_items
         return [x for x in items if _is_proxy_name(x.get("name", "")) or _is_proxy_name(x.get("display_name", ""))]
+    if scope == "python":
+        python_info = get_python_info()
+        python_items = python_info.get("services") or []
+        if python_items:
+            return python_items
+        return [x for x in items if _is_python_name(x.get("name", "")) or _is_python_name(x.get("display_name", ""))]
     return items
 
 
@@ -1861,6 +2255,33 @@ def manage_service(action, name, kind):
             return rc == 0, (out or f"IIS site '{svc_name}' auto-start updated.")
         return False, "Unsupported IIS action."
 
+    if kind == "python_runtime":
+        if action == "start":
+            info = get_python_info()
+            code, output = start_python_jupyter(
+                host=str(info.get("host") or choose_service_host()),
+                port=str(info.get("jupyter_port") or "8888"),
+            )
+            return code == 0, output
+        if action == "stop":
+            code, output = stop_python_jupyter()
+            return code == 0, output
+        if action == "restart":
+            stop_python_jupyter()
+            info = get_python_info()
+            code, output = start_python_jupyter(
+                host=str(info.get("host") or choose_service_host()),
+                port=str(info.get("jupyter_port") or "8888"),
+            )
+            return code == 0, output
+        if action == "delete":
+            stop_python_jupyter()
+            _write_json_file(PYTHON_JUPYTER_STATE_FILE, {})
+            return True, "Managed Jupyter state removed."
+        if action in ("autostart_on", "autostart_off"):
+            return False, "Auto-start is not configured for managed Jupyter yet."
+        return False, "Unsupported Python runtime action."
+
     if os.name == "nt":
         if not is_windows_admin():
             return False, "Stopping services on Windows requires Administrator."
@@ -1959,6 +2380,8 @@ def get_system_status(scope="all"):
             software["iis"] = get_iis_info()
     if scope in ("all", "proxy"):
         software["proxy"] = get_proxy_info()
+    if scope in ("all", "python"):
+        software["python_service"] = get_python_info()
 
     status = {
         "hostname": socket.gethostname(),
@@ -2330,6 +2753,47 @@ def is_local_tcp_port_listening(port):
         if int(item.get("port", 0)) == p:
             return True
     return False
+
+
+def _windows_tcp_port_excluded(port):
+    if os.name != "nt":
+        return False
+    try:
+        target = int(str(port).strip())
+    except Exception:
+        return False
+    if target < 1 or target > 65535:
+        return True
+    rc, out = run_capture(
+        [
+            "netsh",
+            "interface",
+            "ipv4",
+            "show",
+            "excludedportrange",
+            "protocol=tcp",
+        ],
+        timeout=20,
+    )
+    if rc != 0 or not out:
+        return False
+    for line in out.splitlines():
+        m = re.match(r"^\s*(\d+)\s+(\d+)\s*$", line.strip())
+        if not m:
+            continue
+        start = int(m.group(1))
+        end = int(m.group(2))
+        if start <= target <= end:
+            return True
+    return False
+
+
+def _is_windows_tcp_port_usable(port):
+    if _windows_tcp_port_excluded(port):
+        return False, "reserved by Windows"
+    if is_local_tcp_port_listening(port):
+        return False, "already in use"
+    return True, ""
 
 
 def _windows_locals3_iis_owns_port(port):
@@ -2742,16 +3206,27 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
             return 1, "Select an IP address before starting S3 setup."
         resolved_host = choose_s3_host(requested_host)
         form["LOCALS3_HOST"] = [resolved_host]
-    requested_https = (form.get("LOCALS3_HTTPS_PORT", [""])[0] or "").strip()
-    if requested_https:
-        if not requested_https.isdigit():
-            return 1, "LOCALS3_HTTPS_PORT must be numeric."
-        if is_local_tcp_port_listening(requested_https):
-            if _windows_locals3_iis_owns_port(requested_https):
-                # Allow reuse when the existing LocalS3 IIS binding owns the port (update/reinstall).
-                pass
-            else:
-                return 1, f"Requested HTTPS port {requested_https} is already in use. Choose another port."
+    requested_ports = [
+        ("LOCALS3_HTTPS_PORT", "S3 HTTPS", "_windows_locals3_iis_owns_port"),
+        ("LOCALS3_API_PORT", "MinIO API", "_windows_locals3_owns_port"),
+        ("LOCALS3_UI_PORT", "MinIO UI", "_windows_locals3_owns_port"),
+        ("LOCALS3_CONSOLE_PORT", "MinIO Console HTTPS", "_windows_locals3_owns_port"),
+    ]
+    for env_name, label, owner_fn_name in requested_ports:
+        requested_value = (form.get(env_name, [""])[0] or "").strip()
+        if not requested_value:
+            continue
+        if not requested_value.isdigit():
+            return 1, f"{env_name} must be numeric."
+        port_ok, reason = _is_windows_tcp_port_usable(requested_value)
+        if port_ok:
+            continue
+        owner_fn = globals().get(owner_fn_name)
+        if callable(owner_fn) and owner_fn(requested_value):
+            continue
+        if reason == "reserved by Windows":
+            return 1, f"Requested {label} port {requested_value} is reserved by Windows. Choose another port."
+        return 1, f"Requested {label} port {requested_value} is already in use. Choose another port."
     # Script is interactive; only answer the mode prompt to avoid re-running the installer.
     scripted_input = mode_choice + "\n"
     cmd = [
@@ -5390,6 +5865,48 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_linux_proxy_installer(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/python_windows":
+            title = "Python Installer (Windows)"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_windows_python_installer(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_windows_python_installer(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/python_command":
+            title = "Python CMD"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_python_command(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_python_command(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/python_jupyter_start":
+            title = "Start Jupyter"
+            starter = lambda cb: start_python_jupyter(
+                host=(form.get("PYTHON_HOST_IP", [""])[0] or "").strip(),
+                port=(form.get("PYTHON_JUPYTER_PORT", ["8888"])[0] or "8888").strip(),
+                notebook_dir=(form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip(),
+                live_cb=cb,
+            )
+            if self.is_fetch():
+                job_id = start_live_job(title, starter)
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = starter(None)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/python_jupyter_stop":
+            title = "Stop Jupyter"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: stop_python_jupyter(live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = stop_python_jupyter()
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/s3_windows_stop":

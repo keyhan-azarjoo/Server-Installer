@@ -203,8 +203,8 @@ function App() {
   const [portProtocol, setPortProtocol] = React.useState("tcp");
   const [portBusy, setPortBusy] = React.useState(false);
   const [serviceBusy, setServiceBusy] = React.useState(false);
-  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false, docker: false, proxy: false });
-  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "", docker: "", proxy: "" });
+  const [scopeLoading, setScopeLoading] = React.useState({ all: false, mongo: false, s3: false, dotnet: false, docker: false, proxy: false, python: false });
+  const [scopeErrors, setScopeErrors] = React.useState({ all: "", mongo: "", s3: "", dotnet: "", docker: "", proxy: "", python: "" });
   const [serviceFilter, setServiceFilter] = React.useState("");
   const [services, setServices] = React.useState([]);
   const [mongoPageServices, setMongoPageServices] = React.useState([]);
@@ -212,11 +212,13 @@ function App() {
   const [dotnetPageServices, setDotnetPageServices] = React.useState([]);
   const [dockerPageServices, setDockerPageServices] = React.useState([]);
   const [proxyPageServices, setProxyPageServices] = React.useState([]);
+  const [pythonPageServices, setPythonPageServices] = React.useState([]);
   const [mongoInfoState, setMongoInfoState] = React.useState(null);
   const [s3InfoState, setS3InfoState] = React.useState(null);
   const [dotnetInfoState, setDotnetInfoState] = React.useState(null);
   const [dockerInfoState, setDockerInfoState] = React.useState(null);
   const [proxyInfoState, setProxyInfoState] = React.useState(null);
+  const [pythonInfoState, setPythonInfoState] = React.useState(null);
   const [netRate, setNetRate] = React.useState({ rxBps: 0, txBps: 0 });
   const prevNetRef = React.useRef(null);
   const drag = React.useRef({ active: false, sx: 0, sy: 0, bx: 0, by: 0 });
@@ -310,11 +312,13 @@ function App() {
   const loadDotnetServices = React.useRef(async () => {});
   const loadDockerServices = React.useRef(async () => {});
   const loadProxyServices = React.useRef(async () => {});
+  const loadPythonServices = React.useRef(async () => {});
   const loadMongoInfo = React.useRef(async () => {});
   const loadS3Info = React.useRef(async () => {});
   const loadDotnetInfo = React.useRef(async () => {});
   const loadDockerInfo = React.useRef(async () => {});
   const loadProxyInfo = React.useRef(async () => {});
+  const loadPythonInfo = React.useRef(async () => {});
 
   const loadServiceScope = React.useCallback(async (scope, setter) => {
     setScopeLoadingFlag(scope, true);
@@ -353,11 +357,13 @@ function App() {
   loadDotnetServices.current = async () => loadServiceScope("dotnet", setDotnetPageServices);
   loadDockerServices.current = async () => loadServiceScope("docker", setDockerPageServices);
   loadProxyServices.current = async () => loadServiceScope("proxy", setProxyPageServices);
+  loadPythonServices.current = async () => loadServiceScope("python", setPythonPageServices);
   loadMongoInfo.current = async () => loadScopedStatus("mongo", setMongoInfoState);
   loadS3Info.current = async () => loadScopedStatus("s3", setS3InfoState);
   loadDotnetInfo.current = async () => loadScopedStatus("dotnet", setDotnetInfoState);
   loadDockerInfo.current = async () => loadScopedStatus("docker", setDockerInfoState);
   loadProxyInfo.current = async () => loadScopedStatus("proxy", setProxyInfoState);
+  loadPythonInfo.current = async () => loadScopedStatus("python", setPythonInfoState);
 
   const refreshPageServices = React.useCallback((targetPage) => {
     if (targetPage === "services") return loadServices.current();
@@ -365,6 +371,7 @@ function App() {
     if (targetPage === "s3") return loadS3Services.current();
     if (targetPage === "docker") return loadDockerServices.current();
     if (targetPage === "proxy") return loadProxyServices.current();
+    if (targetPage === "python") return loadPythonServices.current();
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetServices.current();
     return Promise.resolve();
   }, []);
@@ -374,6 +381,7 @@ function App() {
     if (targetPage === "s3") return loadS3Info.current();
     if (targetPage === "docker") return loadDockerInfo.current();
     if (targetPage === "proxy") return loadProxyInfo.current();
+    if (targetPage === "python") return loadPythonInfo.current();
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetInfo.current();
     if (targetPage === "home" || targetPage === "sysinfo" || targetPage === "ports" || targetPage === "services") return loadSystem.current();
     return Promise.resolve();
@@ -384,13 +392,13 @@ function App() {
   }, [refreshPageServices, refreshPageStatus]);
 
   React.useEffect(() => {
-    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || String(page).startsWith("dotnet-")) {
+    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || String(page).startsWith("dotnet-")) {
       refreshPageContext(page);
     }
   }, [page, refreshPageContext]);
 
   React.useEffect(() => {
-    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || String(page).startsWith("dotnet-"))) {
+    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || String(page).startsWith("dotnet-"))) {
       return undefined;
     }
     const t = setInterval(() => {
@@ -568,7 +576,7 @@ function App() {
 
   const goBack = () => {
       if (page === "home") return;
-      if (page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
+      if (page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || page === "sysinfo" || page === "ports" || page === "services") setPage("home");
     else if (page.startsWith("dotnet-")) setPage("dotnet");
     else setPage("home");
   };
@@ -580,6 +588,7 @@ function App() {
     if (page === "mongo") return "MongoDB";
     if (page === "docker") return "Docker";
     if (page === "proxy") return "Proxy";
+    if (page === "python") return "Python";
     if (page === "sysinfo") return "SysInfo";
     if (page === "ports") return "Port Management";
     if (page === "services") return "Service Manager";
@@ -688,6 +697,8 @@ function App() {
         loadS3Services.current(),
         loadProxyInfo.current(),
         loadProxyServices.current(),
+        loadPythonInfo.current(),
+        loadPythonServices.current(),
         loadDotnetInfo.current(),
         loadDotnetServices.current(),
         loadDockerInfo.current(),
@@ -747,6 +758,8 @@ function App() {
         loadS3Services.current(),
         loadProxyInfo.current(),
         loadProxyServices.current(),
+        loadPythonInfo.current(),
+        loadPythonServices.current(),
         loadDotnetInfo.current(),
         loadDotnetServices.current(),
         loadDockerInfo.current(),
@@ -804,6 +817,8 @@ function App() {
         loadS3Services.current(),
         loadProxyInfo.current(),
         loadProxyServices.current(),
+        loadPythonInfo.current(),
+        loadPythonServices.current(),
         loadDotnetInfo.current(),
         loadDotnetServices.current(),
         loadDockerInfo.current(),
@@ -857,16 +872,19 @@ function App() {
   const dotnetStatusInfo = dotnetInfoState || systemInfo || {};
   const dockerStatusInfo = dockerInfoState || systemInfo || {};
   const proxyStatusInfo = proxyInfoState || systemInfo || {};
+  const pythonStatusInfo = pythonInfoState || systemInfo || {};
   const mongoSoftware = mongoStatusInfo?.software || {};
   const dotnetSoftware = dotnetStatusInfo?.software || {};
   const dockerSoftware = dockerStatusInfo?.software || {};
   const proxySoftware = proxyStatusInfo?.software || {};
+  const pythonSoftware = pythonStatusInfo?.software || {};
   const dotnet = dotnetSoftware.dotnet || software.dotnet || {};
   const docker = dockerSoftware.docker || software.docker || {};
   const mongoDocker = mongoSoftware.docker || software.docker || {};
   const iis = software.iis || {};
   const mongo = mongoSoftware.mongo || software.mongo || {};
   const proxy = proxySoftware.proxy || software.proxy || {};
+  const pythonService = pythonSoftware.python_service || software.python_service || {};
   const listeningPorts = systemInfo?.listening_ports || [];
   const cpuPercent = clampPercent(systemInfo?.cpu_usage_percent ?? ((systemInfo?.load?.["1m"] && systemInfo?.cpu_count) ? (systemInfo.load["1m"] / systemInfo.cpu_count) * 100 : 0));
   const memoryPercent = clampPercent(systemInfo?.memory?.used_percent);
@@ -928,6 +946,9 @@ function App() {
   const proxyServices = React.useMemo(() => {
     return Array.isArray(proxyPageServices) ? proxyPageServices : [];
   }, [proxyPageServices]);
+  const pythonServices = React.useMemo(() => {
+    return Array.isArray(pythonPageServices) ? pythonPageServices : [];
+  }, [pythonPageServices]);
   const dockerServices = React.useMemo(() => {
     const patt = /(docker|dockerd|containerd|com\.docker\.service|docker desktop service|docker engine)/i;
     return (dockerPageServices || []).filter((s) => {
@@ -1172,6 +1193,9 @@ function App() {
             <NavCard title="MongoDB" text="Install MongoDB with a Compass-style web admin UI." onClick={() => setPage("mongo")} outlined />
           </Grid>
           <Grid item xs={12} md={6}>
+            <NavCard title="Python" text="Install Python, add Jupyter, and run Python-side cmd commands." onClick={() => setPage("python")} outlined />
+          </Grid>
+          <Grid item xs={12} md={6}>
             <NavCard title="Proxy" text="Install and manage the multi-layer proxy stack." onClick={() => setPage("proxy")} outlined />
           </Grid>
         </Grid>
@@ -1208,6 +1232,8 @@ function App() {
                 <Typography variant="body2">MongoDB: {mongo.installed ? `Installed (${mongo.server_version || "docker"})` : "Not installed"}</Typography>
                 {!!mongo.web_version && <Typography variant="body2">Mongo Web UI: {mongo.web_version}</Typography>}
                 {!!mongo.https_url && <Typography variant="body2">Mongo HTTPS: {mongo.https_url}</Typography>}
+                <Typography variant="body2">Python: {pythonService.installed ? `Installed (${pythonService.python_version || "managed"})` : "Not installed"}</Typography>
+                <Typography variant="body2">Jupyter: {pythonService.jupyter_installed ? (pythonService.jupyter_running ? "Running" : "Installed") : "Not installed"}</Typography>
                 <Typography variant="body2">Proxy: {proxy.installed ? `Installed (${proxy.layer || proxy.mode || "proxy"})` : "Not installed"}</Typography>
                 {!!proxy.panel_url && <Typography variant="body2">Proxy Panel: {proxy.panel_url}</Typography>}
               </CardContent>
@@ -1341,8 +1367,8 @@ function App() {
                   { name: "S3_MODE", label: "Mode", type: "select", options: s3WindowsModeOptions, defaultValue: "iis" },
                   { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
                   { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
-                  { name: "LOCALS3_API_PORT", label: "MinIO API Port", defaultValue: "9000", required: true, placeholder: "9000" },
-                  { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port", defaultValue: "9001", required: true, placeholder: "9001" },
+                  { name: "LOCALS3_API_PORT", label: "MinIO API Port", defaultValue: "39000", required: true, placeholder: "39000" },
+                  { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port", defaultValue: "39001", required: true, placeholder: "39001" },
                   { name: "LOCALS3_CONSOLE_PORT", label: "Console Proxy Port", defaultValue: "9443", required: true, placeholder: "9443" },
                   { name: "LOCALS3_ROOT_USER", label: "S3 Username", defaultValue: "admin" },
                   { name: "LOCALS3_ROOT_PASSWORD", label: "S3 Password", defaultValue: "StrongPassword123" },
@@ -1759,6 +1785,138 @@ function App() {
         );
       }
       return <Alert severity="info">Proxy installer is currently configured for Linux hosts and Windows via WSL.</Alert>;
+    }
+
+    if (page === "python") {
+      if (cfg.os !== "windows") {
+        return <Alert severity="info">Python install automation is currently configured for Windows hosts.</Alert>;
+      }
+      const pythonUrl = String(pythonService.jupyter_url || "").trim();
+      const pythonPort = String(pythonService.jupyter_port || "8888").trim() || "8888";
+      const pythonHost = String(pythonService.host || (selectableIps[0] || "127.0.0.1")).trim();
+      const installState = pythonService.installed
+        ? `${pythonService.python_version || "installed"}`
+        : "Not installed yet";
+      return (
+        <Grid container spacing={2}>
+          <Grid item xs={12} md={8}>
+            <ActionCard
+              title="Install Python (Windows)"
+              description="Select a Python version, optionally install Jupyter, and prepare the managed interpreter."
+              action="/run/python_windows"
+              fields={[
+                { name: "PYTHON_VERSION", label: "Python Version", type: "select", options: ["3.13", "3.12", "3.11", "3.10"], defaultValue: pythonService.requested_version || "3.12", required: true },
+                { name: "PYTHON_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: pythonHost, required: true, placeholder: "Select IP" },
+                { name: "PYTHON_INSTALL_JUPYTER", label: "Install Jupyter", type: "select", options: ["yes", "no"], defaultValue: pythonService.jupyter_installed ? "yes" : "yes", required: true },
+                { name: "PYTHON_START_JUPYTER", label: "Start Jupyter Now", type: "select", options: ["no", "yes"], defaultValue: pythonService.jupyter_running ? "yes" : "no", required: true },
+                { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
+                { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: "", placeholder: "Optional. Defaults to installer workspace." },
+              ]}
+              onRun={run}
+              color="#2563eb"
+            />
+          </Grid>
+          <Grid item xs={12} md={4}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Managed Python</Typography>
+                <Typography variant="body2">Interpreter: {installState}</Typography>
+                <Typography variant="body2">Executable: {pythonService.python_executable || "-"}</Typography>
+                <Typography variant="body2">Scripts: {pythonService.scripts_dir || "-"}</Typography>
+                <Typography variant="body2">Jupyter: {pythonService.jupyter_installed ? "Installed" : "Not installed"}</Typography>
+                <Typography variant="body2">Jupyter Status: {pythonService.jupyter_running ? "Running" : "Stopped"}</Typography>
+                {!!pythonUrl && <Typography variant="body2" sx={{ mt: 1 }}>URL: {pythonUrl}</Typography>}
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <ActionCard
+              title="Run Python CMD"
+              description="Send a Windows cmd command with the managed Python and Scripts directories placed first in PATH."
+              action="/run/python_command"
+              fields={[
+                { name: "PYTHON_CMD", label: "CMD Command", defaultValue: "python -m pip --version", required: true, placeholder: "python -m pip install requests" },
+              ]}
+              onRun={run}
+              color="#0f766e"
+            />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <Grid container spacing={2}>
+              <Grid item xs={12}>
+                <ActionCard
+                  title="Start Jupyter"
+                  description="Start managed Jupyter Lab with no browser and no token on the selected host/port."
+                  action="/run/python_jupyter_start"
+                  fields={[
+                    { name: "PYTHON_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: pythonHost, required: true, placeholder: "Select IP" },
+                    { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
+                    { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: "", placeholder: "Optional. Defaults to installer workspace." },
+                  ]}
+                  onRun={run}
+                  color="#7c3aed"
+                />
+              </Grid>
+              <Grid item xs={12}>
+                <ActionCard
+                  title="Stop Jupyter"
+                  description="Stop the managed Jupyter Lab process."
+                  action="/run/python_jupyter_stop"
+                  fields={[]}
+                  onRun={run}
+                  color="#991b1b"
+                />
+              </Grid>
+            </Grid>
+          </Grid>
+          <Grid item xs={12}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                  <Typography variant="h6" fontWeight={800}>Python Services</Typography>
+                  <Box sx={{ flexGrow: 1 }} />
+                  {!!pythonUrl && (
+                    <Button variant="contained" disabled={serviceBusy} onClick={() => window.open(pythonUrl, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
+                      Open Jupyter
+                    </Button>
+                  )}
+                  <Button variant="outlined" disabled={isScopeLoading("python")} onClick={() => Promise.all([loadPythonInfo.current(), loadPythonServices.current()])} sx={{ textTransform: "none" }}>
+                    Refresh
+                  </Button>
+                </Stack>
+                {scopeErrors.python && <Alert severity="error" sx={{ mt: 1 }}>{scopeErrors.python}</Alert>}
+                <Box sx={{ mt: 1.2, maxHeight: 300, overflow: "auto" }}>
+                  {pythonServices.length === 0 && <Typography variant="body2">No managed Python runtime found yet.</Typography>}
+                  {pythonServices.map((svc) => (
+                    <Paper key={`python-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                        <Box sx={{ minWidth: 250 }}>
+                          <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
+                          {renderServiceUrls(svc)}
+                          {renderServicePorts(svc)}
+                        </Box>
+                        <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
+                        <Box sx={{ flexGrow: 1 }} />
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                          disabled={serviceBusy}
+                          onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                          sx={{ textTransform: "none" }}
+                        >
+                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                        </Button>
+                        <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
+                      </Stack>
+                    </Paper>
+                  ))}
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
+        </Grid>
+      );
     }
 
     if (page === "mongo") {

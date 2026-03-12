@@ -381,6 +381,9 @@ function Ask-InstallMode {
 
 
 function Port-Free([int]$p) {
+  if (Test-ExcludedTcpPort $p) {
+    return $false
+  }
   try {
     $c = Get-NetTCPConnection -LocalPort $p -ErrorAction SilentlyContinue
     return ($null -eq $c -or $c.Count -eq 0)
@@ -388,6 +391,24 @@ function Port-Free([int]$p) {
     $out = netstat -ano | Select-String -Pattern "LISTENING" | Select-String -Pattern (":$p\s")
     return ($null -eq $out -or $out.Count -eq 0)
   }
+}
+
+function Test-ExcludedTcpPort([int]$p) {
+  if ($p -lt 1 -or $p -gt 65535) { return $true }
+  try {
+    $lines = netsh interface ipv4 show excludedportrange protocol=tcp 2>$null
+    foreach ($line in @($lines)) {
+      $text = [string]$line
+      $match = [regex]::Match($text, '^\s*(\d+)\s+(\d+)\s*$')
+      if (-not $match.Success) { continue }
+      $start = [int]$match.Groups[1].Value
+      $end = [int]$match.Groups[2].Value
+      if ($p -ge $start -and $p -le $end) {
+        return $true
+      }
+    }
+  } catch {}
+  return $false
 }
 
 function Get-PortListeners([int]$p) {
