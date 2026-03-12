@@ -441,12 +441,13 @@ def run_dashboard_foreground(root: Path, bind_host: str, selected_port: int, dis
     proc = subprocess.Popen(cmd, cwd=str(root))
 
     ok, detail = check_local_http(selected_port, use_https=use_https)
+    primary_url, extra_urls = build_dashboard_urls(bind_host, selected_port)
     print("Startup diagnostics:")
     print(f"- Bind host: {bind_host}")
     print(f"- Selected port: {selected_port}")
-    scheme = "https"
-    print(f"- Dashboard URL: {scheme}://{display_host}:{selected_port}")
-    print(f"- Local URL: {scheme}://127.0.0.1:{selected_port}")
+    print(f"- Verified local URL: {primary_url}")
+    if extra_urls:
+        print(f"- Network URLs: {', '.join(extra_urls)}")
     if ok:
         print(f"- Local HTTP check: PASS (HTTP {detail})")
     else:
@@ -457,7 +458,9 @@ def run_dashboard_foreground(root: Path, bind_host: str, selected_port: int, dis
             print(f"- Local HTTP check: FAIL ({detail})")
             print("- Process is running but localhost is not responding yet.")
     print("")
-    print(f"Dashboard ready: {scheme}://{display_host}:{selected_port}")
+    print(f"Dashboard ready: {primary_url}")
+    if extra_urls:
+        print("Remote URLs require firewall/security-group access to the selected port.")
     return proc.wait()
 
 
@@ -534,15 +537,21 @@ WantedBy=multi-user.target
     )
 
     ok, detail = check_local_http(selected_port, use_https=use_https)
+    fw_ok, fw_note = ensure_linux_firewall_port(selected_port)
+    primary_url, extra_urls = build_dashboard_urls(bind_host, selected_port)
     print(f"OS detected: {platform.system()}")
     print(f"Service: {LINUX_SERVICE_NAME} (enabled, restarted)")
-    print(f"Dashboard URL: https://{display_host}:{selected_port}")
-    print(f"Local URL: https://127.0.0.1:{selected_port}")
+    print(f"Verified local URL: {primary_url}")
+    if extra_urls:
+        print(f"Network URLs: {', '.join(extra_urls)}")
+    print(f"Firewall: {'updated' if fw_ok else 'not changed'} ({fw_note})")
     if ok:
         print(f"Local HTTP check: PASS (HTTP {detail})")
     else:
         print(f"Local HTTP check: FAIL ({detail})")
         print(f"Inspect logs: journalctl -u {LINUX_SERVICE_NAME} -n 120 --no-pager")
+    if extra_urls:
+        print("Remote URLs require firewall/security-group access to the selected port.")
     print("Re-running this same command will update files and restart the service.")
     return 0
 
@@ -717,6 +726,58 @@ def get_local_ipv4_addresses():
     except Exception:
         pass
     return ips
+
+
+def ensure_linux_firewall_port(port: int):
+    if os.name == "nt":
+        return False, "not applicable on Windows"
+    if os.geteuid() != 0:
+        return False, "requires root to update Linux firewall"
+
+    if command_exists("firewall-cmd"):
+        rc_state, _ = run_capture(["firewall-cmd", "--state"], timeout=15)
+        if rc_state == 0:
+            run_capture(["firewall-cmd", "--quiet", "--add-port", f"{port}/tcp"], timeout=20)
+            run_capture(["firewall-cmd", "--quiet", "--permanent", "--add-port", f"{port}/tcp"], timeout=20)
+            rc_reload, out_reload = run_capture(["firewall-cmd", "--quiet", "--reload"], timeout=20)
+            if rc_reload == 0:
+                return True, f"firewalld opened TCP {port}"
+            return False, (out_reload or f"firewalld reload failed after opening TCP {port}").strip()
+
+    if command_exists("ufw"):
+        rc_status, out_status = run_capture(["ufw", "status"], timeout=20)
+        status_text = (out_status or "").lower()
+        if rc_status == 0 and "inactive" not in status_text:
+            rc_allow, out_allow = run_capture(["ufw", "--force", "allow", f"{port}/tcp"], timeout=20)
+            if rc_allow == 0:
+                return True, f"ufw opened TCP {port}"
+            return False, (out_allow or f"ufw failed to open TCP {port}").strip()
+
+    return False, "no active supported Linux firewall manager detected"
+
+
+def build_dashboard_urls(bind_host: str, selected_port: int):
+    scheme = "https"
+    primary = f"{scheme}://127.0.0.1:{selected_port}"
+    extras = []
+
+    def add(url: str):
+        if url != primary and url not in extras:
+            extras.append(url)
+
+    add(f"{scheme}://localhost:{selected_port}")
+
+    if bind_host and bind_host not in ("auto", "0.0.0.0", "127.0.0.1", "localhost"):
+        add(f"{scheme}://{bind_host}:{selected_port}")
+
+    for ip in get_local_ipv4_addresses():
+        add(f"{scheme}://{ip}:{selected_port}")
+
+    preferred = preferred_host(bind_host)
+    if preferred not in ("127.0.0.1", "localhost"):
+        add(f"{scheme}://{preferred}:{selected_port}")
+
+    return primary, extras
 
 
 def ensure_unix_https_material(cert_path: Path, key_path: Path) -> None:
