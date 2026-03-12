@@ -13,6 +13,8 @@ STATE_DIR="${BASE_STATE_DIR}/python"
 STATE_FILE="${STATE_DIR}/python-state.json"
 JUPYTER_STATE_FILE="${STATE_DIR}/jupyter-state.json"
 VENV_DIR="${STATE_DIR}/venv"
+KERNEL_NAME="serverinstaller-python"
+KERNEL_DISPLAY_NAME="Python 3 (Server Installer)"
 JUPYTER_SERVICE_NAME="serverinstaller-jupyter"
 JUPYTER_SERVICE_FILE="/etc/systemd/system/${JUPYTER_SERVICE_NAME}.service"
 JUPYTER_NGINX_CONF="/etc/nginx/conf.d/${JUPYTER_SERVICE_NAME}.conf"
@@ -259,6 +261,14 @@ WantedBy=multi-user.target
 EOF
 }
 
+ensure_jupyter_kernel() {
+  "${VENV_PYTHON}" -m pip install --upgrade ipykernel
+  "${VENV_PYTHON}" -m ipykernel install \
+    --prefix "${VENV_DIR}" \
+    --name "${KERNEL_NAME}" \
+    --display-name "${KERNEL_DISPLAY_NAME}" >/dev/null
+}
+
 write_nginx_config() {
   cat > "${JUPYTER_NGINX_CONF}" <<EOF
 map \$http_upgrade \$connection_upgrade {
@@ -365,6 +375,7 @@ mkdir -p "${NOTEBOOK_DIR}"
 
 if [[ "${INSTALL_JUPYTER,,}" =~ ^(1|true|yes|y|on)$ ]]; then
   "${VENV_PYTHON}" -m pip install --upgrade jupyterlab notebook
+  ensure_jupyter_kernel
   JUPYTER_INSTALLED=true
 else
   JUPYTER_INSTALLED=false
