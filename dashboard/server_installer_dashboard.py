@@ -163,7 +163,7 @@ def _iter_proxy_sync_files():
 
 PROXY_SYNC_FILES = _iter_proxy_sync_files()
 
-SESSIONS = set()
+SESSIONS = {}
 JOBS = {}
 JOBS_LOCK = threading.Lock()
 
@@ -584,6 +584,8 @@ def run_unix_python_installer(form=None, live_cb=None):
     notebook_dir = _resolve_python_notebook_dir((form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip())
     jupyter_user = (form.get("PYTHON_JUPYTER_USER", [""])[0] or "").strip()
     jupyter_password = (form.get("PYTHON_JUPYTER_PASSWORD", [""])[0] or "").strip()
+    system_user = (form.get("SYSTEM_USERNAME", [""])[0] or "").strip()
+    system_password = (form.get("SYSTEM_PASSWORD", [""])[0] or "").strip()
     env["PYTHON_VERSION"] = version
     env["PYTHON_INSTALL_JUPYTER"] = "1"
     env["PYTHON_JUPYTER_PORT"] = jupyter_port
@@ -591,10 +593,12 @@ def run_unix_python_installer(form=None, live_cb=None):
     env["PYTHON_NOTEBOOK_DIR"] = notebook_dir
     if host_ip:
         env["PYTHON_HOST_IP"] = host_ip
-    if jupyter_user:
-        env["PYTHON_JUPYTER_USER"] = jupyter_user
-    if jupyter_password:
-        env["PYTHON_JUPYTER_PASSWORD"] = jupyter_password
+    effective_user = system_user or jupyter_user
+    effective_password = system_password or jupyter_password
+    if effective_user:
+        env["PYTHON_JUPYTER_USER"] = effective_user
+    if effective_password:
+        env["PYTHON_JUPYTER_PASSWORD"] = effective_password
     cmd = ["bash", str(PYTHON_UNIX_INSTALLER)]
     if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
         cmd = ["sudo", "env"]
@@ -616,9 +620,9 @@ def run_unix_python_installer(form=None, live_cb=None):
     state["notebook_dir"] = notebook_dir
     if host_ip:
         state["host"] = host_ip
-    if jupyter_user:
-        state["jupyter_username"] = jupyter_user
-    if jupyter_user or state.get("jupyter_username"):
+    if effective_user:
+        state["jupyter_username"] = effective_user
+    if effective_user or state.get("jupyter_username"):
         state["jupyter_auth_enabled"] = True
     state["jupyter_https_enabled"] = True
     state["service_mode"] = True
@@ -5821,6 +5825,11 @@ class Handler(BaseHTTPRequestHandler):
                 return part[4:]
         return ""
 
+    def get_session(self):
+        sid = self.get_sid()
+        session = SESSIONS.get(sid)
+        return session if isinstance(session, dict) else {}
+
     def is_auth(self):
         sid = self.get_sid()
         return bool(sid and sid in SESSIONS)
@@ -6001,7 +6010,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/logout":
             sid = self.get_sid()
             if sid in SESSIONS:
-                SESSIONS.discard(sid)
+                SESSIONS.pop(sid, None)
             self.write_html(page_login(), clear_sid=True)
             return
         if self.path.startswith("/job/"):
@@ -6046,7 +6055,7 @@ class Handler(BaseHTTPRequestHandler):
             ok, error = validate_os_credentials(user, password)
             if ok:
                 sid = secrets.token_hex(16)
-                SESSIONS.add(sid)
+                SESSIONS[sid] = {"username": user, "password": password}
                 self.write_html(page_dashboard(), cookie_sid=sid)
             else:
                 self.write_html(page_login(error), HTTPStatus.UNAUTHORIZED)
@@ -6126,6 +6135,15 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self.write_html(f"Invalid request: {html.escape(str(ex))}", HTTPStatus.BAD_REQUEST)
             return
+
+        session = self.get_session()
+        if session:
+            session_user = str(session.get("username") or "").strip()
+            session_password = str(session.get("password") or "")
+            if session_user and "SYSTEM_USERNAME" not in form:
+                form["SYSTEM_USERNAME"] = [session_user]
+            if session_password and "SYSTEM_PASSWORD" not in form:
+                form["SYSTEM_PASSWORD"] = [session_password]
 
         if self.path == "/run/s3_windows":
             title = "S3 Installer (Windows)"

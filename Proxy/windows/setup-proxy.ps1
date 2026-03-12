@@ -10,6 +10,139 @@ function Test-IsAdmin {
   return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 }
 
+function Test-IsLocalSystem {
+  $id = [Security.Principal.WindowsIdentity]::GetCurrent()
+  return $id.User -and $id.User.Value -eq "S-1-5-18"
+}
+
+function Get-ActiveInteractiveUser {
+  try {
+    $explorers = Get-Process explorer -IncludeUserName -ErrorAction SilentlyContinue |
+      Where-Object { $_.UserName } |
+      Sort-Object SessionId
+    foreach ($proc in $explorers) {
+      if ($proc.SessionId -ge 1) {
+        return $proc.UserName
+      }
+    }
+  } catch {
+  }
+
+  try {
+    $query = (& query user 2>$null) -split "`r?`n"
+    foreach ($line in $query) {
+      if ($line -match '^\s*>?(?<user>\S+)\s+\S+\s+\d+\s+Active\b') {
+        $user = $matches['user'].Trim()
+        if ($user) { return $user }
+      }
+    }
+  } catch {
+  }
+
+  return ""
+}
+
+function ConvertTo-SingleQuotedPs([string]$value) {
+  if ($null -eq $value) { $value = "" }
+  return "'" + ($value -replace "'", "''") + "'"
+}
+
+function Invoke-AsInteractiveUser {
+  $activeUser = Get-ActiveInteractiveUser
+  if ([string]::IsNullOrWhiteSpace($activeUser)) {
+    Fail "Proxy install requires an active signed-in Windows user session so WSL can be installed and configured."
+  }
+
+  $taskName = "ServerInstaller-ProxyBootstrap"
+  $runnerRoot = Join-Path $env:ProgramData "Server-Installer\proxy"
+  $runnerScript = Join-Path $runnerRoot "proxy-interactive-runner.ps1"
+  $runnerLog = Join-Path $runnerRoot "proxy-interactive-runner.log"
+  $runnerExit = Join-Path $runnerRoot "proxy-interactive-runner.exit"
+  $targetScript = [System.IO.Path]::GetFullPath($MyInvocation.MyCommand.Path)
+
+  New-Item -ItemType Directory -Force -Path $runnerRoot | Out-Null
+  Remove-Item $runnerLog, $runnerExit -Force -ErrorAction SilentlyContinue
+
+  $envAssignments = @(
+    "PROXY_SKIP_INTERACTIVE_RELAUNCH",
+    "PROXY_WSL_DISTRO",
+    "PROXY_LAYER",
+    "PROXY_DOMAIN",
+    "PROXY_EMAIL",
+    "PROXY_DUCKDNS_TOKEN",
+    "PROXY_PANEL_PORT",
+    "SERVER_INSTALLER_DASHBOARD_PORT"
+  ) | ForEach-Object {
+    '$env:{0} = {1}' -f $_, (ConvertTo-SingleQuotedPs ([Environment]::GetEnvironmentVariable($_)))
+  }
+
+  $runnerContent = @(
+    '$ErrorActionPreference = ''Stop'''
+    ('$logFile = {0}' -f (ConvertTo-SingleQuotedPs $runnerLog))
+    ('$exitFile = {0}' -f (ConvertTo-SingleQuotedPs $runnerExit))
+    ('$targetScript = {0}' -f (ConvertTo-SingleQuotedPs $targetScript))
+    '$null = New-Item -ItemType Directory -Force -Path ([System.IO.Path]::GetDirectoryName($logFile))'
+    'Set-Content -Path $logFile -Value "" -Encoding UTF8'
+  ) + $envAssignments + @(
+    'try {'
+    '  & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $targetScript *>&1 | Tee-Object -FilePath $logFile -Append'
+    '  $code = if ($LASTEXITCODE -is [int]) { $LASTEXITCODE } else { 0 }'
+    '} catch {'
+    '  ($_ | Out-String) | Tee-Object -FilePath $logFile -Append | Out-Null'
+    '  $code = 1'
+    '}'
+    'Set-Content -Path $exitFile -Value $code -Encoding ASCII'
+    'exit $code'
+  )
+  Set-Content -Path $runnerScript -Value ($runnerContent -join "`r`n") -Encoding UTF8
+
+  $action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$runnerScript`""
+  $principal = New-ScheduledTaskPrincipal -UserId $activeUser -LogonType InteractiveToken -RunLevel Highest
+  $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+
+  try {
+    Register-ScheduledTask -TaskName $taskName -Action $action -Principal $principal -Settings $settings -Force | Out-Null
+    Start-ScheduledTask -TaskName $taskName
+
+    $offset = 0
+    $deadline = (Get-Date).AddMinutes(30)
+    while ((Get-Date) -lt $deadline) {
+      if (Test-Path $runnerLog) {
+        $content = Get-Content -Path $runnerLog -Raw -ErrorAction SilentlyContinue
+        if ($content) {
+          $newText = $content.Substring([Math]::Min($offset, $content.Length))
+          if ($newText) {
+            Write-Host -NoNewline $newText
+            $offset = $content.Length
+          }
+        }
+      }
+      if (Test-Path $runnerExit) {
+        break
+      }
+      Start-Sleep -Milliseconds 700
+    }
+
+    if (-not (Test-Path $runnerExit)) {
+      Fail "Timed out waiting for interactive Proxy bootstrap task to finish."
+    }
+
+    $exitCode = 1
+    try {
+      $exitCode = [int](Get-Content -Path $runnerExit -Raw -ErrorAction Stop).Trim()
+    } catch {
+      $exitCode = 1
+    }
+    if ($exitCode -ne 0) {
+      Fail "Interactive Proxy bootstrap failed."
+    }
+    return
+  } finally {
+    Unregister-ScheduledTask -TaskName $taskName -Confirm:$false -ErrorAction SilentlyContinue | Out-Null
+    Remove-Item $runnerScript, $runnerExit -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Convert-ToWslPath([string]$windowsPath) {
   $full = [System.IO.Path]::GetFullPath($windowsPath)
   $drive = $full.Substring(0,1).ToLowerInvariant()
@@ -65,6 +198,12 @@ function Test-WslDistroAvailable([string]$name, [string]$helpText) {
 
 if (-not (Test-IsAdmin)) {
   Fail "This installer must run as Administrator."
+}
+
+if ((Test-IsLocalSystem) -and [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable("PROXY_SKIP_INTERACTIVE_RELAUNCH"))) {
+  Info "Proxy installer is running as LocalSystem. Relaunching under the active desktop user for WSL operations..."
+  Invoke-AsInteractiveUser
+  exit 0
 }
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
