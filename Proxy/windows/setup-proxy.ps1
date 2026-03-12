@@ -4,6 +4,27 @@ function Info([string]$message) { Write-Host "[INFO] $message" }
 function Warn([string]$message) { Write-Warning $message }
 function Fail([string]$message) { throw $message }
 
+function Resolve-ScriptPath {
+  $candidates = @(
+    $PSCommandPath,
+    $MyInvocation.PSCommandPath,
+    $MyInvocation.MyCommand.Path
+  )
+
+  foreach ($candidate in $candidates) {
+    if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+      try {
+        return [System.IO.Path]::GetFullPath($candidate)
+      } catch {
+      }
+    }
+  }
+
+  Fail "Could not determine the Proxy installer script path."
+}
+
+$scriptPath = Resolve-ScriptPath
+
 function Test-IsAdmin {
   $id = [Security.Principal.WindowsIdentity]::GetCurrent()
   $principal = New-Object Security.Principal.WindowsPrincipal($id)
@@ -58,7 +79,7 @@ function Invoke-AsInteractiveUser {
   $runnerScript = Join-Path $runnerRoot "proxy-interactive-runner.ps1"
   $runnerLog = Join-Path $runnerRoot "proxy-interactive-runner.log"
   $runnerExit = Join-Path $runnerRoot "proxy-interactive-runner.exit"
-  $targetScript = [System.IO.Path]::GetFullPath($MyInvocation.MyCommand.Path)
+  $targetScript = $scriptPath
 
   New-Item -ItemType Directory -Force -Path $runnerRoot | Out-Null
   Remove-Item $runnerLog, $runnerExit -Force -ErrorAction SilentlyContinue
@@ -207,7 +228,7 @@ if ((Test-IsLocalSystem) -and [string]::IsNullOrWhiteSpace([Environment]::GetEnv
   exit 0
 }
 
-$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptRoot = Split-Path -Parent $scriptPath
 $proxyRoot = Split-Path -Parent $scriptRoot
 $linuxInstallerWindows = Join-Path $proxyRoot "linux-macos\setup-proxy.sh"
 $linuxInstallerWsl = Convert-ToWslPath $linuxInstallerWindows
