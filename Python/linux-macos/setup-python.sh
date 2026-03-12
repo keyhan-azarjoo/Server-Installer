@@ -215,7 +215,7 @@ Type=simple
 User=root
 WorkingDirectory=${NOTEBOOK_DIR}
 Environment=PATH=${VENV_DIR}/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-ExecStart=${VENV_PYTHON} -m jupyter lab --no-browser --ServerApp.ip=127.0.0.1 --ServerApp.port=${JUPYTER_INTERNAL_PORT} --ServerApp.token= --ServerApp.password= --ServerApp.root_dir=${NOTEBOOK_DIR}
+ExecStart=${VENV_PYTHON} -m jupyter lab --allow-root --no-browser --ServerApp.ip=127.0.0.1 --ServerApp.port=${JUPYTER_INTERNAL_PORT} --ServerApp.token= --ServerApp.password= --ServerApp.root_dir=${NOTEBOOK_DIR}
 Restart=always
 RestartSec=5
 StandardOutput=append:${JUPYTER_LOG_FILE}
