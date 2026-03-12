@@ -73,6 +73,7 @@ function Ensure-DockerInstalled {
     Mark-RestartRequired "Docker Desktop installed - PATH update pending"
     return
   }
+  Start-DockerDesktop
   Info "Docker Desktop installed successfully."
 }
 
@@ -120,6 +121,14 @@ function Wait-DockerDesktopFiles([int]$maxSeconds = 90) {
 }
 
 function Start-DockerDesktop {
+  try {
+    $running = Get-Process -Name "Docker Desktop" -ErrorAction SilentlyContinue
+    if ($running) {
+      Info "Docker Desktop is already running."
+      return
+    }
+  } catch {}
+
   $exe = Find-DockerDesktopExe
   if (Test-Path $exe) {
     Info "Starting Docker Desktop: $exe"

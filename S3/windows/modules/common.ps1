@@ -183,12 +183,19 @@ function Reset-RestartCount {
 
 function Try-EnableDockerCliFromDefaultPath {
   if (Has-Cmd "docker") { return }
-  $dockerBin = "C:\Program Files\Docker\Docker\resources\bin"
-  $dockerExe = Join-Path $dockerBin "docker.exe"
-  if (Test-Path $dockerExe) {
+  foreach ($dockerBin in @(
+    "C:\Program Files\Docker\Docker\resources\bin",
+    "C:\Program Files\Docker\Docker",
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker\resources\bin"),
+    (Join-Path $env:LOCALAPPDATA "Programs\Docker\Docker")
+  )) {
+    if (-not $dockerBin) { continue }
+    $dockerExe = Join-Path $dockerBin "docker.exe"
+    if (-not (Test-Path $dockerExe)) { continue }
     if ($env:Path -notlike "*$dockerBin*") {
       $env:Path = "$dockerBin;$env:Path"
     }
+    return
   }
 }
 

@@ -532,19 +532,28 @@ def get_windows_s3_docker_support():
     support = {"supported": True, "reason": ""}
     if os.name != "nt":
         return support
-    docker = get_docker_info()
-    if not docker.get("installed"):
+
+    machine = (platform.machine() or "").strip().lower()
+    if machine not in ("amd64", "x86_64", "arm64", "aarch64"):
         support["supported"] = False
-        support["reason"] = "Docker Desktop is not installed."
+        support["reason"] = f"Docker Desktop requires a 64-bit Windows host. Detected architecture: {machine or 'unknown'}."
         return support
-    if not docker.get("running"):
-        support["supported"] = False
-        support["reason"] = "Docker Desktop is not running."
-        return support
-    if docker.get("os_type") != "linux":
-        support["supported"] = False
-        support["reason"] = "Docker Desktop is not using Linux containers."
-        return support
+
+    try:
+        winver = sys.getwindowsversion()
+        major = int(getattr(winver, "major", 0) or 0)
+        build = int(getattr(winver, "build", 0) or 0)
+        if major < 10:
+            support["supported"] = False
+            support["reason"] = "Docker Desktop requires Windows 10 or newer."
+            return support
+        if build and build < 19041:
+            support["supported"] = False
+            support["reason"] = f"Docker Desktop requires Windows build 19041 or newer. Detected build: {build}."
+            return support
+    except Exception:
+        pass
+
     return support
 
 
