@@ -525,7 +525,9 @@ def _python_state_service_item(info):
 
 def _cleanup_managed_jupyter():
     jupyter_state = _read_json_file(PYTHON_JUPYTER_STATE_FILE)
-    jupyter_port = str(jupyter_state.get("port") or _read_json_file(PYTHON_STATE_FILE).get("jupyter_port") or "").strip()
+    python_state = _read_json_file(PYTHON_STATE_FILE)
+    python_executable = str(python_state.get("python_executable") or "").strip()
+    jupyter_port = str(jupyter_state.get("port") or python_state.get("jupyter_port") or "").strip()
     stop_python_jupyter()
     if os.name != "nt":
         if command_exists("systemctl"):
@@ -554,6 +556,35 @@ def _cleanup_managed_jupyter():
             manage_firewall_port("close", jupyter_port, "tcp")
         except Exception:
             pass
+        if python_executable and Path(python_executable).exists():
+            uninstall_packages = [
+                "jupyterlab",
+                "notebook",
+                "ipykernel",
+                "jupyter-server",
+                "jupyterlab-server",
+                "jupyter-lsp",
+                "jupyter-server-terminals",
+                "notebook-shim",
+                "jupyter-client",
+                "jupyter-core",
+                "jupyter-events",
+                "nbconvert",
+                "nbformat",
+                "nbclient",
+                "pywinpty",
+                "terminado",
+            ]
+            run_capture(
+                [python_executable, "-m", "pip", "uninstall", "-y"] + uninstall_packages,
+                timeout=180,
+            )
+            kernelspec_dir = Path(python_executable).parent / "share" / "jupyter" / "kernels" / "python3"
+            try:
+                if kernelspec_dir.exists():
+                    shutil.rmtree(kernelspec_dir, ignore_errors=True)
+            except Exception:
+                pass
     for path in (
         PYTHON_JUPYTER_STATE_FILE,
         Path("/etc/nginx/auth/serverinstaller-jupyter.htpasswd"),
@@ -562,6 +593,17 @@ def _cleanup_managed_jupyter():
         try:
             if path.exists():
                 path.unlink()
+        except Exception:
+            pass
+    for path in (
+        PYTHON_STATE_DIR / "jupyter-config",
+        PYTHON_STATE_DIR / "jupyter-data",
+        PYTHON_STATE_DIR / "jupyter-runtime",
+        PYTHON_STATE_DIR / "ipython",
+    ):
+        try:
+            if path.exists():
+                shutil.rmtree(path, ignore_errors=True)
         except Exception:
             pass
     state = _read_json_file(PYTHON_STATE_FILE)
@@ -584,12 +626,39 @@ def _cleanup_managed_jupyter():
 def _cleanup_managed_python():
     state = _read_json_file(PYTHON_STATE_FILE)
     managed_exe = str(state.get("python_executable") or "").strip()
+    managed_root = str(state.get("python_root") or "").strip()
+    managed_install = bool(state.get("managed_install"))
+    install_method = str(state.get("install_method") or "").strip().lower()
+    install_package_id = str(state.get("install_package_id") or "").strip()
     _cleanup_managed_jupyter()
-    if managed_exe:
+    if os.name == "nt" and managed_install and install_method == "winget" and install_package_id:
+        run_capture(
+            [
+                "winget.exe",
+                "uninstall",
+                "--id",
+                install_package_id,
+                "--exact",
+                "--silent",
+                "--accept-source-agreements",
+            ],
+            timeout=240,
+        )
+    if os.name == "nt" and managed_install and managed_root:
+        try:
+            root_path = Path(managed_root)
+            if root_path.exists():
+                shutil.rmtree(root_path, ignore_errors=True)
+        except Exception:
+            pass
+    if managed_exe and not managed_install:
         current = _read_json_list(PYTHON_IGNORED_FILE)
         if managed_exe not in current:
             current.append(managed_exe)
-            _write_json_list(PYTHON_IGNORED_FILE, current)
+        _write_json_list(PYTHON_IGNORED_FILE, current)
+    elif managed_exe:
+        current = [item for item in _read_json_list(PYTHON_IGNORED_FILE) if str(item).strip() and str(item).strip() != managed_exe]
+        _write_json_list(PYTHON_IGNORED_FILE, current)
     try:
         if PYTHON_STATE_DIR.exists():
             shutil.rmtree(PYTHON_STATE_DIR, ignore_errors=True)
@@ -849,6 +918,12 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
             return 1, f"Requested Jupyter port {port} is already in use. Choose another port."
     notebook_dir = _resolve_python_notebook_dir(notebook_dir)
     bind_host = host
+    jupyter_config_dir = PYTHON_STATE_DIR / "jupyter-config"
+    jupyter_data_dir = PYTHON_STATE_DIR / "jupyter-data"
+    jupyter_runtime_dir = PYTHON_STATE_DIR / "jupyter-runtime"
+    ipython_dir = PYTHON_STATE_DIR / "ipython"
+    for path in (jupyter_config_dir, jupyter_data_dir, jupyter_runtime_dir, ipython_dir):
+        path.mkdir(parents=True, exist_ok=True)
     if os.name == "nt":
         if host not in ("127.0.0.1", "localhost", "::1"):
             bind_host = "0.0.0.0"
@@ -872,8 +947,16 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
         f"--ServerApp.root_dir={notebook_dir}",
     ]
     env = _python_env(python_executable)
+    env["JUPYTER_CONFIG_DIR"] = str(jupyter_config_dir)
+    env["JUPYTER_DATA_DIR"] = str(jupyter_data_dir)
+    env["JUPYTER_RUNTIME_DIR"] = str(jupyter_runtime_dir)
+    env["JUPYTER_NO_CONFIG"] = "1"
+    env["JUPYTER_PREFER_ENV_PATH"] = "1"
+    env["IPYTHONDIR"] = str(ipython_dir)
     try:
         log_handle = open(log_path, "ab")
+        if os.name == "nt":
+            args.append("--ServerApp.terminals_enabled=False")
         kwargs = {
             "cwd": notebook_dir,
             "env": env,

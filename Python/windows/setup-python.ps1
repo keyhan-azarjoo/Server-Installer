@@ -125,6 +125,11 @@ function Install-PythonWithWinget {
     if ($LASTEXITCODE -ne 0) {
         throw "winget install failed for $packageId."
     }
+
+    return [PSCustomObject]@{
+        InstallMethod = "winget"
+        PackageId = $packageId
+    }
 }
 
 function Ensure-Pip {
@@ -170,12 +175,18 @@ $statePath = Join-Path $stateDir "python-state.json"
 
 New-Item -ItemType Directory -Force -Path $stateDir | Out-Null
 
+$installMethod = "existing"
+$installPackageId = ""
 $pythonInfo = Resolve-PythonFromLauncher -Version $requestedVersion
 if (-not $pythonInfo) {
     $pythonInfo = Resolve-PythonFromPathOrCommonLocations -Version $requestedVersion
 }
 if (-not $pythonInfo) {
-    Install-PythonWithWinget -Version $requestedVersion
+    $installInfo = Install-PythonWithWinget -Version $requestedVersion
+    if ($installInfo) {
+        $installMethod = $installInfo.InstallMethod
+        $installPackageId = $installInfo.PackageId
+    }
     Start-Sleep -Seconds 3
     $pythonInfo = Resolve-PythonFromLauncher -Version $requestedVersion
     if (-not $pythonInfo) {
@@ -203,7 +214,11 @@ $state = [ordered]@{
     requested_version = $requestedVersion
     python_version = $pythonInfo.Version
     python_executable = $pythonInfo.Executable
+    python_root = (Split-Path -Parent $pythonInfo.Executable)
     scripts_dir = $scriptsDir
+    managed_install = ($installMethod -eq "winget")
+    install_method = $installMethod
+    install_package_id = $installPackageId
     jupyter_installed = $installJupyter
     jupyter_port = if ($jupyterPort) { $jupyterPort } else { "8888" }
     host = $hostIp
