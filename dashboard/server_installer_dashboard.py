@@ -621,6 +621,16 @@ def _python_process_running(pid):
         pid_num = int(pid)
     except Exception:
         return False
+    if pid_num <= 0:
+        return False
+    if os.name == "nt":
+        rc, out = run_capture(["tasklist", "/FI", f"PID eq {pid_num}"], timeout=15)
+        return rc == 0 and str(pid_num) in str(out or "")
+    try:
+        os.kill(pid_num, 0)
+        return True
+    except Exception:
+        return False
 
 
 def _windows_process_cmdline(pid):
@@ -653,6 +663,11 @@ def _windows_process_matches_managed_jupyter(pid, port=None):
     if not cmdline:
         return False
     cmdline_lower = cmdline.lower()
+    if "serverinstaller_jupyter_proxy.py" in cmdline_lower:
+        target_port = str(port or _read_json_file(PYTHON_JUPYTER_STATE_FILE).get("port") or "").strip()
+        if target_port.isdigit():
+            return f"--listen-port {target_port}" in cmdline_lower or f"--listen-port={target_port}" in cmdline_lower
+        return True
     if "jupyter" not in cmdline_lower or "lab" not in cmdline_lower:
         return False
 
@@ -674,16 +689,6 @@ def _windows_process_matches_managed_jupyter(pid, port=None):
             return False
 
     return True
-    if pid_num <= 0:
-        return False
-    if os.name == "nt":
-        rc, out = run_capture(["tasklist", "/FI", f"PID eq {pid_num}"], timeout=15)
-        return rc == 0 and str(pid_num) in str(out or "")
-    try:
-        os.kill(pid_num, 0)
-        return True
-    except Exception:
-        return False
 
 
 def _linux_systemd_unit_status(unit_name):
@@ -1102,12 +1107,8 @@ def run_windows_python_installer(form=None, live_cb=None):
     state["notebook_dir"] = notebook_dir
     if system_user:
         state["jupyter_username"] = system_user
-    if system_password:
-        state["jupyter_password_hash"] = _hash_jupyter_password(state.get("python_executable"), system_password)
-        state["jupyter_auth_enabled"] = bool(state.get("jupyter_password_hash"))
-    else:
-        state["jupyter_password_hash"] = ""
-        state["jupyter_auth_enabled"] = False
+    state["jupyter_password_hash"] = ""
+    state["jupyter_auth_enabled"] = bool(system_user and system_password)
     state["jupyter_https_enabled"] = True
     _write_json_file(PYTHON_STATE_FILE, state)
     if install_jupyter in ("1", "true", "yes", "y", "on"):
@@ -1216,17 +1217,6 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
     python_state = _read_json_file(PYTHON_STATE_FILE)
     auth_username = str(auth_username or "").strip()
     auth_password = str(auth_password or "")
-    password_hash = ""
-    if auth_password:
-        password_hash = _hash_jupyter_password(python_executable, auth_password)
-        if password_hash:
-            python_state["jupyter_password_hash"] = password_hash
-            python_state["jupyter_auth_enabled"] = True
-            if auth_username:
-                python_state["jupyter_username"] = auth_username
-            _write_json_file(PYTHON_STATE_FILE, python_state)
-    if not password_hash:
-        password_hash = str(python_state.get("jupyter_password_hash") or "").strip()
     rc_j, out_j = run_capture([python_executable, "-m", "jupyter", "--version"], timeout=20)
     if rc_j != 0:
         return 1, "Jupyter is not installed for the managed Python interpreter."
@@ -1235,6 +1225,9 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
     port = str(port or "8888").strip() or "8888"
     if not port.isdigit():
         return 1, "Jupyter port must be numeric."
+    is_windows_proxy_mode = os.name == "nt"
+    if is_windows_proxy_mode and (not auth_username or not auth_password):
+        return 1, "Windows Jupyter requires the current OS username and password."
     if is_local_tcp_port_listening(port):
         usage = get_port_usage(port, "tcp")
         if usage.get("managed_owner"):
@@ -1246,6 +1239,8 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
             return 1, f"Requested Jupyter port {port} is already in use. Choose another port."
     notebook_dir = _resolve_python_notebook_dir(notebook_dir)
     bind_host = host
+    public_port = port
+    backend_port = port
     jupyter_config_dir = PYTHON_STATE_DIR / "jupyter-config"
     jupyter_data_dir = PYTHON_STATE_DIR / "jupyter-data"
     jupyter_runtime_dir = PYTHON_STATE_DIR / "jupyter-runtime"
@@ -1267,25 +1262,42 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
         certfile, keyfile = _ensure_windows_jupyter_https_assets(python_executable, host)
         if certfile and keyfile:
             scheme = "https"
+        if not _ensure_windows_jupyter_proxy_support(python_executable):
+            return 1, "Failed to install Windows Jupyter proxy support."
+        backend_port_value = pick_free_local_tcp_port([
+            18888,
+            18889,
+            18890,
+            18891,
+            18892,
+            18893,
+            18894,
+            18895,
+            18896,
+            18897,
+            18898,
+            18899,
+        ])
+        if not backend_port_value or str(backend_port_value) == str(public_port):
+            backend_port_value = pick_free_local_tcp_port(range(18900, 19050))
+        if not backend_port_value:
+            return 1, "Could not find a free internal port for Windows Jupyter."
+        backend_port = str(backend_port_value)
     args = [
         python_executable,
         "-m",
         "jupyter",
         "lab",
         "--no-browser",
-        f"--ServerApp.ip={bind_host}",
-        f"--ServerApp.port={port}",
+        f"--ServerApp.ip={'127.0.0.1' if is_windows_proxy_mode else bind_host}",
+        f"--ServerApp.port={backend_port}",
         "--ServerApp.port_retries=0",
         "--ServerApp.allow_remote_access=True",
         f"--ServerApp.root_dir={notebook_dir}",
     ]
-    if password_hash:
-        args.append("--IdentityProvider.token=")
-        args.append(f"--PasswordIdentityProvider.hashed_password={password_hash}")
-    else:
-        args.append("--ServerApp.token=")
-        args.append("--ServerApp.password=")
-    if certfile and keyfile:
+    args.append("--ServerApp.token=")
+    args.append("--ServerApp.password=")
+    if certfile and keyfile and not is_windows_proxy_mode:
         args.append(f"--ServerApp.certfile={certfile}")
         args.append(f"--ServerApp.keyfile={keyfile}")
     env = _python_env(python_executable)
@@ -1311,38 +1323,84 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
         else:
             kwargs["start_new_session"] = True
         proc = subprocess.Popen(args, **kwargs)
-        url = f"{scheme}://{host}:{port}/lab"
+        backend_proc = proc
+        proxy_proc = None
         deadline = time.time() + 20
         while time.time() < deadline:
-            if is_local_tcp_port_listening(port):
+            if is_local_tcp_port_listening(backend_port):
                 break
             if proc.poll() is not None:
                 break
             time.sleep(0.5)
-        if not is_local_tcp_port_listening(port):
+        if not is_local_tcp_port_listening(backend_port):
             try:
                 log_text = log_path.read_text(encoding="utf-8", errors="ignore")
             except Exception:
                 log_text = ""
             if proc.poll() is not None:
                 return 1, (log_text.strip() or f"Jupyter Lab exited early with code {proc.returncode}.")
-            return 1, (log_text.strip() or f"Jupyter Lab did not start listening on port {port}.")
+            return 1, (log_text.strip() or f"Jupyter Lab did not start listening on port {backend_port}.")
+        if is_windows_proxy_mode:
+            proxy_script = _ensure_windows_jupyter_proxy_script()
+            proxy_args = [
+                python_executable,
+                proxy_script,
+                "--listen-host", bind_host,
+                "--listen-port", public_port,
+                "--backend-host", "127.0.0.1",
+                "--backend-port", backend_port,
+                "--username", auth_username,
+                "--password", auth_password,
+                "--certfile", certfile,
+                "--keyfile", keyfile,
+            ]
+            proxy_kwargs = {
+                "cwd": notebook_dir,
+                "env": env,
+                "stdout": log_handle,
+                "stderr": subprocess.STDOUT,
+                "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+            }
+            proxy_proc = subprocess.Popen(proxy_args, **proxy_kwargs)
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                if is_local_tcp_port_listening(public_port):
+                    break
+                if proxy_proc.poll() is not None:
+                    break
+                time.sleep(0.5)
+            if not is_local_tcp_port_listening(public_port):
+                try:
+                    log_text = log_path.read_text(encoding="utf-8", errors="ignore")
+                except Exception:
+                    log_text = ""
+                if proxy_proc.poll() is not None:
+                    return 1, (log_text.strip() or f"Windows Jupyter proxy exited early with code {proxy_proc.returncode}.")
+                return 1, (log_text.strip() or f"Windows Jupyter proxy did not start listening on port {public_port}.")
+        url = f"{scheme}://{host}:{public_port}/lab"
         state = _read_json_file(PYTHON_STATE_FILE)
         state["host"] = host
-        state["jupyter_port"] = port
+        state["jupyter_port"] = public_port
         state["default_notebook_dir"] = notebook_dir
         state["notebook_dir"] = notebook_dir
+        if is_windows_proxy_mode:
+            state["jupyter_username"] = auth_username
+            state["jupyter_auth_enabled"] = True
+            state["jupyter_https_enabled"] = True
+            state["jupyter_password_hash"] = ""
         _write_json_file(PYTHON_STATE_FILE, state)
         _write_json_file(PYTHON_JUPYTER_STATE_FILE, {
-            "pid": proc.pid,
+            "pid": proxy_proc.pid if proxy_proc is not None else proc.pid,
+            "backend_pid": backend_proc.pid if is_windows_proxy_mode else None,
             "host": host,
-            "port": port,
+            "port": public_port,
+            "backend_port": backend_port if is_windows_proxy_mode else public_port,
             "url": url,
             "log_path": str(log_path),
             "notebook_dir": notebook_dir,
-            "username": str(python_state.get("jupyter_username") or "").strip(),
-            "auth_enabled": bool(password_hash),
-            "https_enabled": bool(certfile and keyfile),
+            "username": auth_username if is_windows_proxy_mode else str(python_state.get("jupyter_username") or "").strip(),
+            "auth_enabled": bool(auth_username and auth_password) if is_windows_proxy_mode else bool(python_state.get("jupyter_password_hash")),
+            "https_enabled": bool(certfile and keyfile) if is_windows_proxy_mode else bool(certfile and keyfile),
             "running": True,
         })
         message = f"Jupyter Lab started at {url}."
@@ -1369,6 +1427,7 @@ def stop_python_jupyter(live_cb=None):
         return 0, message
     state = _read_json_file(PYTHON_JUPYTER_STATE_FILE)
     pid = state.get("pid")
+    backend_pid = state.get("backend_pid")
     port = str(state.get("port") or _read_json_file(PYTHON_STATE_FILE).get("jupyter_port") or "").strip()
     killed_any = False
     try:
@@ -1382,6 +1441,18 @@ def stop_python_jupyter(live_cb=None):
             rc, out = run_capture(["kill", "-TERM", str(pid_num)], timeout=20)
         if rc != 0 and _python_process_running(pid_num):
             return 1, (out or f"Failed to stop Jupyter process {pid_num}.")
+        killed_any = True
+    try:
+        backend_pid_num = int(backend_pid)
+    except Exception:
+        backend_pid_num = 0
+    if backend_pid_num > 0 and backend_pid_num != pid_num:
+        if os.name == "nt":
+            rc, out = run_capture(["taskkill", "/PID", str(backend_pid_num), "/F"], timeout=20)
+        else:
+            rc, out = run_capture(["kill", "-TERM", str(backend_pid_num)], timeout=20)
+        if rc != 0 and _python_process_running(backend_pid_num):
+            return 1, (out or f"Failed to stop Jupyter backend process {backend_pid_num}.")
         killed_any = True
     if os.name == "nt" and port.isdigit():
         listener_pids = []
@@ -1407,6 +1478,7 @@ def stop_python_jupyter(live_cb=None):
     if not killed_any:
         return 0, "Jupyter Lab is not running."
     state["pid"] = None
+    state["backend_pid"] = None
     state["running"] = False
     _write_json_file(PYTHON_JUPYTER_STATE_FILE, state)
     message = "Jupyter Lab stopped."

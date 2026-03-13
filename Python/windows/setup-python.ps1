@@ -202,7 +202,7 @@ Ensure-Pip -PythonExe $pythonInfo.Executable
 
 if ($installJupyter) {
     Write-Host "Installing JupyterLab and Notebook..."
-    & $pythonInfo.Executable -m pip install --upgrade jupyterlab notebook
+    & $pythonInfo.Executable -m pip install --upgrade jupyterlab notebook aiohttp
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to install Jupyter packages."
     }
