@@ -30,7 +30,7 @@ from urllib.parse import parse_qs, quote, urlparse
 
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-BUILD_ID = "python-jupyter-service-2026-03-12-1705"
+BUILD_ID = "python-jupyter-service-2026-03-13-1048"
 
 
 def _server_installer_data_dir():
@@ -352,6 +352,59 @@ def _python_process_running(pid):
         pid_num = int(pid)
     except Exception:
         return False
+
+
+def _windows_process_cmdline(pid):
+    if os.name != "nt":
+        return ""
+    try:
+        pid_num = int(pid)
+    except Exception:
+        return ""
+    if pid_num <= 0:
+        return ""
+    rc, out = run_capture(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            f"(Get-CimInstance Win32_Process -Filter \"ProcessId={pid_num}\").CommandLine",
+        ],
+        timeout=20,
+    )
+    return str(out or "").strip() if rc == 0 else ""
+
+
+def _windows_process_matches_managed_jupyter(pid, port=None):
+    if os.name != "nt":
+        return False
+    cmdline = _windows_process_cmdline(pid)
+    if not cmdline:
+        return False
+    cmdline_lower = cmdline.lower()
+    if "jupyter" not in cmdline_lower or "lab" not in cmdline_lower:
+        return False
+
+    python_state = _read_json_file(PYTHON_STATE_FILE)
+    python_executable = str(python_state.get("python_executable") or "").strip().lower()
+    jupyter_state = _read_json_file(PYTHON_JUPYTER_STATE_FILE)
+    state_port = str(jupyter_state.get("port") or python_state.get("jupyter_port") or "").strip()
+    target_port = str(port or state_port or "").strip()
+
+    if python_executable:
+        normalized_cmd = cmdline_lower.replace("/", "\\")
+        normalized_python = python_executable.replace("/", "\\")
+        if normalized_python not in normalized_cmd:
+            return False
+
+    if target_port.isdigit():
+        port_flag = f"--serverapp.port={target_port}"
+        if port_flag not in cmdline_lower and f":{target_port}" not in cmdline_lower:
+            return False
+
+    return True
     if pid_num <= 0:
         return False
     if os.name == "nt":
@@ -787,7 +840,12 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
         return 1, "Jupyter port must be numeric."
     if is_local_tcp_port_listening(port):
         usage = get_port_usage(port, "tcp")
-        if not usage.get("managed_owner"):
+        if usage.get("managed_owner"):
+            stop_python_jupyter()
+            deadline = time.time() + 10
+            while time.time() < deadline and is_local_tcp_port_listening(port):
+                time.sleep(0.5)
+        if is_local_tcp_port_listening(port):
             return 1, f"Requested Jupyter port {port} is already in use. Choose another port."
     notebook_dir = _resolve_python_notebook_dir(notebook_dir)
     bind_host = host
@@ -882,8 +940,8 @@ def stop_python_jupyter(live_cb=None):
         return 0, message
     state = _read_json_file(PYTHON_JUPYTER_STATE_FILE)
     pid = state.get("pid")
-    if not pid:
-        return 0, "Jupyter Lab is not running."
+    port = str(state.get("port") or _read_json_file(PYTHON_STATE_FILE).get("jupyter_port") or "").strip()
+    killed_any = False
     try:
         pid_num = int(pid)
     except Exception:
@@ -895,6 +953,30 @@ def stop_python_jupyter(live_cb=None):
             rc, out = run_capture(["kill", "-TERM", str(pid_num)], timeout=20)
         if rc != 0 and _python_process_running(pid_num):
             return 1, (out or f"Failed to stop Jupyter process {pid_num}.")
+        killed_any = True
+    if os.name == "nt" and port.isdigit():
+        listener_pids = []
+        for item in get_listening_ports(limit=5000):
+            proto = str(item.get("proto", "")).lower()
+            if not proto.startswith("tcp"):
+                continue
+            if int(item.get("port", 0)) != int(port):
+                continue
+            try:
+                listener_pid = int(str(item.get("pid") or "0"))
+            except Exception:
+                continue
+            if listener_pid <= 0 or listener_pid == pid_num:
+                continue
+            if _windows_process_matches_managed_jupyter(listener_pid, port):
+                listener_pids.append(listener_pid)
+        for listener_pid in sorted(set(listener_pids)):
+            rc, out = run_capture(["taskkill", "/PID", str(listener_pid), "/F"], timeout=20)
+            if rc != 0 and _python_process_running(listener_pid):
+                return 1, (out or f"Failed to stop Jupyter process {listener_pid}.")
+            killed_any = True
+    if not killed_any:
+        return 0, "Jupyter Lab is not running."
     state["pid"] = None
     state["running"] = False
     _write_json_file(PYTHON_JUPYTER_STATE_FILE, state)
@@ -1644,20 +1726,28 @@ def _windows_managed_python_owns_port(port, listeners=None):
         pid_num = int(pid)
     except Exception:
         pid_num = 0
-    if pid_num <= 0 or not _python_process_running(pid_num):
-        return False
     active_listeners = listeners if isinstance(listeners, list) else []
     if not active_listeners:
         for item in get_listening_ports(limit=5000):
             proto = str(item.get("proto", "")).lower()
             if proto.startswith("tcp") and int(item.get("port", 0)) == target:
                 active_listeners.append(item)
+    if pid_num > 0 and _python_process_running(pid_num):
+        for item in active_listeners:
+            try:
+                if int(str(item.get("pid") or "0")) == pid_num:
+                    return True
+            except Exception:
+                continue
     for item in active_listeners:
         try:
-            if int(str(item.get("pid") or "0")) == pid_num:
-                return True
+            listener_pid = int(str(item.get("pid") or "0"))
         except Exception:
             continue
+        if listener_pid <= 0:
+            continue
+        if _windows_process_matches_managed_jupyter(listener_pid, target):
+                return True
     return False
 
 
