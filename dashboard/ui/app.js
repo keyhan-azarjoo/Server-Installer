@@ -1851,10 +1851,6 @@ function App() {
                 },
                 { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
                 { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: defaultNotebookDirForOs(cfg.os) },
-                ...(cfg.os === "windows" ? [
-                  { name: "SYSTEM_USERNAME", label: "Jupyter Username", defaultValue: pythonService.jupyter_username || "admin", required: true, placeholder: "admin" },
-                  { name: "SYSTEM_PASSWORD", label: "Jupyter Password", type: "password", required: true, placeholder: "Enter Jupyter password" },
-                ] : []),
               ]}
               onRun={run}
               color="#2563eb"

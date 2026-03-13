@@ -836,6 +836,8 @@ def run_windows_python_installer(form=None, live_cb=None):
             host=host_ip or str(state.get("host") or choose_service_host()),
             port=jupyter_port,
             notebook_dir=notebook_dir,
+            auth_username=system_user,
+            auth_password=system_password,
             live_cb=live_cb,
         )
         if start_output:
@@ -916,7 +918,7 @@ def run_python_command(form=None, live_cb=None):
     return run_process(cmd, env=env, live_cb=live_cb)
 
 
-def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
+def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username="", auth_password="", live_cb=None):
     if os.name != "nt":
         state = _read_json_file(PYTHON_STATE_FILE)
         if state.get("service_mode") and command_exists("systemctl"):
@@ -933,7 +935,19 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", live_cb=None):
     if not python_executable:
         return 1, "Install Python first."
     python_state = _read_json_file(PYTHON_STATE_FILE)
-    password_hash = str(python_state.get("jupyter_password_hash") or "").strip()
+    auth_username = str(auth_username or "").strip()
+    auth_password = str(auth_password or "")
+    password_hash = ""
+    if auth_password:
+        password_hash = _hash_jupyter_password(python_executable, auth_password)
+        if password_hash:
+            python_state["jupyter_password_hash"] = password_hash
+            python_state["jupyter_auth_enabled"] = True
+            if auth_username:
+                python_state["jupyter_username"] = auth_username
+            _write_json_file(PYTHON_STATE_FILE, python_state)
+    if not password_hash:
+        password_hash = str(python_state.get("jupyter_password_hash") or "").strip()
     rc_j, out_j = run_capture([python_executable, "-m", "jupyter", "--version"], timeout=20)
     if rc_j != 0:
         return 1, "Jupyter is not installed for the managed Python interpreter."
@@ -2919,6 +2933,7 @@ def manage_service(action, name, kind, detail=""):
             code, output = start_python_jupyter(
                 host=str(info.get("host") or choose_service_host()),
                 port=str(info.get("jupyter_port") or "8888"),
+                auth_username=str(info.get("jupyter_username") or ""),
             )
             return code == 0, output
         if action == "stop":
@@ -2930,6 +2945,7 @@ def manage_service(action, name, kind, detail=""):
             code, output = start_python_jupyter(
                 host=str(info.get("host") or choose_service_host()),
                 port=str(info.get("jupyter_port") or "8888"),
+                auth_username=str(info.get("jupyter_username") or ""),
             )
             return code == 0, output
         if action == "delete":
@@ -2954,6 +2970,7 @@ def manage_service(action, name, kind, detail=""):
             code, output = start_python_jupyter(
                 host=str(info.get("host") or choose_service_host()),
                 port=str(info.get("jupyter_port") or "8888"),
+                auth_username=str(info.get("jupyter_username") or ""),
             )
             return code == 0, output
         if action == "stop":
@@ -2965,6 +2982,7 @@ def manage_service(action, name, kind, detail=""):
             code, output = start_python_jupyter(
                 host=str(info.get("host") or choose_service_host()),
                 port=str(info.get("jupyter_port") or "8888"),
+                auth_username=str(info.get("jupyter_username") or ""),
             )
             return code == 0, output
         if action == "delete":
@@ -6783,6 +6801,8 @@ class Handler(BaseHTTPRequestHandler):
                 host=(form.get("PYTHON_HOST_IP", [""])[0] or "").strip(),
                 port=(form.get("PYTHON_JUPYTER_PORT", ["8888"])[0] or "8888").strip(),
                 notebook_dir=(form.get("PYTHON_NOTEBOOK_DIR", [""])[0] or "").strip(),
+                auth_username=(form.get("SYSTEM_USERNAME", [""])[0] or "").strip(),
+                auth_password=(form.get("SYSTEM_PASSWORD", [""])[0] or ""),
                 live_cb=cb,
             )
             if self.is_fetch():
