@@ -368,6 +368,46 @@ def _hash_jupyter_password(python_executable, password_text):
     return str(out or "").strip().splitlines()[-1].strip()
 
 
+def _ensure_windows_jupyter_https_assets(python_executable, host):
+    python_exe = str(python_executable or "").strip()
+    host_value = str(host or "").strip() or "localhost"
+    if os.name != "nt" or not python_exe:
+        return "", ""
+    https_dir = PYTHON_STATE_DIR / "https"
+    cert_path = https_dir / "jupyter-cert.pem"
+    key_path = https_dir / "jupyter-key.pem"
+    try:
+        https_dir.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        return "", ""
+    if cert_path.exists() and key_path.exists():
+        return str(cert_path), str(key_path)
+
+    rc_import, _ = run_capture([python_exe, "-c", "import trustme"], timeout=20)
+    if rc_import != 0:
+        rc_install, _ = run_capture([python_exe, "-m", "pip", "install", "--upgrade", "trustme"], timeout=180)
+        if rc_install != 0:
+            return "", ""
+
+    script = (
+        "from pathlib import Path\n"
+        "import trustme\n"
+        f"cert_path = Path(r'''{str(cert_path)}''')\n"
+        f"key_path = Path(r'''{str(key_path)}''')\n"
+        f"host = {host_value!r}\n"
+        "ca = trustme.CA()\n"
+        "server_cert = ca.issue_cert(host, 'localhost', '127.0.0.1')\n"
+        "server_cert.cert_chain_pems[0].write_to_path(cert_path)\n"
+        "server_cert.private_key_pem.write_to_path(key_path)\n"
+        "print(cert_path)\n"
+        "print(key_path)\n"
+    )
+    rc, out = run_capture([python_exe, "-c", script], timeout=60)
+    if rc != 0 or not cert_path.exists() or not key_path.exists():
+        return "", ""
+    return str(cert_path), str(key_path)
+
+
 def _python_process_running(pid):
     try:
         pid_num = int(pid)
@@ -524,23 +564,24 @@ def _python_state_service_item(info):
             "manageable": False,
             "deletable": True,
         })
-    port_text = str(info.get("jupyter_port") or "").strip()
-    ports = [{"port": int(port_text), "protocol": "tcp"}] if port_text.isdigit() else []
-    service_kind = "service" if os.name != "nt" and info.get("service_mode") else "python_runtime"
-    service_name = JUPYTER_SYSTEMD_SERVICE if service_kind == "service" else "serverinstaller-python-jupyter"
-    items.append({
-        "kind": service_kind,
-        "name": service_name,
-        "display_name": "Managed Jupyter Lab",
-        "status": "running" if info.get("jupyter_running") else "stopped",
-        "sub_status": str(info.get("service_sub_status") or ("running" if info.get("jupyter_running") else "stopped")),
-        "autostart": bool(info.get("service_autostart")),
-        "platform": "windows" if os.name == "nt" else "linux",
-        "urls": [info.get("jupyter_url")] if info.get("jupyter_url") else [],
-        "ports": ports,
-        "manageable": True,
-        "deletable": True,
-    })
+    if info.get("jupyter_running"):
+        port_text = str(info.get("jupyter_port") or "").strip()
+        ports = [{"port": int(port_text), "protocol": "tcp"}] if port_text.isdigit() else []
+        service_kind = "service" if os.name != "nt" and info.get("service_mode") else "python_runtime"
+        service_name = JUPYTER_SYSTEMD_SERVICE if service_kind == "service" else "serverinstaller-python-jupyter"
+        items.append({
+            "kind": service_kind,
+            "name": service_name,
+            "display_name": "Managed Jupyter Lab",
+            "status": "running",
+            "sub_status": str(info.get("service_sub_status") or "running"),
+            "autostart": bool(info.get("service_autostart")),
+            "platform": "windows" if os.name == "nt" else "linux",
+            "urls": [info.get("jupyter_url")] if info.get("jupyter_url") else [],
+            "ports": ports,
+            "manageable": True,
+            "deletable": True,
+        })
     return items
 
 
@@ -768,17 +809,16 @@ def get_python_info():
                 info["notebook_dir"] = _resolve_python_notebook_dir(
                     jupyter_state.get("notebook_dir") or info["default_notebook_dir"]
                 )
+                info["jupyter_username"] = str(jupyter_state.get("username") or state.get("jupyter_username") or info["jupyter_username"] or "").strip()
+                info["jupyter_auth_enabled"] = bool(jupyter_state.get("auth_enabled") or state.get("jupyter_auth_enabled"))
+                info["jupyter_https_enabled"] = bool(jupyter_state.get("https_enabled") or state.get("jupyter_https_enabled"))
                 info["jupyter_pid"] = pid
             else:
                 if jupyter_state:
                     jupyter_state["pid"] = None
                     jupyter_state["running"] = False
                     _write_json_file(PYTHON_JUPYTER_STATE_FILE, jupyter_state)
-                if info["jupyter_installed"]:
-                    host = info["host"] or choose_service_host()
-                    port = info["jupyter_port"] or "8888"
-                    if port.isdigit():
-                        info["jupyter_url"] = f"http://{host}:{port}/lab"
+                info["jupyter_url"] = ""
                 info["notebook_dir"] = _resolve_python_notebook_dir(
                     jupyter_state.get("notebook_dir") if jupyter_state else info["default_notebook_dir"]
                 )
@@ -829,7 +869,7 @@ def run_windows_python_installer(form=None, live_cb=None):
     else:
         state["jupyter_password_hash"] = ""
         state["jupyter_auth_enabled"] = False
-    state["jupyter_https_enabled"] = False
+    state["jupyter_https_enabled"] = True
     _write_json_file(PYTHON_STATE_FILE, state)
     if install_jupyter in ("1", "true", "yes", "y", "on"):
         start_code, start_output = start_python_jupyter(
@@ -981,6 +1021,13 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
             live_cb(f"[WARN] Failed to open Windows Firewall for TCP {port}. Jupyter may be unreachable from other devices.\n")
     PYTHON_JUPYTER_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
     log_path = PYTHON_STATE_DIR / "jupyter.log"
+    certfile = ""
+    keyfile = ""
+    scheme = "http"
+    if os.name == "nt":
+        certfile, keyfile = _ensure_windows_jupyter_https_assets(python_executable, host)
+        if certfile and keyfile:
+            scheme = "https"
     args = [
         python_executable,
         "-m",
@@ -999,6 +1046,9 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
     else:
         args.append("--ServerApp.token=")
         args.append("--ServerApp.password=")
+    if certfile and keyfile:
+        args.append(f"--ServerApp.certfile={certfile}")
+        args.append(f"--ServerApp.keyfile={keyfile}")
     env = _python_env(python_executable)
     env["JUPYTER_CONFIG_DIR"] = str(jupyter_config_dir)
     env["JUPYTER_DATA_DIR"] = str(jupyter_data_dir)
@@ -1022,7 +1072,7 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
         else:
             kwargs["start_new_session"] = True
         proc = subprocess.Popen(args, **kwargs)
-        url = f"http://{host}:{port}/lab"
+        url = f"{scheme}://{host}:{port}/lab"
         deadline = time.time() + 20
         while time.time() < deadline:
             if is_local_tcp_port_listening(port):
@@ -1053,7 +1103,7 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
             "notebook_dir": notebook_dir,
             "username": str(python_state.get("jupyter_username") or "").strip(),
             "auth_enabled": bool(password_hash),
-            "https_enabled": False,
+            "https_enabled": bool(certfile and keyfile),
             "running": True,
         })
         message = f"Jupyter Lab started at {url}."
