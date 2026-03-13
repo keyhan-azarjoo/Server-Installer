@@ -1219,6 +1219,9 @@ function App() {
           <Grid item xs={12} md={6}>
             <NavCard title="Proxy" text="Install and manage the multi-layer proxy stack." onClick={() => setPage("proxy")} outlined />
           </Grid>
+          <Grid item xs={12} md={6}>
+            <NavCard title="Python" text="Install Python and manage Jupyter notebooks, kernels, and runtime services." onClick={() => setPage("python")} outlined />
+          </Grid>
         </Grid>
       );
     }
@@ -1992,7 +1995,7 @@ function App() {
             </Alert>
           </Grid>
           <Grid item xs={12} md={6}>
-            <NavCard title="Open Python Jupyter" text="Go back to the main Python page for notebooks, kernels, and Jupyter management." onClick={() => setPage("python")} />
+            <NavCard title="Python" text="Open the Python Jupyter page for notebooks, kernels, and runtime management." onClick={() => setPage("python")} />
           </Grid>
           <Grid item xs={12} md={6}>
             <NavCard title="Open IIS Target" text="Use the IIS deployment flow for Python API hosting on Windows." onClick={() => setPage("python-iis")} outlined />

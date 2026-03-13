@@ -453,10 +453,12 @@ def _request_headers(request, backend_host, backend_port):
         if lower in {"host", "authorization", "connection", "upgrade", "proxy-connection", "keep-alive", "transfer-encoding"}:
             continue
         headers[key] = value
-    headers["Host"] = f"{backend_host}:{backend_port}"
+    headers["Host"] = request.host
     headers["X-Forwarded-For"] = request.remote or ""
     headers["X-Forwarded-Proto"] = "https"
     headers["X-Forwarded-Host"] = request.host
+    headers["X-Forwarded-Port"] = str(request.url.port or 443)
+    headers["X-Real-IP"] = request.remote or ""
     return headers
 
 
@@ -1293,6 +1295,9 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
         f"--ServerApp.port={backend_port}",
         "--ServerApp.port_retries=0",
         "--ServerApp.allow_remote_access=True",
+        "--ServerApp.trust_xheaders=True",
+        f"--ServerApp.allow_origin=https://{host}:{public_port}",
+        f"--ServerApp.local_hostnames={host},127.0.0.1,localhost",
         f"--ServerApp.root_dir={notebook_dir}",
     ]
     args.append("--ServerApp.token=")
