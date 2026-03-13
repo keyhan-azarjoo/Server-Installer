@@ -1316,7 +1316,7 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
     try:
         log_handle = open(log_path, "ab")
         if os.name == "nt":
-            args.append("--ServerApp.terminals_enabled=False")
+            args.append("--ServerApp.terminals_enabled=True")
         kwargs = {
             "cwd": notebook_dir,
             "env": env,
