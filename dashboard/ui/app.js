@@ -1962,26 +1962,6 @@ function App() {
               </CardContent>
             </Card>
           </Grid>
-          {page === "python" && (
-            <Grid item xs={12}>
-              <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-                <CardContent>
-                  <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Deployment Targets</Typography>
-                  <Grid container spacing={2}>
-                    <Grid item xs={12} md={4}>
-                      <NavCard title="API Service" text="Deploy a Python API app as a background service. This is separate from Jupyter notebooks." onClick={() => setPage("python-api")} />
-                    </Grid>
-                    <Grid item xs={12} md={4}>
-                      <NavCard title="Docker" text="Open Python Docker deployment options." onClick={() => setPage("python-docker")} outlined />
-                    </Grid>
-                    <Grid item xs={12} md={4}>
-                      <NavCard title="IIS" text={cfg.os === "windows" ? "Open Python IIS deployment options." : "IIS deployment is only available on Windows hosts."} onClick={() => setPage("python-iis")} outlined />
-                    </Grid>
-                  </Grid>
-                </CardContent>
-              </Card>
-            </Grid>
-          )}
         </Grid>
       );
     }
