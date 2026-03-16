@@ -174,24 +174,8 @@ function Invoke-DashboardBootstrap {
 
     $env:DASHBOARD_HTTPS = "1"
     Write-Host "Repairing dashboard startup and launching the dashboard..."
-    $parts = @(
-        "-NoProfile",
-        "-ExecutionPolicy Bypass",
-        "-WindowStyle Hidden",
-        ('-File "' + $bootstrapPath + '"')
-    )
-    foreach ($arg in @($DashboardArgs)) {
-        if (-not [string]::IsNullOrWhiteSpace($arg)) {
-            $escapedArg = $arg.Replace('"', '\"')
-            $parts += ('"' + $escapedArg + '"')
-        }
-    }
-    $argumentLine = ($parts -join ' ')
-    $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argumentLine -WindowStyle Hidden -Wait -PassThru
-    if (-not $proc) {
-        throw "Dashboard bootstrap did not start."
-    }
-    return $proc.ExitCode
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrapPath @DashboardArgs *> $null
+    return $LASTEXITCODE
 }
 
 if (-not (Test-IsAdministrator)) {
