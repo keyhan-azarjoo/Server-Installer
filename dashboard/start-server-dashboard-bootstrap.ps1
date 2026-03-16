@@ -176,8 +176,14 @@ function Get-RequiredServerInstallerFiles {
 
 function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot, [string]$RepoBase) {
   $requiredFiles = Get-RequiredServerInstallerFiles
+  $totalFiles = $requiredFiles.Count
+  $index = 0
 
   foreach ($relativePath in $requiredFiles) {
+    $index++
+    $percent = if ($totalFiles -gt 0) { [int](($index / $totalFiles) * 100) } else { 0 }
+    Write-Progress -Activity "Downloading Server Installer files" -Status "[$index/$totalFiles] $relativePath" -PercentComplete $percent
+    Write-Output ("[{0}/{1}] {2}" -f $index, $totalFiles, $relativePath)
     $targetPath = Join-Path $DestinationRoot ($relativePath -replace '/', '\')
     $targetDirectory = Split-Path -Path $targetPath -Parent
     New-Item -ItemType Directory -Force -Path $targetDirectory | Out-Null
@@ -193,6 +199,8 @@ function Sync-ServerInstallerFiles([string]$SourceRoot, [string]$DestinationRoot
     }
     Move-Item -Path $tempPath -Destination $targetPath -Force
   }
+
+  Write-Progress -Activity "Downloading Server Installer files" -Completed
 }
 
 function Get-LocalIPv4Addresses {
@@ -435,7 +443,7 @@ $repo = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
 $localSourceRoot = $env:SERVER_INSTALLER_LOCAL_ROOT
 $dashboard = Join-Path $root "dashboard\start-server-dashboard.py"
 
-Write-Host "[INFO] Downloading dashboard launcher..."
+Write-Output "[INFO] Downloading dashboard launcher..."
 Stop-ExistingDashboardProcesses
 Sync-ServerInstallerFiles -SourceRoot $localSourceRoot -DestinationRoot $root -RepoBase $repo
 Repair-DashboardLauncher -Path $dashboard
@@ -444,11 +452,13 @@ $python = Get-CommandPath "python"
 if (-not $python) { $python = Get-CommandPath "py" }
 
 if (-not $python) {
-  Write-Host "[INFO] Python not found. Bootstrapping embeddable Python..."
+  Write-Output "[INFO] Python not found. Bootstrapping embeddable Python..."
   $pyVer = "3.14.2"
   $pyZip = Join-Path $root "python-embed.zip"
   $pyUrl = "https://www.python.org/ftp/python/$pyVer/python-$pyVer-embeddable-amd64.zip"
+  Write-Progress -Activity "Downloading Python runtime" -Status "python-$pyVer-embeddable-amd64.zip" -PercentComplete 0
   Invoke-WebRequest -Uri $pyUrl -OutFile $pyZip
+  Write-Progress -Activity "Downloading Python runtime" -Completed
   if (Test-Path $pyDir) { Remove-Item -Recurse -Force $pyDir }
   New-Item -ItemType Directory -Force -Path $pyDir | Out-Null
   Expand-Archive -Path $pyZip -DestinationPath $pyDir -Force
@@ -470,13 +480,13 @@ if (-not $pythonConsoleless) {
   $pythonConsoleless = $python
 }
 
-Write-Host "[INFO] Starting dashboard..."
+Write-Output "[INFO] Starting dashboard..."
 $certDir = Join-Path $root "certs"
 New-Item -ItemType Directory -Force -Path $certDir | Out-Null
 $certPath = Join-Path $certDir "dashboard.crt"
 $keyPath = Join-Path $certDir "dashboard.key"
 
-Write-Host "[INFO] Generating HTTPS certificate chain..."
+Write-Output "[INFO] Generating HTTPS certificate chain..."
 Ensure-DashboardCaCertificate -CertPath $CertPath -KeyPath $KeyPath
 
 $env:DASHBOARD_HTTPS = "1"
