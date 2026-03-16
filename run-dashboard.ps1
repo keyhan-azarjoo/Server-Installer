@@ -237,8 +237,11 @@ function Invoke-DashboardBootstrap {
 
     $env:DASHBOARD_HTTPS = "1"
     Write-Host "Repairing dashboard startup and launching the dashboard..."
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrapPath @DashboardArgs
-    return $LASTEXITCODE
+    & $bootstrapPath @DashboardArgs
+    if ($?) {
+        return 0
+    }
+    return 1
 }
 
 if (-not (Test-IsAdministrator)) {
@@ -247,7 +250,5 @@ if (-not (Test-IsAdministrator)) {
 
 $null = Ensure-Python
 $exitCode = Invoke-DashboardBootstrap
-if ($exitCode -eq 0) {
-    Show-DashboardUrls
-}
+Show-DashboardUrls
 exit $exitCode
