@@ -239,12 +239,21 @@ function Show-DashboardUrls {
         }
     }
 
-    $url = "https://127.0.0.1:$port"
+    $urls = [System.Collections.Generic.List[string]]::new()
+    $urls.Add("https://127.0.0.1:$port")
+    foreach ($ip in (Get-LocalIPv4Addresses)) {
+        $candidate = "https://$ip`:$port"
+        if (-not $urls.Contains($candidate)) {
+            $urls.Add($candidate)
+        }
+    }
     $publicIp = Get-PublicIPv4Address
 
     Write-Host ""
-    Write-Host "Dashboard URL:"
-    Write-Host "- $url"
+    Write-Host "Dashboard URLs:"
+    foreach ($url in $urls) {
+        Write-Host "- $url"
+    }
     if ($publicIp) {
         Write-Host "Public IP:"
         Write-Host "- $publicIp"

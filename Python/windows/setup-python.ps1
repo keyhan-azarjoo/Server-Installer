@@ -155,6 +155,23 @@ function Ensure-WindowsServiceDependencies {
     if ($LASTEXITCODE -ne 0) {
         throw "Failed to install pywin32."
     }
+
+    $pythonDir = Split-Path -Parent $PythonExe
+    $targetServiceExe = Join-Path $pythonDir "pythonservice.exe"
+    if (-not (Test-Path -LiteralPath $targetServiceExe)) {
+        $candidatePaths = @(
+            (Join-Path $env:APPDATA "Python\Python312\site-packages\win32\pythonservice.exe"),
+            (Join-Path $env:LOCALAPPDATA "Programs\Python\Python312\Lib\site-packages\win32\pythonservice.exe"),
+            (Join-Path $pythonDir "Lib\site-packages\win32\pythonservice.exe")
+        ) | Select-Object -Unique
+
+        $sourceServiceExe = $candidatePaths | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+        if (-not $sourceServiceExe) {
+            throw "pythonservice.exe was not found after installing pywin32."
+        }
+
+        Copy-Item -LiteralPath $sourceServiceExe -Destination $targetServiceExe -Force
+    }
 }
 
 function Ensure-JupyterKernel {

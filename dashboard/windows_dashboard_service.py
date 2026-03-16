@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -41,6 +42,7 @@ import win32serviceutil
 SERVICE_NAME = "ServerInstallerDashboard"
 SERVICE_DISPLAY_NAME = "Server Installer Dashboard"
 SERVICE_DESCRIPTION = "Runs the Server Installer dashboard continuously."
+SERVICE_MODULE = "windows_dashboard_service"
 
 
 def data_root() -> Path:
@@ -76,6 +78,81 @@ def resolve_python_exe() -> str:
             return str(candidate)
 
     return sys.executable
+
+
+def resolve_pythonservice_exe() -> str:
+    exe_dir = Path(sys.executable).resolve().parent
+    candidate = exe_dir / "pythonservice.exe"
+    if candidate.exists():
+        return str(candidate)
+    return str(exe_dir / "python.exe")
+
+
+def resolve_system_site_packages() -> Path:
+    return Path(sys.executable).resolve().parent / "Lib" / "site-packages"
+
+
+def ensure_service_module_copy() -> Path:
+    target = resolve_system_site_packages() / f"{SERVICE_MODULE}.py"
+    source = Path(__file__).resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if source != target:
+        shutil.copyfile(source, target)
+    return target
+
+
+def python_class_string() -> str:
+    return f"{SERVICE_MODULE}.ServerInstallerDashboardService"
+
+
+def install_or_update_service() -> None:
+    ensure_service_module_copy()
+    exe_name = resolve_pythonservice_exe()
+    try:
+        win32serviceutil.QueryServiceStatus(SERVICE_NAME)
+        win32serviceutil.ChangeServiceConfig(
+            python_class_string(),
+            SERVICE_NAME,
+            startType=win32service.SERVICE_AUTO_START,
+            exeName=exe_name,
+            displayName=SERVICE_DISPLAY_NAME,
+            description=SERVICE_DESCRIPTION,
+        )
+    except Exception:
+        win32serviceutil.InstallService(
+            python_class_string(),
+            SERVICE_NAME,
+            SERVICE_DISPLAY_NAME,
+            startType=win32service.SERVICE_AUTO_START,
+            exeName=exe_name,
+            description=SERVICE_DESCRIPTION,
+        )
+
+
+def start_service() -> None:
+    win32serviceutil.StartService(SERVICE_NAME)
+
+
+def stop_service() -> None:
+    try:
+        win32serviceutil.StopService(SERVICE_NAME)
+    except Exception:
+        pass
+
+
+def restart_service() -> None:
+    stop_service()
+    time.sleep(2)
+    start_service()
+
+
+def remove_service() -> None:
+    try:
+        stop_service()
+        time.sleep(1)
+    except Exception:
+        pass
+    win32serviceutil.RemoveService(SERVICE_NAME)
 
 
 class ServerInstallerDashboardService(win32serviceutil.ServiceFramework):
@@ -169,4 +246,16 @@ class ServerInstallerDashboardService(win32serviceutil.ServiceFramework):
 
 
 if __name__ == "__main__":
-    win32serviceutil.HandleCommandLine(ServerInstallerDashboardService)
+    args = [arg.lower() for arg in sys.argv[1:]]
+    if "install" in args or "update" in args:
+        install_or_update_service()
+    elif "restart" in args:
+        restart_service()
+    elif "start" in args:
+        start_service()
+    elif "stop" in args:
+        stop_service()
+    elif "remove" in args:
+        remove_service()
+    else:
+        win32serviceutil.HandleCommandLine(ServerInstallerDashboardService)
