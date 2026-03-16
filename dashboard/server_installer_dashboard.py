@@ -2869,6 +2869,10 @@ def run_python_api_docker(form=None, live_cb=None):
         usage = get_port_usage(deploy["https_port"], "tcp")
         if not usage.get("managed_owner"):
             return 1, f"Requested HTTPS port {deploy['https_port']} is already in use. Choose another port."
+    # Generate TLS certs on the host first, then copy them into the build context
+    host_certfile, host_keyfile = _ensure_python_api_https_assets(deploy["python_executable"], "0.0.0.0", deployment_name)
+    if not host_certfile or not host_keyfile:
+        return 1, "Failed to create HTTPS certificate files for the Python API Docker container."
     runtime_dir, runner_script = _write_python_api_runtime_files(
         deploy["deploy_root"],
         deploy["entry_rel"],
@@ -2878,6 +2882,8 @@ def run_python_api_docker(form=None, live_cb=None):
         certfile="/app/.serverinstaller/tls-cert.pem",
         keyfile="/app/.serverinstaller/tls-key.pem",
     )
+    shutil.copy2(host_certfile, runtime_dir / "tls-cert.pem")
+    shutil.copy2(host_keyfile, runtime_dir / "tls-key.pem")
     dockerfile = deploy["deploy_root"] / "Dockerfile"
     dockerfile.write_text(
         "\n".join([
@@ -2886,18 +2892,8 @@ def run_python_api_docker(form=None, live_cb=None):
             "COPY app/ /app/app/",
             "COPY .serverinstaller/ /app/.serverinstaller/",
             "RUN python -m venv /opt/serverinstaller-venv \\",
-            " && /opt/serverinstaller-venv/bin/python -m pip install --upgrade pip setuptools wheel uvicorn trustme \\",
-            " && if [ -f /app/app/requirements.txt ]; then /opt/serverinstaller-venv/bin/python -m pip install -r /app/app/requirements.txt; fi \\",
-            " && python - <<'PY'",
-            "from pathlib import Path",
-            "import trustme",
-            "cert_dir = Path('/app/.serverinstaller')",
-            "cert_dir.mkdir(parents=True, exist_ok=True)",
-            "ca = trustme.CA()",
-            "server_cert = ca.issue_cert('localhost', '127.0.0.1', '0.0.0.0')",
-            "server_cert.cert_chain_pems[0].write_to_path(cert_dir / 'tls-cert.pem')",
-            "server_cert.private_key_pem.write_to_path(cert_dir / 'tls-key.pem')",
-            "PY",
+            " && /opt/serverinstaller-venv/bin/python -m pip install --upgrade pip setuptools wheel uvicorn \\",
+            " && if [ -f /app/app/requirements.txt ]; then /opt/serverinstaller-venv/bin/python -m pip install -r /app/app/requirements.txt; fi",
             f"EXPOSE {deploy['https_port']}",
             "ENV PATH=/opt/serverinstaller-venv/bin:$PATH",
             f'CMD ["/opt/serverinstaller-venv/bin/python", "/app/.serverinstaller/{runner_script.name}"]',
@@ -2937,6 +2933,61 @@ def run_python_api_docker(form=None, live_cb=None):
         "port": deploy["https_port"],
     })
     return 0, f"Python API Docker deployment completed.\nContainer: {deployment_name}\nURL: {url}\nEntry file: {deploy['entry_rel']}\n"
+
+
+def run_python_api_update_source(service_name, source_path, live_cb=None):
+    deploy_key = _safe_python_api_name(service_name)
+    state = _read_json_file(PYTHON_API_STATE_FILE)
+    deployments = state.get("deployments")
+    if not isinstance(deployments, dict):
+        return 1, "No Python API deployments found."
+    payload = deployments.get(deploy_key)
+    if not payload:
+        return 1, f"Deployment '{service_name}' not found in state."
+    deploy_root = Path(str(payload.get("deploy_root") or ""))
+    entry_hint = str(payload.get("entry_file") or "")
+    kind = str(payload.get("kind") or "service").lower()
+    svc_name = str(payload.get("name") or "")
+    if not deploy_root.exists():
+        return 1, f"Deployment directory not found: {deploy_root}"
+    src = str(source_path or "").strip()
+    if not src:
+        return 1, "Source path is required."
+    if live_cb:
+        live_cb(f"[INFO] Updating files from: {src}\n")
+    try:
+        source_root, entry_file, entry_rel = _resolve_python_api_source(src, entry_hint=entry_hint, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    if live_cb:
+        live_cb(f"[INFO] Copying files to {deploy_root / 'app'}...\n")
+    try:
+        copied_entry, copied_entry_rel = _copy_python_api_source(source_root, entry_file, deploy_root)
+    except Exception as ex:
+        return 1, f"Failed to copy files: {ex}"
+    payload["entry_file"] = copied_entry_rel
+    payload["project_path"] = str(deploy_root / "app")
+    deployments[deploy_key] = payload
+    state["deployments"] = deployments
+    _write_json_file(PYTHON_API_STATE_FILE, state)
+    if live_cb:
+        live_cb(f"[INFO] Files updated. Restarting service '{svc_name}'...\n")
+    if kind == "service":
+        prefix = _sudo_prefix()
+        if os.name != "nt":
+            rc, out = run_capture(prefix + ["systemctl", "restart", svc_name], timeout=30)
+            if rc != 0 and live_cb:
+                live_cb(f"[WARN] Restart failed: {out}\n")
+        else:
+            run_capture(["sc.exe", "stop", svc_name], timeout=15)
+            run_capture(["sc.exe", "start", svc_name], timeout=30)
+    elif kind == "docker":
+        rc, out = run_capture(["docker", "restart", svc_name], timeout=30)
+        if rc != 0 and live_cb:
+            live_cb(f"[WARN] Docker restart: {out}\n")
+    if live_cb:
+        live_cb(f"[INFO] Done. Entry file: {copied_entry_rel}\n")
+    return 0, f"Files updated and service restarted.\nEntry: {copied_entry_rel}\n"
 
 
 def run_windows_python_api_iis(form=None, live_cb=None):
@@ -4165,7 +4216,27 @@ def manage_firewall_port(action, port, protocol):
         rc, out = run_capture(cmd, timeout=30)
         return rc == 0, (out or f"ufw {action} completed.")
 
-    return False, "No supported firewall manager found (ufw on Linux, Windows Firewall on Windows)."
+    if command_exists("firewall-cmd"):
+        rc_state, _ = run_capture(prefix + ["firewall-cmd", "--state"], timeout=15)
+        if rc_state == 0:
+            if action == "open":
+                run_capture(prefix + ["firewall-cmd", "--add-port", f"{port_num}/{protocol}"], timeout=20)
+                rc, out = run_capture(prefix + ["firewall-cmd", "--permanent", "--add-port", f"{port_num}/{protocol}"], timeout=20)
+            else:
+                run_capture(prefix + ["firewall-cmd", "--remove-port", f"{port_num}/{protocol}"], timeout=20)
+                rc, out = run_capture(prefix + ["firewall-cmd", "--permanent", "--remove-port", f"{port_num}/{protocol}"], timeout=20)
+            run_capture(prefix + ["firewall-cmd", "--reload"], timeout=20)
+            return rc == 0, (out or f"firewalld {action} completed.")
+
+    if command_exists("iptables"):
+        if action == "open":
+            cmd = prefix + ["iptables", "-I", "INPUT", "-p", protocol, "--dport", str(port_num), "-j", "ACCEPT"]
+        else:
+            cmd = prefix + ["iptables", "-D", "INPUT", "-p", protocol, "--dport", str(port_num), "-j", "ACCEPT"]
+        rc, out = run_capture(cmd, timeout=20)
+        return rc == 0, (out or f"iptables {action} completed.")
+
+    return False, "No supported firewall manager found (ufw, firewalld, or iptables on Linux)."
 
 
 def get_port_usage(port, protocol="tcp"):
@@ -8803,6 +8874,17 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_python_api_docker(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/python_api_update_source":
+            title = "Update API Files"
+            service_name = (form.get("service_name", [""])[0] or "").strip()
+            source_path = (form.get("source_path", [""])[0] or "").strip()
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_python_api_update_source(service_name, source_path, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_python_api_update_source(service_name, source_path)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/python_api_iis":

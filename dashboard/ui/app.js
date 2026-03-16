@@ -1,5 +1,5 @@
 const {
-  Alert, AppBar, Box, Button, Card, CardContent, Chip, CssBaseline, Drawer,
+  Alert, AppBar, Box, Button, Card, CardContent, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, Drawer,
   FormControl, Grid, IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, TextField, Toolbar, Tooltip, Typography
 } = MaterialUI;
 
@@ -75,6 +75,7 @@ function App() {
   const [websiteInfoState, setWebsiteInfoState] = React.useState(null);
   const [pythonApiEditor, setPythonApiEditor] = React.useState(null);
   const [pythonApiEditorSeed, setPythonApiEditorSeed] = React.useState(0);
+  const [updateSourceDlg, setUpdateSourceDlg] = React.useState(null);
   const [websiteEditor, setWebsiteEditor] = React.useState(null);
   const [websiteEditorSeed, setWebsiteEditorSeed] = React.useState(0);
   const [fileManagerPath, setFileManagerPath] = React.useState("");
@@ -851,6 +852,35 @@ function App() {
     setPage(targetPage);
   }, [cfg.os]);
 
+  const runPythonApiUpdateSource = React.useCallback(async (svc, sourcePath) => {
+    const title = "Update API Files";
+    append("============================================================");
+    append(`[${new Date().toLocaleTimeString()}] ${title} started for ${svc.form_name || svc.name}`);
+    setTermState(`Running: ${title}`);
+    setTermOpen(true);
+    setTermMin(false);
+    setRunError("");
+    try {
+      const fd = new FormData();
+      fd.append("service_name", svc.form_name || svc.name);
+      fd.append("source_path", sourcePath);
+      const r = await fetch("/run/python_api_update_source", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.job_id) {
+        append(j.output || "No output.");
+        append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code ?? 1})`);
+        if (Number(j.exit_code ?? 1) !== 0) setRunError(`${title} failed. Check terminal output.`);
+        setTermState("Idle");
+        Promise.all([loadPythonInfo.current(), loadPythonServices.current()]);
+        return;
+      }
+      poll(j.job_id, title, 0);
+    } catch (err) {
+      append(`Error: ${err}`);
+      setTermState("Error");
+    }
+  }, []);
+
   const startNewPythonApiDeployment = React.useCallback((targetPage) => {
     setPythonApiEditor(null);
     setPythonApiEditorSeed((prev) => prev + 1);
@@ -911,7 +941,7 @@ function App() {
                   </Box>
                   <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
                   <Box sx={{ flexGrow: 1 }} />
-                  <Button size="small" variant="contained" disabled={serviceBusy} onClick={() => openPythonApiRun(svc)} sx={{ textTransform: "none" }}>
+                  <Button size="small" variant="contained" disabled={serviceBusy} onClick={() => setUpdateSourceDlg({ svc, path: "" })} sx={{ textTransform: "none" }}>
                     Update Files
                   </Button>
                   {svc.manageable !== false && (
@@ -3138,9 +3168,45 @@ function App() {
   const mainMargin = isMobile ? 0 : (collapsed ? DRAWER_MIN : DRAWER_W);
   const termStyle = termPos.x === null ? { right: 16, bottom: 16 } : { left: termPos.x, top: termPos.y };
 
+  const updateSourceDialog = updateSourceDlg ? (
+    <Dialog open onClose={() => setUpdateSourceDlg(null)} maxWidth="sm" fullWidth>
+      <DialogTitle>Update Files — {updateSourceDlg.svc.form_name || updateSourceDlg.svc.name}</DialogTitle>
+      <DialogContent>
+        <Typography variant="body2" sx={{ mb: 1.5, color: "text.secondary" }}>
+          Enter the path to the source folder on this server. All files in that folder will replace the current deployed files and the service will be restarted.
+        </Typography>
+        <TextField
+          fullWidth
+          size="small"
+          label="Source folder path on server"
+          placeholder="/home/user/my-project"
+          value={updateSourceDlg.path}
+          onChange={(e) => setUpdateSourceDlg((prev) => ({ ...prev, path: e.target.value }))}
+          autoFocus
+        />
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setUpdateSourceDlg(null)} sx={{ textTransform: "none" }}>Cancel</Button>
+        <Button
+          variant="contained"
+          disabled={!updateSourceDlg.path.trim()}
+          onClick={() => {
+            const { svc, path } = updateSourceDlg;
+            setUpdateSourceDlg(null);
+            runPythonApiUpdateSource(svc, path.trim());
+          }}
+          sx={{ textTransform: "none" }}
+        >
+          Update
+        </Button>
+      </DialogActions>
+    </Dialog>
+  ) : null;
+
   return (
     <Box sx={{ display: "flex", minHeight: "100%" }}>
       <CssBaseline />
+      {updateSourceDialog}
       <AppBar position="fixed" sx={{ zIndex: 1300, ml: `${mainMargin}px`, width: `calc(100% - ${mainMargin}px)`, background: "linear-gradient(90deg,#081726,#1a3f66)", transition: "all .2s ease" }}>
         <Toolbar sx={{ gap: 1 }}>
           <IconButton color="inherit" onClick={() => isMobile ? setMobileOpen(true) : setCollapsed((v) => !v)}>
