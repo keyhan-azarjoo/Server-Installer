@@ -145,6 +145,18 @@ function Ensure-Pip {
     }
 }
 
+function Ensure-WindowsServiceDependencies {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PythonExe
+    )
+
+    & $PythonExe -m pip install --upgrade pywin32
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to install pywin32."
+    }
+}
+
 function Ensure-JupyterKernel {
     param(
         [Parameter(Mandatory = $true)]
@@ -199,6 +211,9 @@ if (-not $pythonInfo) {
 }
 
 Ensure-Pip -PythonExe $pythonInfo.Executable
+if ($IsWindows) {
+    Ensure-WindowsServiceDependencies -PythonExe $pythonInfo.Executable
+}
 
 if ($installJupyter) {
     Write-Host "Installing JupyterLab and Notebook..."

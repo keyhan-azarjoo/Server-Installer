@@ -6,6 +6,32 @@ import sys
 import time
 from pathlib import Path
 
+
+def _bootstrap_pywin32() -> None:
+    candidates = []
+    try:
+        import site
+
+        for base in site.getsitepackages():
+            candidates.append(Path(base))
+    except Exception:
+        pass
+    candidates.append(Path(sys.executable).resolve().parent / "Lib" / "site-packages")
+
+    extra_paths = []
+    for base in candidates:
+        for rel in ("pywin32_system32", "win32", "win32\\lib", "pythonwin"):
+            path = base / rel
+            if path.exists():
+                extra_paths.append(str(path))
+
+    for path in extra_paths:
+        if path not in sys.path:
+            sys.path.insert(0, path)
+
+
+_bootstrap_pywin32()
+
 import servicemanager
 import win32event
 import win32service
