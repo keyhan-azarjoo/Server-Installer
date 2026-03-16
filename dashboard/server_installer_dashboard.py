@@ -785,25 +785,24 @@ def _detect_python_versions():
 
 
 def _python_state_service_item(info):
-    if not info.get("installed"):
-        return []
     items = []
-    for runtime in info.get("python_versions") or []:
-        is_managed = bool(runtime.get("managed"))
-        items.append({
-            "kind": "python_installation" if is_managed else "python_version",
-            "name": f"python-{runtime.get('version') or 'unknown'}",
-            "display_name": "Managed Python" if is_managed else "Detected Python",
-            "status": "installed",
-            "sub_status": runtime.get("python_executable") or "",
-            "detail": runtime.get("python_executable") or "",
-            "autostart": False,
-            "platform": "windows" if os.name == "nt" else "linux",
-            "urls": [],
-            "ports": [],
-            "manageable": False,
-            "deletable": True,
-        })
+    if info.get("installed"):
+        for runtime in info.get("python_versions") or []:
+            is_managed = bool(runtime.get("managed"))
+            items.append({
+                "kind": "python_installation" if is_managed else "python_version",
+                "name": f"python-{runtime.get('version') or 'unknown'}",
+                "display_name": "Managed Python" if is_managed else "Detected Python",
+                "status": "installed",
+                "sub_status": runtime.get("python_executable") or "",
+                "detail": runtime.get("python_executable") or "",
+                "autostart": False,
+                "platform": "windows" if os.name == "nt" else "linux",
+                "urls": [],
+                "ports": [],
+                "manageable": False,
+                "deletable": True,
+            })
     if info.get("jupyter_running"):
         port_text = str(info.get("jupyter_port") or "").strip()
         ports = [{"port": int(port_text), "protocol": "tcp"}] if port_text.isdigit() else []
@@ -2884,6 +2883,22 @@ def run_python_api_docker(form=None, live_cb=None):
     )
     shutil.copy2(host_certfile, runtime_dir / "tls-cert.pem")
     shutil.copy2(host_keyfile, runtime_dir / "tls-key.pem")
+    # Rewrite run_api.py to use container-internal paths (not host paths)
+    runner_script.write_text(
+        "\n".join([
+            "import os",
+            "import runpy",
+            f"os.environ['SERVER_INSTALLER_APP_FILE'] = '/app/app/{deploy[\"entry_rel\"]}'",
+            f"os.environ['SERVER_INSTALLER_APP_OBJECT'] = r'''{str(deploy['app_object'] or '').strip()}'''",
+            "os.environ['SERVER_INSTALLER_HOST'] = '0.0.0.0'",
+            f"os.environ['SERVER_INSTALLER_PORT'] = r'''{str(deploy['https_port']).strip()}'''",
+            "os.environ['SERVER_INSTALLER_CERTFILE'] = '/app/.serverinstaller/tls-cert.pem'",
+            "os.environ['SERVER_INSTALLER_KEYFILE'] = '/app/.serverinstaller/tls-key.pem'",
+            "runpy.run_path('/app/.serverinstaller/serverinstaller_python_api_host.py', run_name='__main__')",
+            "",
+        ]),
+        encoding="utf-8",
+    )
     dockerfile = deploy["deploy_root"] / "Dockerfile"
     dockerfile.write_text(
         "\n".join([
