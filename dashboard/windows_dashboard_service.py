@@ -131,12 +131,39 @@ def ensure_service_module_copy() -> Path:
     return target
 
 
+def ensure_system_pywin32_pth() -> None:
+    """Create pywin32.pth in the system site-packages so pythonservice.exe (running
+    as SYSTEM with no user profile) can locate win32/ and servicemanager.pyd.
+    pywin32 is often installed per-user, leaving system site-packages without
+    the .pth file that adds win32/ to sys.path. Without it, pythonservice.exe
+    fails with ModuleNotFoundError: No module named 'servicemanager'."""
+    site_packages = resolve_system_site_packages()
+    win32_dir = site_packages / "win32"
+    if not win32_dir.exists():
+        return
+    pth_path = site_packages / "pywin32.pth"
+    if pth_path.exists():
+        return
+    pth_content = (
+        "# .pth file for the PyWin32 extensions\n"
+        "win32\n"
+        "win32\\lib\n"
+        "Pythonwin\n"
+        "import pywin32_bootstrap\n"
+    )
+    try:
+        pth_path.write_text(pth_content, encoding="utf-8")
+    except Exception:
+        pass
+
+
 def python_class_string() -> str:
     return f"{SERVICE_MODULE}.ServerInstallerDashboardService"
 
 
 def install_or_update_service() -> None:
     ensure_service_module_copy()
+    ensure_system_pywin32_pth()
     exe_name = resolve_pythonservice_exe()
     try:
         win32serviceutil.QueryServiceStatus(SERVICE_NAME)
@@ -253,15 +280,19 @@ class ServerInstallerDashboardService(win32serviceutil.ServiceFramework):
             "--key",
             str(key_path),
         ]
-        log_fp = open(log_path, "a", encoding="utf-8", buffering=1)
+        try:
+            log_fp = open(log_path, "a", encoding="utf-8", buffering=1)
+        except Exception:
+            log_fp = None
         creationflags = 0x08000000
-        self.process = subprocess.Popen(
-            args,
-            cwd=str(root),
-            stdout=log_fp,
-            stderr=log_fp,
-            creationflags=creationflags,
-        )
+        popen_kwargs = {"cwd": str(root), "creationflags": creationflags}
+        if log_fp is not None:
+            popen_kwargs["stdout"] = log_fp
+            popen_kwargs["stderr"] = log_fp
+        else:
+            popen_kwargs["stdout"] = subprocess.DEVNULL
+            popen_kwargs["stderr"] = subprocess.DEVNULL
+        self.process = subprocess.Popen(args, **popen_kwargs)
         self.log(f"Started dashboard pid={self.process.pid}")
 
     def main(self):
