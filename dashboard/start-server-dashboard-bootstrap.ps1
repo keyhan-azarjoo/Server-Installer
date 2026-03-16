@@ -483,4 +483,5 @@ $env:DASHBOARD_KEY = $keyPath
 if ($localSourceRoot) {
   $env:SERVER_INSTALLER_REPO_BASE = "http://127.0.0.1:9"
 }
-& $pythonConsoleless $dashboard @args
+# Use a console-capable interpreter for install/update so failures (e.g., missing pywin32) are visible.
+& $python $dashboard @args

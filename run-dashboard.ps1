@@ -166,24 +166,64 @@ function Get-OrDownloadFile {
 }
 
 function Ensure-Python {
-    $pythonInfo = Get-PythonInfo
-    if ($pythonInfo) {
-        return $pythonInfo
+    function Test-WindowsServicePythonReady {
+        param(
+            [Parameter(Mandatory = $true)]
+            [string]$PythonExe
+        )
+
+        if (-not $IsWindows) {
+            return $true
+        }
+
+        if (-not (Test-Path -LiteralPath $PythonExe)) {
+            return $false
+        }
+
+        $pythonDir = Split-Path -Parent $PythonExe
+        $pythonServiceExe = Join-Path $pythonDir "pythonservice.exe"
+        if (-not (Test-Path -LiteralPath $pythonServiceExe)) {
+            return $false
+        }
+
+        try {
+            & $PythonExe -c "import win32serviceutil, win32service; print('pywin32-ok')" 2>$null | Out-Null
+            return ($LASTEXITCODE -eq 0)
+        } catch {
+            return $false
+        }
     }
 
-    Write-Host "Python $RequestedPythonVersion not found. Installing the minimum required runtime..."
     $pythonSetupScript = Get-OrDownloadFile -RelativePath $PythonSetupRelativePath
     $env:PYTHON_VERSION = $RequestedPythonVersion
     $env:PYTHON_INSTALL_JUPYTER = "0"
 
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pythonSetupScript
-    if ($LASTEXITCODE -ne 0) {
-        throw "Python setup failed."
-    }
-
     $pythonInfo = Get-PythonInfo
     if (-not $pythonInfo) {
-        throw "Python $RequestedPythonVersion was not found after install."
+        Write-Host "Python $RequestedPythonVersion not found. Installing the minimum required runtime..."
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pythonSetupScript
+        if ($LASTEXITCODE -ne 0) {
+            throw "Python setup failed."
+        }
+        $pythonInfo = Get-PythonInfo
+        if (-not $pythonInfo) {
+            throw "Python $RequestedPythonVersion was not found after install."
+        }
+        return $pythonInfo
+    }
+
+    # Python exists, but may be missing the Windows service deps (pywin32/pythonservice.exe). Repair in-place.
+    if (-not (Test-WindowsServicePythonReady -PythonExe $pythonInfo.Executable)) {
+        Write-Host "Python $RequestedPythonVersion found, but Windows service dependencies are missing. Repairing..."
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $pythonSetupScript
+        if ($LASTEXITCODE -ne 0) {
+            throw "Python repair failed."
+        }
+
+        $pythonInfo = Get-PythonInfo
+        if (-not $pythonInfo) {
+            throw "Python $RequestedPythonVersion was not found after repair."
+        }
     }
 
     return $pythonInfo
