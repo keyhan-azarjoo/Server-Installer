@@ -4228,9 +4228,9 @@ def manage_firewall_port(action, port, protocol):
     prefix = _sudo_prefix()
     if command_exists("ufw"):
         if action == "open":
-            cmd = prefix + ["ufw", "--force", "allow", f"{port_num}/{protocol}"]
+            cmd = prefix + ["ufw", "allow", f"{port_num}/{protocol}"]
         else:
-            cmd = prefix + ["ufw", "--force", "delete", "allow", f"{port_num}/{protocol}"]
+            cmd = prefix + ["ufw", "delete", "allow", f"{port_num}/{protocol}"]
         rc, out = run_capture(cmd, timeout=30)
         return rc == 0, (out or f"ufw {action} completed.")
 

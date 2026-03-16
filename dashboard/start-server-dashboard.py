@@ -806,7 +806,7 @@ def ensure_linux_firewall_port(port: int):
         rc_status, out_status = run_capture(["ufw", "status"], timeout=20)
         status_text = (out_status or "").lower()
         if rc_status == 0 and "inactive" not in status_text:
-            rc_allow, out_allow = run_capture(["ufw", "--force", "allow", f"{port}/tcp"], timeout=20)
+            rc_allow, out_allow = run_capture(["ufw", "allow", f"{port}/tcp"], timeout=20)
             if rc_allow == 0:
                 return True, f"ufw opened TCP {port}"
             return False, (out_allow or f"ufw failed to open TCP {port}").strip()
