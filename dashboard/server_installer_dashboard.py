@@ -8099,6 +8099,9 @@ if (savedAuth) {{
 
 
 class Handler(BaseHTTPRequestHandler):
+    def log_message(self, format, *args):
+        return
+
     def is_local_client(self):
         try:
             return ipaddress.ip_address(self.client_address[0]).is_loopback
@@ -9028,11 +9031,6 @@ def main():
     except Exception:
         pass
 
-    print("Dashboard URLs:")
-    for url in urls:
-        print(f"- {url}")
-    print("Localhost access: no login required.")
-    print("Remote access: requires OS username/password of this computer.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
