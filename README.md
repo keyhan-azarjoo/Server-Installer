@@ -24,7 +24,6 @@ $ProgressPreference = 'SilentlyContinue'; $u = 'https://raw.githubusercontent.co
 
 Dashboard URLs:
 - `https://127.0.0.1:8090`
-- `https://<server-ip>:8090`
 
 Notes for Windows dashboard startup:
 
@@ -32,6 +31,7 @@ Notes for Windows dashboard startup:
 - The dashboard launcher installs or updates the background `ServerInstallerDashboard` startup task, then exits.
 - The dashboard startup task is installed as `ServerInstallerDashboard` and is intended to start automatically after reboot.
 - `run-dashboard.ps1` works both from this repo and from GitHub raw.
+- The stable local dashboard URL is `https://127.0.0.1:8090`.
 
 Repository folder:
 
