@@ -7567,28 +7567,27 @@ def run_dashboard_update(live_cb=None):
 
     def _restart():
         time.sleep(2)
-        # Read service name from service-state.json written by start-server-dashboard.py
-        state_file = ROOT / "dashboard" / "service-state.json"
-        service_name = ""
-        try:
-            sdata = json.loads(state_file.read_text(encoding="utf-8"))
-            service_name = str(sdata.get("service") or "").strip()
-        except Exception:
-            pass
-        try:
-            if os.name == "nt":
-                if not service_name:
-                    service_name = "ServerInstallerDashboard"
+        if os.name == "nt":
+            # Windows: restart the service via sc.exe
+            state_file = ROOT / "dashboard" / "service-state.json"
+            service_name = "ServerInstallerDashboard"
+            try:
+                sdata = json.loads(state_file.read_text(encoding="utf-8"))
+                service_name = str(sdata.get("service") or service_name).strip()
+            except Exception:
+                pass
+            try:
                 run_capture(["sc.exe", "stop", service_name], timeout=20)
                 time.sleep(3)
                 run_capture(["sc.exe", "start", service_name], timeout=30)
-            else:
-                if not service_name:
-                    service_name = "server-installer-dashboard.service"
-                prefix = _sudo_prefix()
-                run_capture(prefix + ["systemctl", "restart", service_name], timeout=40)
-        except Exception:
-            pass
+            except Exception:
+                pass
+        else:
+            # Linux: exit this process cleanly so the parent (start-server-dashboard.py)
+            # also exits, and systemd's Restart=always restarts the whole service with
+            # the new downloaded files. Calling systemctl restart from inside the service
+            # causes a race where the orphaned process still holds the port.
+            os._exit(0)
 
     threading.Thread(target=_restart, daemon=True).start()
     return 0, ""

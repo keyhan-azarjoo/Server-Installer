@@ -324,14 +324,14 @@ function App() {
         append(`[${new Date().toLocaleTimeString()}] ${title} finished (exit ${j.exit_code})`);
         if (title === "Dashboard Update") {
           if (Number(j.exit_code) === 0) {
-            append("[INFO] Dashboard is restarting. Page will reload automatically...");
-            setInfoMessage("Dashboard updated. Reloading in a few seconds...");
+            append("[INFO] Dashboard is restarting. Page will reload automatically in 15 seconds...");
+            setInfoMessage("Dashboard updated. Reloading in 15 seconds...");
           } else {
             setRunError(`${title} failed (exit ${j.exit_code}). Check Web Terminal output for details.`);
             setInfoMessage("Dashboard update failed. Check the terminal for details.");
           }
           setTermState("Idle");
-          setTimeout(() => window.location.reload(), 5000);
+          setTimeout(() => window.location.reload(), 15000);
           return;
         }
         if (Number(j.exit_code) !== 0) {
@@ -346,9 +346,9 @@ function App() {
     } catch (err) {
       if (title === "Dashboard Update") {
         append(`Update triggered. Dashboard is restarting... (${err})`);
-        setInfoMessage("Dashboard update started. If the page disconnects, refresh in a few seconds.");
+        setInfoMessage("Dashboard update started. Reloading in 15 seconds...");
         setTermState("Idle");
-        setTimeout(() => window.location.reload(), 5000);
+        setTimeout(() => window.location.reload(), 15000);
         return;
       }
       append(`Polling failed: ${err}`);
