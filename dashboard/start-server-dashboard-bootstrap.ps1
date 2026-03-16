@@ -24,7 +24,7 @@ if ($IsWindows -and -not (Test-IsAdministrator)) {
     }
   }
   $argLine = $argParts -join " "
-  $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argLine -Verb RunAs -Wait -PassThru
+  $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argLine -Verb RunAs -WindowStyle Hidden -Wait -PassThru
   exit $proc.ExitCode
 }
 

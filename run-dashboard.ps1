@@ -12,6 +12,8 @@ $RepoBase = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/m
 $RequestedPythonVersion = "3.12"
 $PythonSetupRelativePath = "Python/windows/setup-python.ps1"
 $DashboardBootstrapRelativePath = "dashboard/start-server-dashboard-bootstrap.ps1"
+$ProgramDataRoot = Join-Path $env:ProgramData "Server-Installer"
+$DashboardStatePath = Join-Path $ProgramDataRoot "dashboard\service-state.json"
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -20,13 +22,19 @@ function Test-IsAdministrator {
 }
 
 function Restart-Elevated {
-    $argList = @(
+    $argParts = @(
         "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
-        "-File", ('"' + $PSCommandPath + '"')
-    ) + $DashboardArgs
-
-    $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argList -Verb RunAs -Wait -PassThru
+        "-ExecutionPolicy Bypass",
+        ('-File "' + $PSCommandPath + '"')
+    )
+    foreach ($arg in @($DashboardArgs)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$arg)) {
+            $escapedArg = ([string]$arg).Replace('"', '\"')
+            $argParts += ('"' + $escapedArg + '"')
+        }
+    }
+    $argLine = $argParts -join " "
+    $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argLine -Verb RunAs -WindowStyle Hidden -Wait -PassThru
     exit $proc.ExitCode
 }
 
@@ -163,6 +171,61 @@ function Ensure-Python {
     return $pythonInfo
 }
 
+function Get-LocalIPv4Addresses {
+    $ips = @()
+    try {
+        $ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.IPAddress -and
+                $_.IPAddress -ne "127.0.0.1" -and
+                $_.IPAddress -notlike "169.254.*" -and
+                $_.PrefixOrigin -ne "WellKnown"
+            } |
+            Select-Object -ExpandProperty IPAddress -Unique
+    } catch {
+        $ips = @()
+    }
+    return @($ips)
+}
+
+function Show-DashboardUrls {
+    $host = "0.0.0.0"
+    $port = 8090
+
+    if (Test-Path -LiteralPath $DashboardStatePath) {
+        try {
+            $state = Get-Content -LiteralPath $DashboardStatePath -Raw | ConvertFrom-Json
+            if ($state.host) {
+                $host = [string]$state.host
+            }
+            if ($state.port) {
+                $port = [int]$state.port
+            }
+        } catch {
+        }
+    }
+
+    $urls = [System.Collections.Generic.List[string]]::new()
+    $urls.Add("https://127.0.0.1:$port")
+
+    if ($host -and $host -notin @("0.0.0.0", "127.0.0.1", "localhost")) {
+        $urls.Add("https://$host`:$port")
+    } else {
+        foreach ($ip in (Get-LocalIPv4Addresses)) {
+            $url = "https://$ip`:$port"
+            if (-not $urls.Contains($url)) {
+                $urls.Add($url)
+            }
+        }
+    }
+
+    Write-Host ""
+    Write-Host "Dashboard URLs:"
+    foreach ($url in $urls) {
+        Write-Host "- $url"
+    }
+}
+
 function Invoke-DashboardBootstrap {
     $bootstrapPath = Get-OrDownloadFile -RelativePath $DashboardBootstrapRelativePath
 
@@ -174,8 +237,24 @@ function Invoke-DashboardBootstrap {
 
     $env:DASHBOARD_HTTPS = "1"
     Write-Host "Repairing dashboard startup and launching the dashboard..."
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrapPath @DashboardArgs *> $null
-    return $LASTEXITCODE
+    $argParts = @(
+        "-NoProfile",
+        "-ExecutionPolicy Bypass",
+        "-WindowStyle Hidden",
+        ('-File "' + $bootstrapPath + '"')
+    )
+    foreach ($arg in @($DashboardArgs)) {
+        if (-not [string]::IsNullOrWhiteSpace([string]$arg)) {
+            $escapedArg = ([string]$arg).Replace('"', '\"')
+            $argParts += ('"' + $escapedArg + '"')
+        }
+    }
+    $argLine = $argParts -join " "
+    $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argLine -WindowStyle Hidden -Wait -PassThru
+    if (-not $proc) {
+        throw "Dashboard bootstrap did not start."
+    }
+    return $proc.ExitCode
 }
 
 if (-not (Test-IsAdministrator)) {
@@ -183,4 +262,8 @@ if (-not (Test-IsAdministrator)) {
 }
 
 $null = Ensure-Python
-exit (Invoke-DashboardBootstrap)
+$exitCode = Invoke-DashboardBootstrap
+if ($exitCode -eq 0) {
+    Show-DashboardUrls
+}
+exit $exitCode
