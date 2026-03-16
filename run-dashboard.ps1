@@ -237,7 +237,7 @@ function Invoke-DashboardBootstrap {
 
     $env:DASHBOARD_HTTPS = "1"
     Write-Host "Repairing dashboard startup and launching the dashboard..."
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrapPath @DashboardArgs *> $null
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $bootstrapPath @DashboardArgs
     return $LASTEXITCODE
 }
 
