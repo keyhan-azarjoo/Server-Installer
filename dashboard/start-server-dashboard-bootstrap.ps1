@@ -34,6 +34,35 @@ function Get-CommandPath([string]$name) {
   return $null
 }
 
+function Stop-ExistingDashboardProcesses {
+  if (-not $IsWindows) {
+    return
+  }
+
+  try {
+    schtasks /End /TN "ServerInstallerDashboard" *> $null
+  } catch {
+  }
+
+  try {
+    $procs = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+      $_.CommandLine -and (
+        $_.CommandLine -match 'server_installer_dashboard\.py' -or
+        $_.CommandLine -match 'start-server-dashboard\.py.+--run-server'
+      )
+    }
+    foreach ($proc in $procs) {
+      try {
+        Stop-Process -Id $proc.ProcessId -Force -ErrorAction Stop
+      } catch {
+      }
+    }
+  } catch {
+  }
+
+  Start-Sleep -Seconds 2
+}
+
 function Get-RequiredServerInstallerFiles {
   $files = @(
     "dashboard/start-server-dashboard.py",
@@ -401,6 +430,7 @@ $localSourceRoot = $env:SERVER_INSTALLER_LOCAL_ROOT
 $dashboard = Join-Path $root "dashboard\start-server-dashboard.py"
 
 Write-Host "[INFO] Downloading dashboard launcher..."
+Stop-ExistingDashboardProcesses
 Sync-ServerInstallerFiles -SourceRoot $localSourceRoot -DestinationRoot $root -RepoBase $repo
 Repair-DashboardLauncher -Path $dashboard
 

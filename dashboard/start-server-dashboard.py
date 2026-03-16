@@ -632,7 +632,6 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
         stop_existing_dashboard_on_port(selected_port)
 
     python_exe = resolve_windows_python()
-    background_python_exe = resolve_windows_pythonw()
     task_name = "ServerInstallerDashboard"
     program_data = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer"
     log_dir = program_data / "logs"
@@ -656,9 +655,11 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
             [
                 "$ErrorActionPreference = 'Stop'",
                 f"$root = {powershell_single_quote(str(root))}",
-                f"$pythonExe = {powershell_single_quote(background_python_exe)}",
+                f"$pythonExe = {powershell_single_quote(python_exe)}",
+                f"$logPath = {powershell_single_quote(str(log_path))}",
                 f"$dashboardArgs = {ps_task_args}",
-                "$proc = Start-Process -FilePath $pythonExe -ArgumentList $dashboardArgs -WorkingDirectory $root -WindowStyle Hidden -PassThru",
+                "New-Item -ItemType Directory -Force -Path (Split-Path -Path $logPath -Parent) | Out-Null",
+                "$proc = Start-Process -FilePath $pythonExe -ArgumentList $dashboardArgs -WorkingDirectory $root -WindowStyle Hidden -RedirectStandardOutput $logPath -RedirectStandardError $logPath -PassThru",
                 "if (-not $proc) { throw 'Dashboard process did not start.' }",
             ]
         ) + "\n",
@@ -807,14 +808,6 @@ def resolve_windows_python() -> str:
     if embedded.exists():
         return str(embedded)
     return sys.executable
-
-
-def resolve_windows_pythonw() -> str:
-    python_exe = Path(resolve_windows_python())
-    pythonw_exe = python_exe.with_name("pythonw.exe")
-    if pythonw_exe.exists():
-        return str(pythonw_exe)
-    return str(python_exe)
 
 
 def get_local_ipv4_addresses():

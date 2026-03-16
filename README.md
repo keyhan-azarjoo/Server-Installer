@@ -16,10 +16,16 @@ These installers deploy only from prebuilt published output.
 
 ## Windows
 
-Run higher-level dashboard mode (cross-platform, single URL):
+Run higher-level dashboard mode from GitHub raw:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='SilentlyContinue'; $u='https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard-bootstrap.ps1'; $f=Join-Path $env:TEMP 'start-server-dashboard-bootstrap.ps1'; Invoke-WebRequest -Uri $u -OutFile $f; Start-Process powershell -Verb RunAs -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File',(\"`\"$f`\"\")"
+```
+
+Repair or reinstall the Windows background dashboard service from this local repo copy:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "C:\Users\KeyhanAzarjoo\Downloads\IISForDotNetInstaller\IIS-Installer\start-dashboard.ps1"
 ```
 
 Run in the current PowerShell window without opening a new PowerShell window:
@@ -42,6 +48,7 @@ Notes for Windows dashboard startup:
 
 - Start the dashboard from an elevated PowerShell session, or use the `Start-Process ... -Verb RunAs` command above.
 - The command above downloads the latest dashboard bootstrap script from GitHub raw and re-launches it elevated.
+- If the installed dashboard service needs repair, run the local `start-dashboard.ps1` command above so the fixed repo files are copied into `C:\ProgramData\Server-Installer`.
 - The `start-server-dashboard.py` commands above run in the current PowerShell window and install or update the background `ServerInstallerDashboard` startup task, then exit.
 - The dashboard startup task is installed as `ServerInstallerDashboard` and is intended to start automatically after reboot.
 - If you use the raw downloaded bootstrap script directly, it may fail unless it is already running elevated.
