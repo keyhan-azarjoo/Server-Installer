@@ -29,6 +29,13 @@ def _bootstrap_pywin32() -> None:
     for path in extra_paths:
         if path not in sys.path:
             sys.path.insert(0, path)
+        # Register as a DLL directory so Windows can find pywintypes*.dll
+        # even when running as a service with a restricted system PATH.
+        if hasattr(os, "add_dll_directory"):
+            try:
+                os.add_dll_directory(path)
+            except Exception:
+                pass
 
 
 _bootstrap_pywin32()
