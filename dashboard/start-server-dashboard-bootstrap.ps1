@@ -455,6 +455,21 @@ if (-not $python) {
   $python = Join-Path $pyDir "python.exe"
 }
 
+$pythonConsoleless = $null
+if ($python) {
+  try {
+    $candidate = Join-Path (Split-Path -Parent $python) "pythonw.exe"
+    if (Test-Path -LiteralPath $candidate) {
+      $pythonConsoleless = $candidate
+    }
+  } catch {
+    $pythonConsoleless = $null
+  }
+}
+if (-not $pythonConsoleless) {
+  $pythonConsoleless = $python
+}
+
 Write-Host "[INFO] Starting dashboard..."
 $certDir = Join-Path $root "certs"
 New-Item -ItemType Directory -Force -Path $certDir | Out-Null
@@ -470,4 +485,4 @@ $env:DASHBOARD_KEY = $keyPath
 if ($localSourceRoot) {
   $env:SERVER_INSTALLER_REPO_BASE = "http://127.0.0.1:9"
 }
-& $python $dashboard @args
+& $pythonConsoleless $dashboard @args
