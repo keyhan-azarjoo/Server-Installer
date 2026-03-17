@@ -97,6 +97,7 @@ function Get-RequiredServerInstallerFiles {
     "dashboard/server_installer_dashboard.py",
     "dashboard/windows_dashboard_service.py",
     "dashboard/file_manager.py",
+    "dashboard/ssl_manager.py",
     "dashboard/ui_assets.py",
     "dashboard/ui/core.js",
     "dashboard/ui/utils.js",

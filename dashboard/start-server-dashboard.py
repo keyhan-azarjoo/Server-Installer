@@ -25,6 +25,7 @@ SYNC_DASHBOARD_FILES = [
     "dashboard/server_installer_dashboard.py",
     "dashboard/windows_dashboard_service.py",
     "dashboard/file_manager.py",
+    "dashboard/ssl_manager.py",
     "dashboard/ui_assets.py",
     "dashboard/ui/core.js",
     "dashboard/ui/utils.js",
@@ -50,6 +51,7 @@ SYNC_DASHBOARD_FILES = [
     "dashboard/ui/pages/python/python-docker.js",
     "dashboard/ui/pages/python/python-iis.js",
     "dashboard/ui/pages/website/website.js",
+    "dashboard/ui/pages/ssl/ssl.js",
     "dashboard/ui/pages/files/files.js",
     "dashboard/ui/app.js",
 ]
