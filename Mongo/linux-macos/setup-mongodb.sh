@@ -113,21 +113,52 @@ dump_mongo_debug() {
 }
 
 ensure_docker_linux() {
+  info "[1/3] Checking Docker CLI..."
+  if has_cmd docker; then
+    info "      Docker CLI found: $(command -v docker)"
+  else
+    warn "      Docker CLI: NOT found."
+  fi
+
+  info "[2/3] Checking if Docker Engine is running..."
   if has_cmd docker && docker info >/dev/null 2>&1; then
-    info "Docker is already available."
+    info "      Docker Engine is running."
     return
   fi
-  if ! has_cmd apt-get; then
-    err "Docker is required. Automatic install is only implemented for apt-based Linux hosts."
-    exit 1
+
+  info "[3/3] Installing / starting Docker..."
+  if ! has_cmd docker; then
+    info "      Docker not installed. Installing now..."
+    export DEBIAN_FRONTEND=noninteractive
+    if has_cmd apt-get; then
+      apt-get update -y 2>&1 | tail -3
+      apt-get install -y --no-install-recommends docker.io ca-certificates curl
+    elif has_cmd yum; then
+      yum install -y docker
+    elif has_cmd dnf; then
+      dnf install -y docker
+    else
+      info "      apt/yum/dnf not found. Trying get.docker.com install script..."
+      curl -fsSL https://get.docker.com | sh
+    fi
+    info "      Docker installed."
+  else
+    info "      Docker CLI found but engine not running. Starting Docker service..."
   fi
-  info "Installing Docker on Linux..."
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -y
-  apt-get install -y --no-install-recommends docker.io ca-certificates curl
-  systemctl enable --now docker || true
+
+  systemctl enable --now docker 2>/dev/null || service docker start 2>/dev/null || true
+  # Wait up to 30s for daemon
+  local elapsed=0
+  while [ $elapsed -lt 30 ]; do
+    sleep 2; elapsed=$((elapsed + 2))
+    if docker info >/dev/null 2>&1; then
+      info "      Docker Engine is ready."
+      return
+    fi
+  done
+
   if ! has_cmd docker || ! docker info >/dev/null 2>&1; then
-    err "Docker install completed but docker is not ready."
+    err "Docker is not ready after installation/start attempt."
     exit 1
   fi
 }
@@ -138,14 +169,22 @@ ensure_docker() {
     ensure_docker_linux
     return
   fi
-  if ! has_cmd docker; then
-    err "Docker Desktop is required on macOS. Install it, start it, then rerun."
+  # macOS
+  info "[1/3] Checking Docker CLI..."
+  if has_cmd docker; then
+    info "      Docker CLI found: $(command -v docker)"
+  else
+    err "      Docker Desktop is NOT installed on macOS."
+    err "      Install it from https://www.docker.com/products/docker-desktop/ and start it, then retry."
     exit 1
   fi
+  info "[2/3] Checking if Docker Engine is running..."
   if ! docker info >/dev/null 2>&1; then
-    err "Docker Desktop is installed but the engine is not running."
+    err "      Docker Desktop is installed but the engine is not running."
+    err "      Open Docker Desktop and wait for 'Engine running', then retry."
     exit 1
   fi
+  info "[3/3] Docker Engine is running."
 }
 
 ensure_hosts_entry() {

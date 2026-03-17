@@ -7183,6 +7183,253 @@ def run_unix_mongo_installer(form=None, live_cb=None):
     return run_process(cmd, env=env, live_cb=live_cb)
 
 
+def _find_docker_desktop_exe_windows():
+    """Search common install paths for Docker Desktop.exe on Windows."""
+    candidates = []
+    for base in [
+        os.environ.get("ProgramFiles", "C:\\Program Files"),
+        os.environ.get("LOCALAPPDATA", ""),
+        os.environ.get("ProgramW6432", ""),
+    ]:
+        if not base:
+            continue
+        candidates += [
+            os.path.join(base, "Docker", "Docker", "Docker Desktop.exe"),
+            os.path.join(base, "Programs", "Docker", "Docker", "Docker Desktop.exe"),
+        ]
+    for path in candidates:
+        if os.path.isfile(path):
+            return path
+    return ""
+
+
+def _find_docker_bin_windows():
+    """Return the first Docker CLI bin directory found on Windows."""
+    for base in [
+        os.environ.get("ProgramFiles", "C:\\Program Files"),
+        os.environ.get("LOCALAPPDATA", ""),
+        os.environ.get("ProgramW6432", ""),
+    ]:
+        if not base:
+            continue
+        for rel in ["Docker\\Docker\\resources\\bin", "Programs\\Docker\\Docker\\resources\\bin"]:
+            d = os.path.join(base, rel)
+            if os.path.isfile(os.path.join(d, "docker.exe")):
+                return d
+    return ""
+
+
+def _docker_info_check(prefix=None, context=None):
+    """
+    Run `[prefix...] docker [--context ctx] info` and return True if exit code 0.
+    prefix: e.g. ["sudo"] or [] or None
+    context: e.g. "desktop-linux" or None
+    """
+    cmd = list(prefix or []) + ["docker"]
+    if context:
+        cmd += ["--context", context]
+    cmd += ["info"]
+    try:
+        r = subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=15)
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _ensure_docker_windows_ready(live_cb=None):
+    """
+    Ensure Docker CLI is installed and the Docker Engine is running on Windows.
+    Checks CLI, finds/installs Docker Desktop, starts it, and waits for the engine.
+    Returns (ok: bool, docker_context: str, error_msg: str).
+    """
+    def emit(msg):
+        if live_cb:
+            live_cb(msg if msg.endswith("\n") else msg + "\n")
+
+    # ── Step 1: Docker CLI ────────────────────────────────────────────────
+    emit("[1/5] Checking Docker CLI...")
+    docker_bin = _find_docker_bin_windows()
+    if docker_bin and docker_bin not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = docker_bin + os.pathsep + os.environ.get("PATH", "")
+
+    if not shutil.which("docker") and docker_bin:
+        pass  # PATH was just updated
+    elif not shutil.which("docker"):
+        emit("      Docker CLI not found in PATH or default locations.")
+    else:
+        emit(f"      Docker CLI found: {shutil.which('docker')}")
+
+    # ── Step 2: Docker Desktop installation ──────────────────────────────
+    emit("[2/5] Checking Docker Desktop installation...")
+    desktop_exe = _find_docker_desktop_exe_windows()
+    if desktop_exe:
+        emit(f"      Docker Desktop found: {desktop_exe}")
+    else:
+        emit("      Docker Desktop is NOT installed.")
+        emit("[3/5] Downloading and installing Docker Desktop (this may take several minutes)...")
+        cache_dir = os.path.join(os.environ.get("ProgramData", "C:\\ProgramData"), "ServerInstaller", "downloads")
+        os.makedirs(cache_dir, exist_ok=True)
+        installer_path = os.path.join(cache_dir, "DockerDesktopInstaller.exe")
+        download_urls = [
+            "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe",
+            "https://desktop.docker.com/win/stable/amd64/Docker%20Desktop%20Installer.exe",
+        ]
+        downloaded = False
+        for url in download_urls:
+            emit(f"      Downloading from: {url}")
+            try:
+                dl = subprocess.run(
+                    ["powershell", "-Command",
+                     f"$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '{url}' -OutFile '{installer_path}' -UseBasicParsing"],
+                    capture_output=True, timeout=600
+                )
+                if dl.returncode == 0 and os.path.isfile(installer_path) and os.path.getsize(installer_path) > 100_000_000:
+                    downloaded = True
+                    emit("      Download complete.")
+                    break
+            except Exception as ex:
+                emit(f"      Download attempt failed: {ex}")
+        if not downloaded:
+            return False, "", ("Docker Desktop download failed. "
+                               "Please install manually: https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe")
+        emit("      Installing Docker Desktop (silent install, please wait)...")
+        try:
+            inst = subprocess.run(
+                [installer_path, "install", "--quiet", "--accept-license"],
+                capture_output=True, timeout=600
+            )
+            if inst.returncode not in (0, 3010):
+                return False, "", f"Docker Desktop installer exited with code {inst.returncode}. Please install manually."
+        except Exception as ex:
+            return False, "", f"Docker Desktop installation error: {ex}"
+        emit("      Docker Desktop installed.")
+        # Refresh CLI path
+        docker_bin = _find_docker_bin_windows()
+        if docker_bin and docker_bin not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = docker_bin + os.pathsep + os.environ.get("PATH", "")
+        desktop_exe = _find_docker_desktop_exe_windows()
+        if not desktop_exe:
+            return False, "", "Docker Desktop installed but .exe not found. A system restart may be required."
+
+    # ── Step 3 (skipped — was install): Start Docker Desktop ─────────────
+    emit("[4/5] Checking if Docker Engine is running...")
+    # Try both the default context and desktop-linux
+    active_ctx = None
+    for ctx in (None, "desktop-linux"):
+        if _docker_info_check(context=ctx):
+            active_ctx = ctx or "default"
+            emit(f"      Docker Engine is already running (context: {active_ctx}).")
+            break
+
+    if active_ctx is None:
+        emit("      Docker Engine is not responding. Starting Docker Desktop...")
+        if desktop_exe and os.path.isfile(desktop_exe):
+            subprocess.Popen([desktop_exe], close_fds=True)
+        else:
+            emit("      Warning: Docker Desktop executable not found; attempting 'docker context use desktop-linux' anyway.")
+
+        emit("[5/5] Waiting for Docker Engine to start (up to 3 minutes)...")
+        # Switch context to desktop-linux early
+        try:
+            subprocess.run(["docker", "context", "use", "desktop-linux"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10)
+        except Exception:
+            pass
+
+        for tick in range(36):  # 36 × 5s = 180s
+            time.sleep(5)
+            elapsed = (tick + 1) * 5
+            for ctx in ("desktop-linux", None):
+                if _docker_info_check(context=ctx):
+                    active_ctx = ctx or "default"
+                    emit(f"      Docker Engine ready after {elapsed}s (context: {active_ctx}).")
+                    break
+            if active_ctx:
+                break
+            if elapsed % 20 == 0:
+                emit(f"      Still waiting for Docker Engine... ({elapsed}/180s)")
+
+        if active_ctx is None:
+            return False, "", (
+                "Docker Engine did not start within 3 minutes.\n"
+                "Please open Docker Desktop manually, wait for 'Engine running', then retry.\n"
+                "If this is a fresh install, a Windows restart may be required first."
+            )
+
+    return True, active_ctx, ""
+
+
+def _ensure_docker_linux_ready(live_cb=None):
+    """
+    Ensure Docker CLI is installed and running on Linux/macOS.
+    Returns (ok: bool, docker_prefix: list, error_msg: str).
+    """
+    def emit(msg):
+        if live_cb:
+            live_cb(msg if msg.endswith("\n") else msg + "\n")
+
+    # Determine sudo prefix
+    sudo_prefix = []
+    try:
+        if os.geteuid() != 0 and subprocess.run(
+            ["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        ).returncode == 0:
+            sudo_prefix = ["sudo"]
+    except AttributeError:
+        pass
+
+    emit("[1/3] Checking Docker CLI...")
+    has_docker = bool(shutil.which("docker"))
+    if has_docker:
+        emit(f"      Docker CLI found: {shutil.which('docker')}")
+    else:
+        emit("      Docker CLI not found.")
+
+    emit("[2/3] Checking if Docker Engine is running...")
+    if has_docker and _docker_info_check(prefix=sudo_prefix):
+        emit("      Docker Engine is running.")
+        return True, sudo_prefix, ""
+
+    # Need to install or start Docker
+    import platform
+    system = platform.system().lower()
+    if not has_docker:
+        emit("[3/3] Installing Docker...")
+        if system == "linux":
+            install_script = (
+                "apt-get update -qq 2>/dev/null | tail -1 || true; "
+                "if command -v apt-get >/dev/null 2>&1; then "
+                "  apt-get install -y --no-install-recommends docker.io ca-certificates curl 2>&1; "
+                "else "
+                "  curl -fsSL https://get.docker.com | sh 2>&1; "
+                "fi; "
+                "systemctl enable --now docker 2>&1 || service docker start 2>&1 || true"
+            )
+            code, out = run_process(sudo_prefix + ["bash", "-c", install_script], live_cb=live_cb)
+            if code != 0:
+                return False, sudo_prefix, out or "Docker installation failed."
+            emit("      Docker installed successfully.")
+        elif system == "darwin":
+            return False, sudo_prefix, (
+                "Docker is not installed on macOS. "
+                "Please install Docker Desktop from https://www.docker.com/products/docker-desktop/ and start it."
+            )
+    else:
+        # Docker installed but not running
+        emit("[3/3] Starting Docker service...")
+        run_process(sudo_prefix + ["bash", "-c",
+            "systemctl start docker 2>/dev/null || service docker start 2>/dev/null || true"],
+            live_cb=None)
+        time.sleep(3)
+
+    # Final check
+    if _docker_info_check(prefix=sudo_prefix):
+        return True, sudo_prefix, ""
+    if _docker_info_check():
+        return True, [], ""
+    return False, sudo_prefix, "Docker is installed but engine is still not responding. Try restarting it manually."
+
+
 def run_mongo_docker(form=None, live_cb=None):
     """Deploy MongoDB + mongo-express in Docker containers with optional nginx HTTPS (Linux only)."""
     form = form or {}
@@ -7212,49 +7459,36 @@ def run_mongo_docker(form=None, live_cb=None):
         https_port = "9445"
 
     docker_prefix = []
-    if not is_windows:
-        try:
-            if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
-                docker_prefix = ["sudo"]
-        except AttributeError:
-            pass
+    docker_context = None  # Windows: context name to pass as --context
 
-    # Ensure Docker is available
-    code, out = run_process(docker_prefix + ["docker", "info"], live_cb=None)
-    if code != 0:
-        if is_windows:
-            if live_cb:
-                live_cb("Docker not running. Attempting to start Docker Desktop...\n")
-            # Try starting Docker Desktop on Windows
-            _code, _out = run_process(
-                ["powershell", "-Command",
-                 "Start-Process 'C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe' -WindowStyle Hidden; "
-                 "Start-Sleep 30; docker context use desktop-linux 2>$null; "
-                 "$i=0; while ($i -lt 12) { if ((docker info 2>$null)) { break }; Start-Sleep 10; $i++ }"],
-                live_cb=live_cb
-            )
-            code2, out2 = run_process(docker_prefix + ["docker", "info"], live_cb=None)
-            if code2 != 0:
-                return 1, "Docker is not running and could not be started automatically. Please start Docker Desktop manually."
+    # ── Ensure Docker is installed and running ────────────────────────────
+    if is_windows:
+        ok, docker_context, err_msg = _ensure_docker_windows_ready(live_cb=live_cb)
+        if not ok:
+            return 1, err_msg
+        # Build Windows docker prefix with context
+        if docker_context and docker_context != "default":
+            docker_prefix = ["docker", "--context", docker_context]
         else:
-            if live_cb:
-                live_cb("Docker not running. Installing/starting Docker...\n")
-            install_code, install_out = run_process(
-                ["bash", "-c", "curl -fsSL https://get.docker.com | sh && systemctl enable --now docker"],
-                live_cb=live_cb
-            )
-            if install_code != 0:
-                return install_code, install_out or "Docker install failed."
+            docker_prefix = ["docker"]
+        # docker_prefix replaces the base "docker" command
+        docker_cmd_base = docker_prefix
+    else:
+        ok, docker_prefix_sudo, err_msg = _ensure_docker_linux_ready(live_cb=live_cb)
+        if not ok:
+            return 1, err_msg
+        docker_prefix = docker_prefix_sudo
+        docker_cmd_base = docker_prefix + ["docker"]
 
     # Remove old containers if they exist
     for cname in [f"{instance_name}-db", f"{instance_name}-web"]:
-        run_process(docker_prefix + ["docker", "rm", "-f", cname], live_cb=None)
+        run_process(docker_cmd_base + ["rm", "-f", cname], live_cb=None)
 
     # Start MongoDB container
     if live_cb:
         live_cb(f"Starting MongoDB container '{instance_name}-db' on port {mongo_port}...\n")
-    mongo_run = docker_prefix + [
-        "docker", "run", "-d",
+    mongo_run = docker_cmd_base + [
+        "run", "-d",
         "--name", f"{instance_name}-db",
         "--restart", "unless-stopped",
         "-p", f"127.0.0.1:{mongo_port}:27017",
@@ -7270,8 +7504,8 @@ def run_mongo_docker(form=None, live_cb=None):
     internal_web_port = str(int(web_port))
     if live_cb:
         live_cb(f"Starting mongo-express web UI '{instance_name}-web' on port {internal_web_port}...\n")
-    mongoexpress_run = docker_prefix + [
-        "docker", "run", "-d",
+    mongoexpress_run = docker_cmd_base + [
+        "run", "-d",
         "--name", f"{instance_name}-web",
         "--restart", "unless-stopped",
         "--link", f"{instance_name}-db:mongo",

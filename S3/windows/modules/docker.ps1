@@ -48,33 +48,55 @@ function Enable-WSLFeatures {
 }
 
 function Ensure-DockerInstalled {
-  Info "Checking Docker installation..."
+  Info "--- [1/4] Checking Docker CLI ---"
   Try-EnableDockerCliFromDefaultPath
   if (Has-Cmd "docker") {
-    Info "Docker CLI found."
-    return
+    $dockerExe = (Get-Command docker -ErrorAction SilentlyContinue).Source
+    Info "    Docker CLI found: $dockerExe"
+  } else {
+    Warn "    Docker CLI: NOT found in PATH or default locations."
+
+    Info "--- [2/4] Checking Docker Desktop installation ---"
+    $desktopExe = Find-DockerDesktopExe
+    if ($desktopExe) {
+      Info "    Docker Desktop found: $desktopExe"
+      Info "    Adding Docker CLI to PATH..."
+      $dockerBin = Join-Path (Split-Path -Parent $desktopExe) "resources\bin"
+      if (Test-Path $dockerBin) {
+        $env:Path = "$dockerBin;$env:Path"
+        Try-EnableDockerCliFromDefaultPath
+      }
+    } else {
+      Warn "    Docker Desktop: NOT installed."
+      Info "--- [3/4] Downloading and installing Docker Desktop ---"
+      Warn "    This may take several minutes. Please wait..."
+      $ok = Install-DockerDesktopDirect
+      if (-not $ok) {
+        Err "    Automatic Docker Desktop installation failed."
+        Warn "    Please install Docker Desktop manually:"
+        Write-Host "      https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
+        exit 1
+      }
+      Info "    Docker Desktop installed successfully."
+      Try-EnableDockerCliFromDefaultPath
+    }
+
+    if (-not (Has-Cmd "docker")) {
+      Warn "    Docker CLI still not in PATH after install."
+      Warn "    A Windows restart may be required to complete Docker Desktop setup."
+      Mark-RestartRequired "Docker Desktop installed - PATH update pending"
+      return
+    }
+    $dockerExe = (Get-Command docker -ErrorAction SilentlyContinue).Source
+    Info "    Docker CLI now available: $dockerExe"
   }
 
-  Warn "Docker CLI not found. Attempting automatic installation..."
-  $ok = Install-DockerDesktopDirect
-  if (-not $ok) {
-    Err "Automatic Docker Desktop installation failed."
-    Warn "Please install Docker Desktop manually, then rerun this script."
-    Write-Host "Download URL:"
-    Write-Host "  https://www.docker.com/products/docker-desktop/"
-    Write-Host "Direct Windows installer:"
-    Write-Host "  https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
-    exit 1
-  }
-  # After silent install, refresh PATH and recheck
-  Try-EnableDockerCliFromDefaultPath
-  if (-not (Has-Cmd "docker")) {
-    Warn "Docker CLI still not in PATH after install. A Windows restart may be required."
-    Mark-RestartRequired "Docker Desktop installed - PATH update pending"
-    return
+  Info "--- [4/4] Starting Docker Desktop ---"
+  $desktopExe = Find-DockerDesktopExe
+  if ($desktopExe) {
+    Info "    Docker Desktop path: $desktopExe"
   }
   Start-DockerDesktop
-  Info "Docker Desktop installed successfully."
 }
 
 function Find-DockerDesktopExe {
@@ -139,10 +161,21 @@ function Start-DockerDesktop {
 }
 
 function Test-DockerEngine {
+  param([string]$context = "")
   $prev = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
-  docker info 2>&1 | Out-Null
-  $ok = ($LASTEXITCODE -eq 0)
+  if ($context) {
+    docker --context $context info 2>&1 | Out-Null
+    $ok = ($LASTEXITCODE -eq 0)
+  } else {
+    # Try default context first, then desktop-linux as fallback (Docker Desktop on Windows)
+    docker info 2>&1 | Out-Null
+    $ok = ($LASTEXITCODE -eq 0)
+    if (-not $ok) {
+      docker --context desktop-linux info 2>&1 | Out-Null
+      $ok = ($LASTEXITCODE -eq 0)
+    }
+  }
   $ErrorActionPreference = $prev
   return $ok
 }
@@ -327,26 +360,43 @@ function Repair-DockerEngine {
 
 function Wait-DockerEngine {
   Info "Checking Docker Engine availability..."
+
+  # Quick check — also tries desktop-linux context (see Test-DockerEngine)
   if (Test-DockerEngine) {
     Info "Docker Engine is ready."
+    # Ensure we use the right context if desktop-linux is what's working
+    $prev = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+    docker info 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+      Info "Switching to desktop-linux context..."
+      docker context use desktop-linux 2>&1 | Out-Null
+    }
+    $ErrorActionPreference = $prev
     return
   }
 
-  Warn "Docker Engine not reachable. Attempting to start Docker Desktop..."
+  Warn "Docker Engine not reachable. Starting Docker Desktop..."
   Start-DockerDesktop
+  Info "Attempting to switch to desktop-linux context..."
+  $prev = $ErrorActionPreference; $ErrorActionPreference = "Continue"
+  docker context use desktop-linux 2>&1 | Out-Null
+  $ErrorActionPreference = $prev
 
-  # Phase 1: wait 90 seconds normally
-  $maxSeconds = 90
+  # Phase 1: wait up to 180s (Docker Desktop can take 2–3 min on first boot)
+  $maxSeconds = 180
   $step = 5
   $elapsed = 0
   while ($elapsed -lt $maxSeconds) {
     Start-Sleep -Seconds $step
     $elapsed += $step
     if (Test-DockerEngine) {
-      Info "Docker Engine is ready."
+      Info "Docker Engine is ready (after ${elapsed}s)."
       return
     }
-    if ($elapsed % 30 -eq 0) { Info "Waiting for Docker Engine... ($elapsed/${maxSeconds}s)" }
+    # Progress: every 10s
+    if ($elapsed % 10 -eq 0) {
+      Info "  Waiting for Docker Engine... ($elapsed/${maxSeconds}s)"
+    }
   }
 
   # Phase 2: attempt self-repair
@@ -354,12 +404,12 @@ function Wait-DockerEngine {
   $repaired = Repair-DockerEngine
   if ($repaired) { return }
 
-  Err "Docker Engine is still NOT reachable after repair attempts."
+  Err "Docker Engine is still NOT reachable after all recovery attempts."
   Warn "Manual recovery steps:"
-  Write-Host "  1. Open Docker Desktop and wait for 'Engine running'"
-  Write-Host "  2. Run: wsl --shutdown  then reopen Docker Desktop"
-  Write-Host "  3. If new: wsl --install (then reboot)"
-  Write-Host "  4. Ensure virtualization is enabled in BIOS (Intel VT-x / AMD SVM)"
+  Write-Host "  1. Open Docker Desktop and wait until the bottom bar shows 'Engine running'"
+  Write-Host "  2. If stuck: run 'wsl --shutdown' in a terminal, then reopen Docker Desktop"
+  Write-Host "  3. If freshly installed: restart Windows first, then retry"
+  Write-Host "  4. Ensure BIOS virtualization is enabled (Intel VT-x / AMD SVM)"
   exit 1
 }
 
