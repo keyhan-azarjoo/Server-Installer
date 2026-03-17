@@ -463,6 +463,17 @@ def powershell_list(items) -> str:
 def resolve_root() -> Path:
     root = cache_root()
     ensure_files(root)
+    # If a newer version of this script was just downloaded to the cache and
+    # the user ran an older copy, re-exec with the fresh cached version so that
+    # any changes (e.g. an updated SYNC_DASHBOARD_FILES list) take effect.
+    cached_self = root / "dashboard" / "start-server-dashboard.py"
+    current_self = Path(__file__).resolve()
+    if cached_self.exists() and cached_self.resolve() != current_self:
+        try:
+            if cached_self.read_bytes() != current_self.read_bytes():
+                os.execv(sys.executable, [sys.executable, str(cached_self)] + sys.argv[1:])
+        except Exception:
+            pass
     return root
 
 
