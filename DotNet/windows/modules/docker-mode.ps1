@@ -390,6 +390,35 @@ function Invoke-DockerDeployment {
 
     Ensure-DockerInstalled
     $engineOsType = Get-DockerEngineOsType
+
+    # If Docker daemon is not responding, try to start Docker Desktop and wait
+    if ([string]::IsNullOrWhiteSpace($engineOsType)) {
+        Write-Host "Docker engine not responding. Attempting to start Docker Desktop..."
+        $desktopCandidates = @(
+            (Join-Path $env:ProgramFiles "Docker\Docker\Docker Desktop.exe"),
+            (Join-Path ${env:ProgramFiles(x86)} "Docker\Docker\Docker Desktop.exe"),
+            (Join-Path $env:LocalAppData "Docker\Docker\Docker Desktop.exe")
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_) }
+
+        foreach ($desktopPath in $desktopCandidates) {
+            Write-Host "Starting Docker Desktop: $desktopPath"
+            Start-Process -FilePath $desktopPath -WindowStyle Hidden -ErrorAction SilentlyContinue | Out-Null
+            break
+        }
+
+        Write-Host "Waiting for Docker engine to become available (up to 60 seconds)..."
+        $deadline = (Get-Date).AddSeconds(60)
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 3
+            $engineOsType = Get-DockerEngineOsType
+            if (-not [string]::IsNullOrWhiteSpace($engineOsType)) {
+                Write-Host "Docker engine is now available (type: $engineOsType)."
+                break
+            }
+            Write-Host "Still waiting for Docker engine..."
+        }
+    }
+
     if ($engineOsType -eq "windows") {
         try {
             Ensure-WindowsContainerRuntimeReady
@@ -420,7 +449,7 @@ function Invoke-DockerDeployment {
         Write-Host "Docker engine is already Linux."
     }
     else {
-        throw "Unable to detect Docker engine OS type. Ensure Docker Desktop/Engine is running."
+        throw "Docker engine is not available. Please open Docker Desktop and wait for it to finish starting, then try again."
     }
 
     $deploymentRoot = Join-Path $env:ProgramData "Server-Installer\docker"
