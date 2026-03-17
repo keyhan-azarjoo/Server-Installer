@@ -9,7 +9,7 @@
       cfg, run, serviceBusy,
       docker, dockerServices, dockerServiceUrls, dockerManageEndpoints, dockerConnectionHelp,
       isScopeLoading, loadDockerInfo, loadDockerServices,
-      hasStoppedServices, batchServiceAction, copyText, setPage,
+      hasStoppedServices, batchServiceAction, copyText,
       isServiceRunningStatus, formatServiceState, onServiceAction,
       renderServiceUrls, renderServicePorts,
       scopeErrors,
