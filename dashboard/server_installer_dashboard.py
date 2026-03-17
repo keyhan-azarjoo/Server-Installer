@@ -7950,7 +7950,10 @@ echo "Nginx configured: HTTPS={https_port} -> container port {docker_host_port}"
         if nginx_code != 0 and live_cb:
             live_cb(f"[WARN] nginx setup returned non-zero; container is still running on port {docker_host_port}.\n")
         if nginx_code == 0:
-            extra += f"HTTPS URL: https://$(hostname -I | awk '{{print $1}}'):{https_port}\n"
+            resolved_ip = choose_service_host()
+            extra += f"HTTPS URL: https://{resolved_ip}:{https_port}\n"
+            if http_port:
+                extra += f"HTTP URL:  http://{resolved_ip}:{http_port}\n"
 
     return 0, (output or "") + extra
 
