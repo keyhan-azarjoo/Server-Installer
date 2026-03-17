@@ -175,7 +175,7 @@ resolve_dotnet_channel() {
   if [[ -z "${selection}" ]]; then
     echo "Choose a .NET release channel."
     echo "Examples: 8, 9, 10, 10.0, LTS, STS"
-    read -r -p "Enter .NET channel (default: 8.0): " selection
+    read -r -p "Enter .NET channel (default: 8.0): " selection || true
   fi
 
   if [[ -z "${selection}" ]]; then
@@ -773,7 +773,7 @@ main() {
 
   local source_value="${SOURCE_VALUE}"
   if [[ -z "${source_value}" ]]; then
-    read -r -p "Enter a build artifact URL, a local source folder, a local published folder, or a local .zip/.tar.gz package path to deploy (leave blank to skip): " source_value
+    read -r -p "Enter a build artifact URL, a local source folder, a local published folder, or a local .zip/.tar.gz package path to deploy (leave blank to skip): " source_value || true
   fi
   if [[ -z "${source_value}" ]]; then
     echo "Setup completed. .NET prerequisites are installed."
