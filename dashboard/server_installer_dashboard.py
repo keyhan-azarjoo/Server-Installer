@@ -7989,7 +7989,7 @@ def page_dashboard_mui(message="", system_name=""):
         "s3_windows_docker_supported": bool(s3_docker.get("supported", True)),
         "s3_windows_docker_reason": str(s3_docker.get("reason") or ""),
     }
-    return render_dashboard_page(config, DASHBOARD_UI_SCRIPTS)
+    return render_dashboard_page(config, DASHBOARD_UI_SCRIPTS, dashboard_root=ROOT / "dashboard")
 
 
 def page_dashboard(message=""):

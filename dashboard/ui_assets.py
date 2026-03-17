@@ -1,5 +1,6 @@
 import html
 import json
+import pathlib
 
 
 DASHBOARD_UI_SCRIPTS = [
@@ -304,11 +305,28 @@ if (firstInput) firstInput.focus();
 </body></html>"""
 
 
-def render_dashboard_page(config, script_paths=None):
-    script_tags = "\n".join(
-        f'  <script type="text/babel" src="{html.escape(path)}"></script>'
-        for path in (script_paths or DASHBOARD_UI_SCRIPTS)
-    )
+def render_dashboard_page(config, script_paths=None, dashboard_root=None):
+    # Page files under ui/pages/ are inlined as script content so Babel processes
+    # them synchronously — external src= scripts are fetched async by Babel standalone,
+    # causing a race where React renders before page IIFEs have registered themselves.
+    pages_prefix = "/static/ui/pages/"
+    script_tags_list = []
+    for path in (script_paths or DASHBOARD_UI_SCRIPTS):
+        if dashboard_root and path.startswith(pages_prefix):
+            rel = path[len("/static/ui/"):]  # e.g. "pages/home/home.js"
+            file_path = pathlib.Path(dashboard_root) / "ui" / rel
+            try:
+                content = file_path.read_text(encoding="utf-8")
+                script_tags_list.append(
+                    f'  <script type="text/babel">\n{content}\n  </script>'
+                )
+                continue
+            except Exception:
+                pass
+        script_tags_list.append(
+            f'  <script type="text/babel" src="{html.escape(path)}"></script>'
+        )
+    script_tags = "\n".join(script_tags_list)
     return """<!doctype html>
 <html>
 <head>
