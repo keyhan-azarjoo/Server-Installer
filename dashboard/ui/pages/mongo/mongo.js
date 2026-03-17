@@ -23,11 +23,12 @@
           <Grid item xs={12} md={8}>
             <ActionCard
               title="Install MongoDB (Windows)"
-              description="Install MongoDB as a native Windows service."
+              description="Install MongoDB as a native Windows service. Leave HTTP Port or HTTPS Port empty to skip that protocol."
               action="/run/mongo_windows"
               fields={[
                 { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
-                { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "443, 9445..." },
+                { name: "LOCALMONGO_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP" },
+                { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "Leave empty to skip HTTPS" },
                 { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017" },
                 { name: "LOCALMONGO_WEB_PORT", label: "Local Web UI Port", defaultValue: "8081", placeholder: "8081" },
                 { name: "LOCALMONGO_ADMIN_USER", label: "MongoDB Admin User", defaultValue: "admin" },
@@ -126,11 +127,12 @@
           <Grid item xs={12} md={8}>
             <ActionCard
               title={`Install MongoDB (${cfg.os === "linux" ? "Linux" : "macOS"})`}
-              description="Deploy MongoDB with a Compass-style web admin UI behind HTTPS."
+              description="Deploy MongoDB with a Compass-style web admin UI. Leave HTTP Port or HTTPS Port empty to skip that protocol."
               action="/run/mongo_unix"
               fields={[
                 { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
-                { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "443, 9445..." },
+                { name: "LOCALMONGO_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP" },
+                { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "Leave empty to skip HTTPS" },
                 { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017" },
                 { name: "LOCALMONGO_WEB_PORT", label: "Local Web UI Port", defaultValue: "8081", placeholder: "8081" },
                 { name: "LOCALMONGO_ADMIN_USER", label: "MongoDB Admin User", defaultValue: "admin" },

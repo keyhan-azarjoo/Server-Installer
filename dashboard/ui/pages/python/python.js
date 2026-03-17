@@ -32,7 +32,7 @@
         <Grid item xs={12} md={8}>
           <ActionCard
             title={`Install Python (${installOsLabel})`}
-            description="Install the managed Python runtime and run Jupyter notebooks directly on this host."
+            description="Install the managed Python runtime and run Jupyter notebooks on this host. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
             action="/run/python_install"
             fields={[
               { name: "PYTHON_VERSION", label: "Python Version", type: "select", options: ["3.13", "3.12", "3.11", "3.10"], defaultValue: pythonService.requested_version || "3.12", required: true },
@@ -46,8 +46,10 @@
                 disabled: selectableIps.length === 0,
                 placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
               },
-              { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
+              { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Internal Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
               { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: defaultNotebookDirForOs(cfg.os) },
+              { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "80", placeholder: "Leave empty to skip HTTP" },
+              { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: "443", placeholder: "Leave empty to skip HTTPS" },
             ]}
             onRun={run}
             color="#2563eb"

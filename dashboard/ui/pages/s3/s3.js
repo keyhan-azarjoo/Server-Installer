@@ -22,12 +22,13 @@
           <Grid item xs={12} md={8}>
             <ActionCard
               title="Install S3 (Windows)"
-              description="Choose IIS or Docker mode, host type (local/DNS/IP), and ports."
+              description="Choose IIS or Docker mode, host type (local/DNS/IP), and ports. Leave HTTP Port or HTTPS Port empty to skip that protocol."
               action="/run/s3_windows"
               fields={[
                 { name: "S3_MODE", label: "Mode", type: "select", options: s3WindowsModeOptions, defaultValue: "iis" },
                 { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
-                { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
+                { name: "LOCALS3_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP" },
+                { name: "LOCALS3_HTTPS_PORT", label: "HTTPS Port", defaultValue: "8443", placeholder: "Leave empty to skip HTTPS" },
                 { name: "LOCALS3_API_PORT", label: "MinIO API Port", defaultValue: "39000", required: true, placeholder: "39000" },
                 { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port", defaultValue: "39001", required: true, placeholder: "39001" },
                 { name: "LOCALS3_CONSOLE_PORT", label: "Console Proxy Port", defaultValue: "9443", required: true, placeholder: "9443" },
@@ -124,11 +125,12 @@
           <Grid item xs={12} md={8}>
             <ActionCard
               title="Install S3 (Linux/macOS)"
-              description="Run local S3 installer with selectable host and ports."
+              description="Run local S3 installer with selectable host and ports. Leave HTTP Port or HTTPS Port empty to skip that protocol."
               action="/run/s3_linux"
               fields={[
                 { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
-                { name: "LOCALS3_HTTPS_PORT", label: "S3 HTTPS Port", defaultValue: "8443", required: true, placeholder: "8443" },
+                { name: "LOCALS3_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP" },
+                { name: "LOCALS3_HTTPS_PORT", label: "HTTPS Port", defaultValue: "8443", placeholder: "Leave empty to skip HTTPS" },
                 { name: "LOCALS3_API_PORT", label: "MinIO API Port", defaultValue: "9000", required: true, placeholder: "9000" },
                 { name: "LOCALS3_UI_PORT", label: "MinIO Console UI Port", defaultValue: "9001", required: true, placeholder: "9001" },
                 { name: "LOCALS3_ROOT_USER", label: "S3 Username", defaultValue: "admin" },
