@@ -7902,13 +7902,8 @@ def run_linux_docker_deploy(form, live_cb=None):
     if https_port:
         service_name = container_name
         cert_dir = f"/etc/nginx/ssl/{service_name}"
-        http_redirect_block = (
-            f"server {{\n"
-            f"    listen {http_port};\n"
-            f"    server_name _;\n"
-            f"    return 308 https://$host:{https_port}$request_uri;\n"
-            f"}}\n\n"
-        ) if http_port else ""
+        # HTTP is served directly by Docker's port binding — no nginx HTTP block needed,
+        # which also avoids a port conflict between Docker and nginx on the same port.
         nginx_script = f"""
 set -euo pipefail
 command -v nginx >/dev/null 2>&1 || {{ echo "nginx not found; skipping nginx setup."; exit 0; }}
@@ -7922,7 +7917,7 @@ if [[ ! -f "{cert_dir}/server.crt" || ! -f "{cert_dir}/server.key" ]]; then
   chmod 600 "{cert_dir}/server.key"
 fi
 cat > "/etc/nginx/conf.d/{service_name}.conf" <<'NGINX'
-{http_redirect_block}server {{
+server {{
     listen {https_port} ssl;
     server_name _;
     ssl_certificate {cert_dir}/server.crt;

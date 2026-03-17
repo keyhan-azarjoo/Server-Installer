@@ -263,6 +263,7 @@ function App() {
     if (targetPage === "proxy") return loadProxyServices.current();
     if (targetPage === "python" || String(targetPage || "").startsWith("python-")) return loadPythonServices.current();
     if (targetPage === "website") return loadWebsiteServices.current();
+    if (targetPage === "dotnet-docker") return Promise.all([loadDotnetServices.current(), loadDockerServices.current()]);
     if (targetPage === "dotnet" || String(targetPage || "").startsWith("dotnet-")) return loadDotnetServices.current();
     return Promise.resolve();
   }, []);
