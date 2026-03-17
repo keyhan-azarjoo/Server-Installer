@@ -13,6 +13,32 @@
   const FolderIcon        = ic("Folder");
   const FolderOpenIcon    = ic("FolderOpen");
   const FileIcon          = ic("InsertDriveFile");
+  const ImageFileIcon     = ic("Image") || ic("Photo");
+  const VideoFileIcon     = ic("VideoFile") || ic("Videocam");
+  const AudioFileIcon     = ic("AudioFile") || ic("Audiotrack");
+  const PdfFileIcon       = ic("PictureAsPdf") || ic("Description");
+  const ZipFileIcon       = ic("FolderZip") || ic("Archive");
+  const CodeFileIcon      = ic("Code");
+  const DataFileIcon      = ic("TableChart") || ic("GridOn");
+  const DocFileIcon       = ic("Article") || ic("Description");
+  const ShellFileIcon     = ic("Terminal") || ic("Code");
+  const ConfigFileIcon    = ic("Settings") || ic("Tune");
+
+  function getFileTypeIcon(name) {
+    const ext = (name || "").split(".").pop().toLowerCase();
+    if (["png","jpg","jpeg","gif","svg","webp","bmp","ico","tiff"].includes(ext)) return ImageFileIcon;
+    if (["mp4","mkv","avi","mov","wmv","webm","flv"].includes(ext)) return VideoFileIcon;
+    if (["mp3","wav","ogg","flac","aac","m4a"].includes(ext)) return AudioFileIcon;
+    if (ext === "pdf") return PdfFileIcon;
+    if (["zip","tar","gz","bz2","rar","7z","xz"].includes(ext)) return ZipFileIcon;
+    if (["js","ts","jsx","tsx","py","cs","go","rs","cpp","c","java","php","rb","swift","kt","dart"].includes(ext)) return CodeFileIcon;
+    if (["csv","xlsx","xls","ods","parquet"].includes(ext)) return DataFileIcon;
+    if (["doc","docx","odt","rtf","md","txt","log"].includes(ext)) return DocFileIcon;
+    if (["sh","bash","zsh","ps1","bat","cmd"].includes(ext)) return ShellFileIcon;
+    if (["json","yaml","yml","toml","xml","env","ini","cfg","conf"].includes(ext)) return ConfigFileIcon;
+    return null;
+  }
+
   const ChevronRightIcon  = ic("ChevronRight");
   const ExpandMoreIcon    = ic("ExpandMore");
   const GridViewIcon      = ic("GridView") || ic("Apps");
@@ -64,8 +90,8 @@
       const parts = path.replace(/\\/g, "/").split("/").filter(Boolean);
       let cur = "";
       for (const p of parts) {
-        cur = cur ? `${cur}\\${p}` : (p.endsWith(":") ? `${p}\\` : p);
-        crumbs.push({ label: p.replace(/\\$/, "") || p, path: cur });
+        cur = cur ? `${cur.replace(/[\\/]+$/, "")}\\${p}` : (p.endsWith(":") ? `${p}\\` : p);
+        crumbs.push({ label: p.replace(/[\\/]+$/, "") || p, path: cur });
       }
     } else {
       const parts = path.split("/").filter(Boolean);
@@ -122,7 +148,7 @@
           <Box component={(isExpanded && FolderOpenIcon) ? FolderOpenIcon : (FolderIcon || "span")}
             sx={{ fontSize: 16, color: "#f59e0b", mr: 0.6, flexShrink: 0 }} />
         ) : (
-          <Box component={FileIcon || "span"}
+          <Box component={getFileTypeIcon(entry.name) || FileIcon || "span"}
             sx={{ fontSize: 15, color: fileExtColor(entry.name), mr: 0.6, flexShrink: 0 }} />
         )}
         {/* Name */}
@@ -212,7 +238,7 @@
             <Typography sx={{ fontSize: 9, fontWeight: 800, color: fileExtColor(entry.name), textTransform: "uppercase", letterSpacing: .5, lineHeight: 1 }}>
               {ext || "FILE"}
             </Typography>
-            <Box component={FileIcon || "span"} sx={{ fontSize: 18, color: fileExtColor(entry.name), mt: 0.25 }} />
+            <Box component={getFileTypeIcon(entry.name) || FileIcon || "span"} sx={{ fontSize: 18, color: fileExtColor(entry.name), mt: 0.25 }} />
           </Box>
         )}
         {/* Name */}
@@ -780,7 +806,7 @@
             >
               {entry.is_dir
                 ? <Box component={FolderIcon || "span"} sx={{ fontSize: 18, color: "#f59e0b", flexShrink: 0 }} />
-                : <Box component={FileIcon || "span"} sx={{ fontSize: 16, color: fileExtColor(entry.name), flexShrink: 0 }} />
+                : <Box component={getFileTypeIcon(entry.name) || FileIcon || "span"} sx={{ fontSize: 16, color: fileExtColor(entry.name), flexShrink: 0 }} />
               }
               <Typography variant="body2" noWrap sx={{ flexGrow: 1, fontSize: 13, minWidth: 0 }}>{entry.name}</Typography>
               <Typography variant="caption" sx={{ color: "#94a3b8", fontSize: 11, flexShrink: 0, minWidth: 56, textAlign: "right" }}>

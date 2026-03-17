@@ -6773,6 +6773,7 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
         "LOCALS3_HOST_IP",
         "LOCALS3_HOST_MODE",
         "LOCALS3_ENABLE_LAN",
+        "LOCALS3_HTTP_PORT",
         "LOCALS3_HTTPS_PORT",
         "LOCALS3_API_PORT",
         "LOCALS3_UI_PORT",
@@ -6802,6 +6803,7 @@ def run_windows_mongo_installer(form, live_cb=None):
     for key in [
         "LOCALMONGO_HOST",
         "LOCALMONGO_HOST_IP",
+        "LOCALMONGO_HTTP_PORT",
         "LOCALMONGO_HTTPS_PORT",
         "LOCALMONGO_MONGO_PORT",
         "LOCALMONGO_WEB_PORT",
@@ -6872,6 +6874,7 @@ def run_unix_mongo_installer(form=None, live_cb=None):
     for key in [
         "LOCALMONGO_HOST",
         "LOCALMONGO_HOST_IP",
+        "LOCALMONGO_HTTP_PORT",
         "LOCALMONGO_HTTPS_PORT",
         "LOCALMONGO_MONGO_PORT",
         "LOCALMONGO_WEB_PORT",
@@ -6912,6 +6915,7 @@ def run_unix_mongo_installer(form=None, live_cb=None):
         for key in [
             "LOCALMONGO_HOST",
             "LOCALMONGO_HOST_IP",
+            "LOCALMONGO_HTTP_PORT",
             "LOCALMONGO_HTTPS_PORT",
             "LOCALMONGO_MONGO_PORT",
             "LOCALMONGO_WEB_PORT",
@@ -6926,6 +6930,148 @@ def run_unix_mongo_installer(form=None, live_cb=None):
         cmd += ["bash", str(ROOT / "Mongo" / "linux-macos" / "setup-mongodb.sh")]
 
     return run_process(cmd, env=env, live_cb=live_cb)
+
+
+def run_mongo_docker(form=None, live_cb=None):
+    """Deploy MongoDB + mongo-express in Docker containers with optional nginx HTTPS."""
+    if os.name == "nt":
+        return 1, "Docker MongoDB deploy can only run on Linux hosts via this route."
+    form = form or {}
+
+    admin_user = (form.get("LOCALMONGO_ADMIN_USER", [""])[0] or "admin").strip()
+    admin_pass = (form.get("LOCALMONGO_ADMIN_PASSWORD", [""])[0] or "StrongPassword123").strip()
+    ui_user = (form.get("LOCALMONGO_UI_USER", [""])[0] or "admin").strip()
+    ui_pass = (form.get("LOCALMONGO_UI_PASSWORD", [""])[0] or "StrongPassword123").strip()
+    mongo_port = (form.get("LOCALMONGO_MONGO_PORT", [""])[0] or "27017").strip()
+    web_port = (form.get("LOCALMONGO_WEB_PORT", [""])[0] or "8081").strip()
+    https_port = (form.get("LOCALMONGO_HTTPS_PORT", [""])[0] or "").strip()
+    http_port = (form.get("LOCALMONGO_HTTP_PORT", [""])[0] or "").strip()
+
+    for name, val in [("MongoDB port", mongo_port), ("Web UI port", web_port)]:
+        if val and not val.isdigit():
+            return 1, f"{name} must be numeric."
+    if https_port and not https_port.isdigit():
+        return 1, "HTTPS port must be numeric."
+    if http_port and not http_port.isdigit():
+        return 1, "HTTP port must be numeric."
+
+    if not https_port and not http_port:
+        https_port = "9445"
+
+    docker_prefix = []
+    if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+        docker_prefix = ["sudo"]
+
+    # Ensure Docker is available
+    code, out = run_process(docker_prefix + ["docker", "info"], live_cb=None)
+    if code != 0:
+        if live_cb:
+            live_cb("Docker not running. Installing/starting Docker...\n")
+        install_code, install_out = run_process(
+            ["bash", "-c", "curl -fsSL https://get.docker.com | sh && systemctl enable --now docker"],
+            live_cb=live_cb
+        )
+        if install_code != 0:
+            return install_code, install_out or "Docker install failed."
+
+    # Remove old containers if they exist
+    for cname in ["localmongo-db", "localmongo-web"]:
+        run_process(docker_prefix + ["docker", "rm", "-f", cname], live_cb=None)
+
+    # Start MongoDB container
+    if live_cb:
+        live_cb(f"Starting MongoDB container on port {mongo_port}...\n")
+    mongo_run = docker_prefix + [
+        "docker", "run", "-d",
+        "--name", "localmongo-db",
+        "--restart", "unless-stopped",
+        "-p", f"127.0.0.1:{mongo_port}:27017",
+        "-e", f"MONGO_INITDB_ROOT_USERNAME={admin_user}",
+        "-e", f"MONGO_INITDB_ROOT_PASSWORD={admin_pass}",
+        "mongo:latest",
+    ]
+    code, out = run_process(mongo_run, live_cb=live_cb)
+    if code != 0:
+        return code, out or "Failed to start MongoDB container."
+
+    # Start mongo-express container (web UI on localhost only)
+    internal_web_port = str(int(web_port))
+    if live_cb:
+        live_cb(f"Starting mongo-express web UI on port {internal_web_port}...\n")
+    mongoexpress_run = docker_prefix + [
+        "docker", "run", "-d",
+        "--name", "localmongo-web",
+        "--restart", "unless-stopped",
+        "--link", "localmongo-db:mongo",
+        "-p", f"127.0.0.1:{internal_web_port}:8081",
+        "-e", f"ME_CONFIG_MONGODB_ADMINUSERNAME={admin_user}",
+        "-e", f"ME_CONFIG_MONGODB_ADMINPASSWORD={admin_pass}",
+        "-e", f"ME_CONFIG_BASICAUTH_USERNAME={ui_user}",
+        "-e", f"ME_CONFIG_BASICAUTH_PASSWORD={ui_pass}",
+        "-e", "ME_CONFIG_MONGODB_URL=mongodb://$(ME_CONFIG_MONGODB_ADMINUSERNAME):$(ME_CONFIG_MONGODB_ADMINPASSWORD)@mongo:27017/",
+        "mongo-express:latest",
+    ]
+    code, out = run_process(mongoexpress_run, live_cb=live_cb)
+    if code != 0 and live_cb:
+        live_cb(f"[WARN] mongo-express failed to start: {out}\n")
+
+    resolved_ip = choose_service_host()
+    extra = f"\nMongoDB Docker deploy complete.\nMongoDB port: {mongo_port}\nWeb UI (internal): http://127.0.0.1:{internal_web_port}\n"
+
+    # Set up nginx HTTPS for the web UI if requested
+    if https_port:
+        service_name = "localmongo"
+        cert_dir = f"/etc/nginx/ssl/{service_name}"
+        nginx_script = f"""
+set -euo pipefail
+command -v nginx >/dev/null 2>&1 || {{ echo "nginx not found; skipping nginx setup."; exit 0; }}
+mkdir -p "{cert_dir}"
+if [[ ! -f "{cert_dir}/server.crt" || ! -f "{cert_dir}/server.key" ]]; then
+  HOST=$(hostname -I | awk '{{{{print $1}}}}')
+  SAN="IP:$HOST"
+  openssl req -x509 -nodes -newkey rsa:2048 \\
+    -keyout "{cert_dir}/server.key" -out "{cert_dir}/server.crt" \\
+    -days 825 -subj "/CN=$HOST" -addext "subjectAltName=$SAN" 2>/dev/null
+  chmod 600 "{cert_dir}/server.key"
+fi
+cat > "/etc/nginx/conf.d/{service_name}.conf" <<'NGINX'
+server {{{{
+    listen {https_port} ssl;
+    server_name _;
+    ssl_certificate {cert_dir}/server.crt;
+    ssl_certificate_key {cert_dir}/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    location / {{{{
+        proxy_pass http://127.0.0.1:{internal_web_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }}}}
+}}}}
+NGINX
+nginx -t && (systemctl is-active --quiet nginx && systemctl reload nginx || systemctl restart nginx)
+echo "nginx configured: HTTPS={https_port} -> web UI port {internal_web_port}"
+"""
+        sudo_prefix = []
+        if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            sudo_prefix = ["sudo"]
+        nginx_code, nginx_out = run_process(sudo_prefix + ["bash", "-c", nginx_script], live_cb=live_cb)
+        if nginx_code == 0:
+            extra += f"MongoDB Web UI HTTPS: https://{resolved_ip}:{https_port}\n"
+            if http_port:
+                manage_firewall_port("open", http_port, "tcp")
+                _setup_nginx_http_redirect(service_name, http_port, https_port, live_cb=live_cb)
+                extra += f"HTTP URL: http://{resolved_ip}:{http_port} (redirects to HTTPS)\n"
+        else:
+            if live_cb:
+                live_cb(f"[WARN] nginx setup failed. Web UI available only at http://127.0.0.1:{internal_web_port}\n")
+        manage_firewall_port("open", https_port, "tcp")
+
+    if live_cb:
+        live_cb(extra)
+    return 0, extra
 
 
 def run_linux_proxy_installer(form=None, live_cb=None):
@@ -7147,6 +7293,7 @@ def run_linux_s3_installer(form=None, live_cb=None):
     for key in [
         "LOCALS3_HOST",
         "LOCALS3_ENABLE_LAN",
+        "LOCALS3_HTTP_PORT",
         "LOCALS3_HTTPS_PORT",
         "LOCALS3_API_PORT",
         "LOCALS3_UI_PORT",
@@ -9071,6 +9218,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_unix_mongo_installer(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/mongo_docker":
+            title = "MongoDB Docker Installer"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_mongo_docker(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_mongo_docker(form)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/proxy_windows":

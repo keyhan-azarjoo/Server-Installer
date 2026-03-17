@@ -351,6 +351,8 @@ def render_dashboard_page(config, script_paths=None, dashboard_root=None):
   <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script crossorigin src="https://unpkg.com/@mui/material@5.16.14/umd/material-ui.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script crossorigin src="https://unpkg.com/@mui/icons-material@5.16.14/umd/material-icons.production.min.js"></script>
+  <script>window.MaterialUIIcons = window.MaterialIcons || {};</script>
 </head>
 <body>
   <div id="root"></div>

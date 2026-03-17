@@ -124,10 +124,10 @@
     if (cfg.os === "linux" || cfg.os === "darwin") {
       return (
         <Grid container spacing={2}>
-          <Grid item xs={12} md={8}>
+          <Grid item xs={12} md={6}>
             <ActionCard
               title={`Install MongoDB (${cfg.os === "linux" ? "Linux" : "macOS"})`}
-              description="Deploy MongoDB with a Compass-style web admin UI. Leave HTTP Port or HTTPS Port empty to skip that protocol."
+              description="Deploy MongoDB natively with a Compass-style web admin UI. Leave HTTP Port or HTTPS Port empty to skip that protocol."
               action="/run/mongo_unix"
               fields={[
                 { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
@@ -142,6 +142,25 @@
               ]}
               onRun={run}
               color="#7c3aed"
+            />
+          </Grid>
+          <Grid item xs={12} md={6}>
+            <ActionCard
+              title="Deploy MongoDB (Docker)"
+              description="Run MongoDB and mongo-express web UI in Docker containers. Leave HTTP Port or HTTPS Port empty to skip that protocol."
+              action="/run/mongo_docker"
+              fields={[
+                { name: "LOCALMONGO_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
+                { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "Leave empty to skip HTTPS", checkPort: true },
+                { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017", checkPort: true },
+                { name: "LOCALMONGO_WEB_PORT", label: "Web UI Port (internal)", defaultValue: "8081", placeholder: "8081" },
+                { name: "LOCALMONGO_ADMIN_USER", label: "MongoDB Admin User", defaultValue: "admin" },
+                { name: "LOCALMONGO_ADMIN_PASSWORD", label: "MongoDB Admin Password", type: "password", defaultValue: "StrongPassword123" },
+                { name: "LOCALMONGO_UI_USER", label: "Web UI User", defaultValue: "admin" },
+                { name: "LOCALMONGO_UI_PASSWORD", label: "Web UI Password", type: "password", defaultValue: "StrongPassword123" },
+              ]}
+              onRun={run}
+              color="#166534"
             />
           </Grid>
           <Grid item xs={12} md={4}>
