@@ -12,6 +12,7 @@
       hasStoppedServices, batchServiceAction, onProxyServiceAction,
       isServiceRunningStatus, formatServiceState,
       windowsAdminRequired, windowsAdminReason,
+      setPage, setFileManagerPath,
     } = p;
 
     if (cfg.os === "windows" || cfg.os === "linux") {
@@ -112,6 +113,9 @@
                           </Box>
                           <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
                           <Box sx={{ flexGrow: 1 }} />
+                          {!!(svc.project_path && setFileManagerPath && setPage) && (
+                            <Button size="small" variant="outlined" onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }} sx={{ textTransform: "none" }}>Open Folder</Button>
+                          )}
                           <Button size="small" variant="outlined" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"} disabled={serviceBusy} onClick={() => onProxyServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
                             {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
                           </Button>

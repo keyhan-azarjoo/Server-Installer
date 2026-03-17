@@ -14,6 +14,7 @@
       renderServiceUrls, renderServicePorts,
       scopeErrors,
       defaultNotebookDirForOs,
+      setPage, setFileManagerPath,
     } = p;
 
     const pythonUrl = String(pythonService.jupyter_url || "").trim();
@@ -113,6 +114,9 @@
                       </Box>
                       <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
                       <Box sx={{ flexGrow: 1 }} />
+                      {!!(svc.project_path && setFileManagerPath && setPage) && (
+                        <Button size="small" variant="outlined" onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }} sx={{ textTransform: "none" }}>Open Folder</Button>
+                      )}
                       {svc.manageable !== false && (
                         <>
                           <Button

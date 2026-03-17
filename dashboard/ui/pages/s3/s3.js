@@ -14,6 +14,7 @@
       isServiceRunningStatus, formatServiceState, onServiceAction,
       renderServiceUrls, renderServicePorts,
       OpenCompassStyleIcon, TryOpenCompassIcon, CopyCompassIcon,
+      setPage, setFileManagerPath,
     } = p;
 
     if (cfg.os === "windows") {
@@ -98,6 +99,9 @@
                         </Box>
                         <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
                         <Box sx={{ flexGrow: 1 }} />
+                        {!!(svc.project_path && setFileManagerPath && setPage) && (
+                          <Button size="small" variant="outlined" onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }} sx={{ textTransform: "none" }}>Open Folder</Button>
+                        )}
                         <Button
                           size="small"
                           variant="outlined"
@@ -184,6 +188,9 @@
                         </Box>
                         <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
                         <Box sx={{ flexGrow: 1 }} />
+                        {!!(svc.project_path && setFileManagerPath && setPage) && (
+                          <Button size="small" variant="outlined" onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }} sx={{ textTransform: "none" }}>Open Folder</Button>
+                        )}
                         <Button
                           size="small"
                           variant="outlined"
