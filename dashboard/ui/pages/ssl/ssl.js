@@ -37,13 +37,18 @@
 
     // Assign dialog
     const [assignDlg, setAssignDlg] = React.useState(null); // { certName }
-    const [asKind, setAsKind]       = React.useState("custom"); // iis | nginx | custom
+    const [asKind, setAsKind]       = React.useState("custom"); // iis | nginx | managed | custom
     const [asSite, setAsSite]       = React.useState("");
     const [asCertDest, setAsCertDest] = React.useState("");
     const [asKeyDest, setAsKeyDest]   = React.useState("");
     const [asRestart, setAsRestart]   = React.useState(true);
     const assignFormRef = React.useRef(null);
     const assignHiddenRef = React.useRef({});
+
+    // Managed service picker (loaded when assign dialog opens)
+    const [managedServices, setManagedServices] = React.useState([]);
+    const [managedSvcLoading, setMSvcLoading]   = React.useState(false);
+    const [selectedSvc, setSelectedSvc]         = React.useState(null); // full svc object
 
     // ── Load certs ────────────────────────────────────────────────────────────
     const loadCerts = React.useCallback(async () => {
@@ -122,6 +127,30 @@
       run(e, "/run/ssl_assign", `Assign certificate — ${assignDlg.certName}`, assignFormRef.current);
       setAssignDlg(null);
     }, [run, assignDlg]);
+
+    // ── Load managed services for assign dialog ───────────────────────────
+    const loadManagedServices = React.useCallback(async () => {
+      setMSvcLoading(true);
+      try {
+        const r = await fetch("/api/system/services", { headers: { "X-Requested-With": "fetch" } });
+        const j = await r.json();
+        if (j.ok) {
+          // Only show services that have a project_path (website, python api, etc.)
+          setManagedServices((j.services || []).filter((s) => s.project_path));
+        }
+      } catch (_) {}
+      setMSvcLoading(false);
+    }, []);
+
+    // When user picks a managed service, auto-fill cert/key paths
+    const handleSelectManagedSvc = React.useCallback((svc) => {
+      setSelectedSvc(svc);
+      if (!svc) { setAsCertDest(""); setAsKeyDest(""); return; }
+      const base = String(svc.project_path || "").replace(/[\\/]+$/, "");
+      const sep = base.includes("\\") ? "\\" : "/";
+      setAsCertDest(`${base}${sep}ssl${sep}cert.pem`);
+      setAsKeyDest(`${base}${sep}ssl${sep}key.pem`);
+    }, []);
 
     // ── Renew all ─────────────────────────────────────────────────────────────
     const renewFormRef = React.useRef(null);
@@ -211,6 +240,8 @@
                             setAssignDlg({ certName: cert.name });
                             setAsKind(cfg.os === "windows" ? "iis" : "nginx");
                             setAsSite(""); setAsCertDest(""); setAsKeyDest("");
+                            setSelectedSvc(null);
+                            loadManagedServices();
                           }}
                           sx={{ textTransform: "none" }}>
                           Assign to Service
@@ -446,7 +477,8 @@
             <DialogContent>
               <form ref={assignFormRef} onSubmit={handleAssign} id="assignForm">
                 <input type="hidden" name="SSL_CERT_NAME" value={assignDlg.certName} />
-                <input type="hidden" name="SSL_SERVICE_KIND" value={asKind} />
+                {/* "managed" is a UI concept only — backend uses "custom" to copy cert files */}
+                <input type="hidden" name="SSL_SERVICE_KIND" value={asKind === "managed" ? "custom" : asKind} />
                 <input type="hidden" name="SSL_SITE_NAME" value={asSite} />
                 <input type="hidden" name="SSL_CUSTOM_CERT_DEST" value={asCertDest} />
                 <input type="hidden" name="SSL_CUSTOM_KEY_DEST" value={asKeyDest} />
@@ -454,9 +486,10 @@
                 <Stack spacing={2} sx={{ mt: 1 }}>
                   <FormControl size="small" fullWidth>
                     <InputLabel>Service Type</InputLabel>
-                    <Select label="Service Type" value={asKind} onChange={(e) => setAsKind(e.target.value)}>
+                    <Select label="Service Type" value={asKind} onChange={(e) => { setAsKind(e.target.value); setSelectedSvc(null); setAsCertDest(""); setAsKeyDest(""); }}>
                       {cfg.os === "windows" && <MenuItem value="iis">IIS (Windows — imports to cert store)</MenuItem>}
                       {(cfg.os === "linux" || cfg.os === "darwin") && <MenuItem value="nginx">nginx (updates ssl_certificate in config)</MenuItem>}
+                      <MenuItem value="managed">Managed Service (Website / Python API / etc.)</MenuItem>
                       <MenuItem value="custom">Custom Path (copy files to any location)</MenuItem>
                     </Select>
                   </FormControl>
@@ -471,6 +504,44 @@
                     <Alert severity="info" sx={{ py: 0.5 }}>
                       All nginx config files containing <code>ssl_certificate</code> will be updated to point to the new cert. nginx will be reloaded after.
                     </Alert>
+                  )}
+
+                  {asKind === "managed" && (
+                    <>
+                      <FormControl size="small" fullWidth>
+                        <InputLabel>{managedSvcLoading ? "Loading services…" : "Select Service"}</InputLabel>
+                        <Select
+                          label={managedSvcLoading ? "Loading services…" : "Select Service"}
+                          value={selectedSvc ? selectedSvc.name : ""}
+                          disabled={managedSvcLoading}
+                          onChange={(e) => {
+                            const svc = managedServices.find((s) => s.name === e.target.value) || null;
+                            handleSelectManagedSvc(svc);
+                          }}
+                        >
+                          {managedServices.map((s) => (
+                            <MenuItem key={`${s.kind}-${s.name}`} value={s.name}>
+                              {s.form_name || s.name} ({s.kind || s.stack_label || "service"})
+                            </MenuItem>
+                          ))}
+                          {!managedSvcLoading && managedServices.length === 0 && (
+                            <MenuItem disabled value="">No services with a project path found</MenuItem>
+                          )}
+                        </Select>
+                      </FormControl>
+                      {selectedSvc && (
+                        <Alert severity="info" sx={{ py: 0.5 }}>
+                          Certificate will be copied to the service's <b>ssl/</b> sub-folder. Make sure the service is configured to load TLS from these paths.
+                        </Alert>
+                      )}
+                      {/* Show/edit auto-filled paths */}
+                      <TextField label="Certificate destination path" size="small" fullWidth required
+                        value={asCertDest} onChange={(e) => setAsCertDest(e.target.value)}
+                        placeholder="(select a service above to auto-fill)" />
+                      <TextField label="Private key destination path" size="small" fullWidth required
+                        value={asKeyDest} onChange={(e) => setAsKeyDest(e.target.value)}
+                        placeholder="(select a service above to auto-fill)" />
+                    </>
                   )}
 
                   {asKind === "custom" && (<>
@@ -495,7 +566,8 @@
             <DialogActions>
               <Button onClick={() => setAssignDlg(null)} sx={{ textTransform: "none" }}>Cancel</Button>
               <Button type="submit" form="assignForm" variant="contained" disabled={serviceBusy ||
-                (asKind === "custom" && (!asCertDest.trim() || !asKeyDest.trim()))}
+                (asKind === "custom" && (!asCertDest.trim() || !asKeyDest.trim())) ||
+                (asKind === "managed" && (!asCertDest.trim() || !asKeyDest.trim()))}
                 onClick={handleAssign}
                 sx={{ textTransform: "none" }}>
                 Assign Certificate

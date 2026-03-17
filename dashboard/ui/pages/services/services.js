@@ -9,6 +9,7 @@
       scopeErrors, filteredServices, serviceBusy,
       isServiceRunningStatus, formatServiceState, onServiceAction, actionLabel,
       renderServiceUrls, renderServicePorts,
+      setPage, setFileManagerPath,
     } = p;
     return (
       <Grid container spacing={2}>
@@ -41,6 +42,15 @@
                         <Chip size="small" color={isServiceRunningStatus(status, svc.sub_status) ? "success" : "default"} label={formatServiceState(status, svc.sub_status)} />
                         <Chip size="small" color={autostart ? "primary" : "default"} label={autostart ? "autostart:on" : "autostart:off"} />
                         <Box sx={{ flexGrow: 1 }} />
+                        {!!(svc.project_path && setFileManagerPath && setPage) && (
+                          <Button
+                            size="small" variant="outlined"
+                            onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }}
+                            sx={{ textTransform: "none" }}
+                          >
+                            Open Folder
+                          </Button>
+                        )}
                         <Button
                           size="small"
                           variant="outlined"

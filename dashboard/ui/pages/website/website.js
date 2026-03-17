@@ -16,6 +16,7 @@
       renderServiceUrls, renderServicePorts,
       scopeErrors,
       defaultWebsiteDirForOs,
+      setPage, setFileManagerPath,
     } = p;
 
     const websiteHost = selectableIps.includes(String(websiteEditor?.host || "").trim())
@@ -23,13 +24,22 @@
       : (selectableIps.length === 1 ? selectableIps[0] : "");
 
     // ── Form state ─────────────────────────────────────────────────────────
-    const [siteName,  setSiteName]  = React.useState(websiteEditor?.name || "ServerInstallerWebsite");
-    const [siteKind,  setSiteKind]  = React.useState(websiteEditor?.kind || "auto");
-    const [bindIp,    setBindIp]    = React.useState(websiteHost);
-    const [port,      setPort]      = React.useState(websiteEditor?.port || "8088");
-    const [source,    setSource]    = React.useState(websiteEditor?.source || defaultWebsiteDirForOs(cfg.os));
-    const formRef  = React.useRef(null);
+    const [siteName,   setSiteName]   = React.useState(websiteEditor?.name || "ServerInstallerWebsite");
+    const [siteKind,   setSiteKind]   = React.useState(websiteEditor?.kind || "auto");
+    const [bindIp,     setBindIp]     = React.useState(websiteHost);
+    const [port,       setPort]       = React.useState(websiteEditor?.port || "8088");
+    const [httpsPort,  setHttpsPort]  = React.useState(websiteEditor?.https_port || "");
+    const [source,     setSource]     = React.useState(websiteEditor?.source || defaultWebsiteDirForOs(cfg.os));
+    const formRef      = React.useRef(null);
     const hiddenTargetRef = React.useRef(null);
+
+    // ── Port-check state ──────────────────────────────────────────────────
+    const [portResults,   setPortResults]   = React.useState(null); // map port→{ok,used_by,...}
+    const [portChecking,  setPortChecking]  = React.useState(false);
+
+    // ── Folder-upload state ───────────────────────────────────────────────
+    const [uploadBusy,   setUploadBusy]   = React.useState(false);
+    const [uploadStatus, setUploadStatus] = React.useState(null); // {ok, text}
 
     // Keep bindIp in sync if selectableIps loads
     React.useEffect(() => {
@@ -42,6 +52,76 @@
       if (hiddenTargetRef.current) hiddenTargetRef.current.value = target;
       run(e, "/run/website_deploy", `Deploy Website → ${target}`, formRef.current);
     }, [run]);
+
+    // ── Port conflict check ───────────────────────────────────────────────
+    const checkPorts = React.useCallback(async () => {
+      const toCheck = [
+        port.trim()      ? { port: port.trim(),      label: "HTTP Port" }  : null,
+        httpsPort.trim() ? { port: httpsPort.trim(), label: "HTTPS Port" } : null,
+      ].filter(Boolean);
+      if (!toCheck.length) return;
+      setPortChecking(true);
+      setPortResults(null);
+      const results = {};
+      await Promise.all(toCheck.map(async ({ port: p, label }) => {
+        try {
+          const fd = new FormData();
+          fd.append("port", p);
+          fd.append("protocol", "tcp");
+          const r = await fetch("/api/system/port_check", {
+            method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd,
+          });
+          const j = await r.json();
+          results[p] = { label, ...j };
+        } catch (ex) {
+          results[p] = { label, ok: false, error: String(ex) };
+        }
+      }));
+      setPortResults(results);
+      setPortChecking(false);
+    }, [port, httpsPort]);
+
+    // ── Folder / files upload to source path ─────────────────────────────
+    const handleFolderUpload = React.useCallback(async (event) => {
+      const files = Array.from(event.target.files || []);
+      // reset input so same selection re-triggers onChange
+      event.target.value = "";
+      if (!files.length) return;
+      const targetDir = source.trim();
+      if (!targetDir) {
+        setUploadStatus({ ok: false, text: "Set a Published Folder path first." });
+        return;
+      }
+      setUploadBusy(true);
+      setUploadStatus(null);
+      try {
+        const fd = new FormData();
+        fd.append("target", targetDir);
+        files.forEach((f) => fd.append("files", f, f.webkitRelativePath || f.name));
+        const r = await fetch("/api/files/upload", {
+          method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd,
+        });
+        const j = await r.json();
+        setUploadStatus({
+          ok: j.ok,
+          text: j.ok
+            ? `Uploaded ${j.written ?? files.length} file(s) to ${targetDir}.`
+            : (j.error || "Upload failed."),
+        });
+      } catch (ex) {
+        setUploadStatus({ ok: false, text: String(ex) });
+      } finally {
+        setUploadBusy(false);
+      }
+    }, [source]);
+
+    // ── Open source folder in file manager ────────────────────────────────
+    const openSourceInFileManager = React.useCallback(() => {
+      const dir = source.trim();
+      if (!dir || !setFileManagerPath || !setPage) return;
+      setFileManagerPath(dir);
+      setPage("files");
+    }, [source, setFileManagerPath, setPage]);
 
     // Target cards config
     const targets = [
@@ -100,51 +180,153 @@
                       {selectableIps.map((ip) => <MenuItem key={ip} value={ip}>{ip}</MenuItem>)}
                     </Select>
                   </FormControl>
-                  <TextField
-                    label="HTTP Port" size="small" fullWidth required
-                    name="WEBSITE_PORT" value={port} placeholder="8088"
-                    onChange={(e) => setPort(e.target.value)}
-                  />
-                  <TextField
-                    label="Published Folder or Path" size="small" fullWidth
-                    name="WEBSITE_SOURCE" value={source}
-                    placeholder={defaultWebsiteDirForOs(cfg.os)}
-                    onChange={(e) => setSource(e.target.value)}
-                    helperText="Point to your built/published folder. The dashboard auto-detects the project type."
-                  />
+                  {/* Ports row */}
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5}>
+                    <TextField
+                      label="HTTP Port" size="small" fullWidth required
+                      name="WEBSITE_PORT" value={port} placeholder="8088"
+                      onChange={(e) => { setPort(e.target.value); setPortResults(null); }}
+                    />
+                    <TextField
+                      label="HTTPS Port (optional)" size="small" fullWidth
+                      name="WEBSITE_HTTPS_PORT" value={httpsPort} placeholder="8443"
+                      onChange={(e) => { setHttpsPort(e.target.value); setPortResults(null); }}
+                    />
+                  </Stack>
+
+                  {/* Port check button + results */}
+                  <Box>
+                    <Button
+                      size="small" variant="outlined"
+                      disabled={portChecking || (!port.trim() && !httpsPort.trim())}
+                      onClick={checkPorts}
+                      sx={{ textTransform: "none", mb: portResults ? 1 : 0 }}
+                    >
+                      {portChecking ? "Checking ports…" : "Check Port Conflicts"}
+                    </Button>
+                    {portResults && Object.entries(portResults).map(([p, r]) => (
+                      <Alert
+                        key={p}
+                        severity={r.in_use ? "error" : "success"}
+                        sx={{ mb: 0.5, py: 0.25, fontSize: 12 }}
+                      >
+                        {r.label} {p}: {r.in_use
+                          ? `IN USE — ${r.used_by || "another process"} (PID ${r.pid || "?"})`
+                          : "available"}
+                      </Alert>
+                    ))}
+                  </Box>
+
+                  <Stack direction={{ xs: "column", sm: "row" }} spacing={1} alignItems="flex-start">
+                    <TextField
+                      label="Published Folder or Path" size="small" fullWidth
+                      name="WEBSITE_SOURCE" value={source}
+                      placeholder={defaultWebsiteDirForOs(cfg.os)}
+                      onChange={(e) => setSource(e.target.value)}
+                      helperText="Point to your built/published folder. The dashboard auto-detects the project type."
+                    />
+                    <Button
+                      size="small" variant="outlined"
+                      onClick={openSourceInFileManager}
+                      disabled={!source.trim()}
+                      sx={{ textTransform: "none", flexShrink: 0, mt: 0.5 }}
+                    >
+                      Open Folder
+                    </Button>
+                  </Stack>
                 </Stack>
               </form>
             </CardContent>
           </Card>
         </Grid>
 
-        {/* ── Info card ── */}
+        {/* ── Info + Upload card ── */}
         <Grid item xs={12} md={4}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
-            <CardContent>
-              <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Auto-Detection</Typography>
-              <Typography variant="body2">
-                The dashboard scans your source folder and auto-detects the project type:
-              </Typography>
-              <Box component="ul" sx={{ pl: 2, mt: 1, mb: 0 }}>
-                {[
-                  ["Next.js", "package.json + .next"],
-                  ["Flutter web", "build/web/index.html"],
-                  ["PHP", ".php files"],
-                  ["Static / exported", "index.html"],
-                ].map(([label, hint]) => (
-                  <Box key={label} component="li" sx={{ mb: 0.5 }}>
-                    <Typography variant="body2"><b>{label}</b> — {hint}</Typography>
-                  </Box>
-                ))}
-              </Box>
-              <Typography variant="body2" sx={{ mt: 1.5 }}>
-                Managed sites: {Number(websiteInfo?.count || websiteServices.length || 0)}
-              </Typography>
-              <Typography variant="body2">IIS: {iis.installed ? "Installed" : "Not installed"}</Typography>
-              <Typography variant="body2">Docker: {docker.installed ? `Installed (${docker.version || "available"})` : "Not installed"}</Typography>
-            </CardContent>
-          </Card>
+          <Stack spacing={2} sx={{ height: "100%" }}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Auto-Detection</Typography>
+                <Typography variant="body2">
+                  The dashboard scans your source folder and auto-detects the project type:
+                </Typography>
+                <Box component="ul" sx={{ pl: 2, mt: 1, mb: 0 }}>
+                  {[
+                    ["Next.js", "package.json + .next"],
+                    ["Flutter web", "build/web/index.html"],
+                    ["PHP", ".php files"],
+                    ["Static / exported", "index.html"],
+                  ].map(([label, hint]) => (
+                    <Box key={label} component="li" sx={{ mb: 0.5 }}>
+                      <Typography variant="body2"><b>{label}</b> — {hint}</Typography>
+                    </Box>
+                  ))}
+                </Box>
+                <Typography variant="body2" sx={{ mt: 1.5 }}>
+                  Managed sites: {Number(websiteInfo?.count || websiteServices.length || 0)}
+                </Typography>
+                <Typography variant="body2">IIS: {iis.installed ? "Installed" : "Not installed"}</Typography>
+                <Typography variant="body2">Docker: {docker.installed ? `Installed (${docker.version || "available"})` : "Not installed"}</Typography>
+              </CardContent>
+            </Card>
+
+            {/* ── Upload files to source folder ── */}
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5 }}>Upload to Source Folder</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                  Upload your built files directly to the Published Folder on the server. Select a folder or individual files from your local machine.
+                </Typography>
+                {uploadStatus && (
+                  <Alert
+                    severity={uploadStatus.ok ? "success" : "error"}
+                    sx={{ mb: 1.5, py: 0.5 }}
+                    onClose={() => setUploadStatus(null)}
+                  >
+                    {uploadStatus.text}
+                  </Alert>
+                )}
+                {!source.trim() && (
+                  <Alert severity="warning" sx={{ mb: 1.5, py: 0.5 }}>
+                    Set a Published Folder path above before uploading.
+                  </Alert>
+                )}
+                <Stack direction="row" spacing={1} flexWrap="wrap">
+                  <Button
+                    component="label"
+                    variant="contained"
+                    size="small"
+                    disabled={uploadBusy || !source.trim()}
+                    sx={{ textTransform: "none", fontWeight: 700 }}
+                  >
+                    {uploadBusy ? "Uploading…" : "Upload Folder"}
+                    <input
+                      hidden type="file"
+                      webkitdirectory=""
+                      multiple
+                      onChange={handleFolderUpload}
+                    />
+                  </Button>
+                  <Button
+                    component="label"
+                    variant="outlined"
+                    size="small"
+                    disabled={uploadBusy || !source.trim()}
+                    sx={{ textTransform: "none" }}
+                  >
+                    Upload Files
+                    <input
+                      hidden type="file"
+                      multiple
+                      onChange={handleFolderUpload}
+                    />
+                  </Button>
+                </Stack>
+                <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: "block" }}>
+                  Target: {source.trim() || "(not set)"}
+                </Typography>
+              </CardContent>
+            </Card>
+          </Stack>
         </Grid>
 
         {/* ── Deploy target buttons ── */}
@@ -212,6 +394,15 @@
                       {!!(svc.urls && svc.urls[0]) && (
                         <Button size="small" variant="contained" disabled={serviceBusy} onClick={() => window.open(svc.urls[0], "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
                           Open
+                        </Button>
+                      )}
+                      {!!(svc.project_path && setFileManagerPath && setPage) && (
+                        <Button
+                          size="small" variant="outlined"
+                          onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }}
+                          sx={{ textTransform: "none" }}
+                        >
+                          Open Folder
                         </Button>
                       )}
                       <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => openWebsiteRun(svc)} sx={{ textTransform: "none" }}>
