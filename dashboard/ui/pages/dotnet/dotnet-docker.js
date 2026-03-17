@@ -54,6 +54,7 @@
               description="Build and run Docker container for your .NET app. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
               action="/run/linux_docker"
               fields={[
+                { name: "CONTAINER_NAME", label: "Container Name", defaultValue: "dotnetapp", required: true },
                 { name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://...", enableUpload: true },
                 { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "80", placeholder: "Leave empty to skip HTTP", checkPort: true },
                 { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: "443", placeholder: "Leave empty to skip HTTPS", checkPort: true },

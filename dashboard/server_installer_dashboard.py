@@ -7948,8 +7948,9 @@ def run_linux_docker_deploy(form, live_cb=None):
     if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
         docker_prefix = ["sudo"]
 
-    image_name = "dotnetapp"
-    container_name = "dotnetapp"
+    raw_name = (form.get("CONTAINER_NAME", [""])[0] or "dotnetapp").strip()
+    container_name = re.sub(r"[^a-z0-9\-]", "-", raw_name.lower()).strip("-") or "dotnetapp"
+    image_name = container_name
 
     if live_cb:
         live_cb(f"Building Docker image from: {context_dir}\n")
