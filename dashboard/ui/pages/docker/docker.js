@@ -49,9 +49,6 @@
               <Typography variant="body2" sx={{ mt: 1.5 }}>
                 For app deployment, use the existing DotNet Docker page.
               </Typography>
-              <Button variant="outlined" sx={{ mt: 1.5, textTransform: "none" }} onClick={() => setPage("dotnet-docker")}>
-                Open DotNet Docker
-              </Button>
             </CardContent>
           </Card>
         </Grid>
