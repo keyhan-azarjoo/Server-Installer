@@ -1591,31 +1591,18 @@ function App() {
 
 
   const sidebar = (
-    <Box sx={{ height: "100%", background: "linear-gradient(180deg,#081726,#132d4b)", color: "#deebff", p: 1.5 }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ px: 1, pb: 1.5, pt: 1 }}>
+    <Box sx={{ height: "100%", background: "linear-gradient(180deg,#081726,#132d4b)", color: "#deebff", p: 1.5, display: "flex", flexDirection: "column" }}>
+      <Stack direction="row" alignItems="center" sx={{ px: 1, pb: 1.5, pt: 1 }}>
         {!collapsed && (
           <Box>
             <Typography variant="h6" fontWeight={800}>Server Installer</Typography>
             <Typography variant="caption" sx={{ opacity: 0.8 }}>Control Panel</Typography>
           </Box>
         )}
-        {!isMobile && (
-          <Button size="small" variant="outlined" onClick={() => setCollapsed((v) => !v)} sx={{ color: "#deebff", borderColor: "rgba(219,234,254,.35)", textTransform: "none", minWidth: 74 }}>
-            {collapsed ? "Expand" : "Collapse"}
-          </Button>
-        )}
       </Stack>
       {!collapsed && <Chip label={cfg.os_label} size="small" sx={{ mb: 1.5, ml: 1, bgcolor: "rgba(96,165,250,.2)", color: "#dbeafe", border: "1px solid rgba(147,197,253,.45)" }} />}
       <Button fullWidth variant={page === "home" ? "contained" : "outlined"} sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }} onClick={() => { setPage("home"); if (isMobile) setMobileOpen(false); }}>
         {collapsed ? "Home" : "Dashboard Home"}
-      </Button>
-      <Button
-        fullWidth
-        variant="outlined"
-        sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: "#dbeafe", borderColor: "rgba(219,234,254,.35)" }}
-        onClick={runDashboardUpdate}
-      >
-        {collapsed ? "Update" : "Update Dashboard"}
       </Button>
       <Button
         fullWidth
@@ -1632,6 +1619,15 @@ function App() {
         onClick={() => { setPage("files"); setFileManagerData(null); if (isMobile) setMobileOpen(false); }}
       >
         {collapsed ? "Files" : "File Manager"}
+      </Button>
+      <Box sx={{ flexGrow: 1 }} />
+      <Button
+        fullWidth
+        variant="outlined"
+        sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: "#dbeafe", borderColor: "rgba(219,234,254,.35)" }}
+        onClick={runDashboardUpdate}
+      >
+        {collapsed ? "Update" : "Update Dashboard"}
       </Button>
     </Box>
   );
@@ -1680,8 +1676,10 @@ function App() {
       {updateSourceDialog}
       <AppBar position="fixed" sx={{ zIndex: 1300, ml: `${mainMargin}px`, width: `calc(100% - ${mainMargin}px)`, background: "linear-gradient(90deg,#081726,#1a3f66)", transition: "all .2s ease" }}>
         <Toolbar sx={{ gap: 1 }}>
-          <IconButton color="inherit" onClick={() => isMobile ? setMobileOpen(true) : setCollapsed((v) => !v)}>
-            <span style={{ fontSize: 18, fontWeight: 700 }}>|||</span>
+          <IconButton color="inherit" onClick={() => isMobile ? setMobileOpen(true) : setCollapsed((v) => !v)} title={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+            <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+              <path d="M3 18h18v-2H3v2zm0-5h18v-2H3v2zm0-7v2h18V6H3z"/>
+            </svg>
           </IconButton>
           <Box sx={{ ml: 0.5 }}>
             <Typography variant="h6" fontWeight={800}>{headerTitle}</Typography>
