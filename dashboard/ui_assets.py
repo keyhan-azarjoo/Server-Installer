@@ -306,26 +306,31 @@ if (firstInput) firstInput.focus();
 
 
 def render_dashboard_page(config, script_paths=None, dashboard_root=None):
-    # Page files under ui/pages/ are inlined as script content so Babel processes
-    # them synchronously — external src= scripts are fetched async by Babel standalone,
-    # causing a race where React renders before page IIFEs have registered themselves.
-    pages_prefix = "/static/ui/pages/"
+    # All dashboard scripts are inlined as script content so Babel processes them
+    # synchronously in document order. External src= scripts are fetched asynchronously
+    # by Babel standalone, creating a race where app.js can evaluate before
+    # components.js has set window.ServerInstallerUI.components, causing NavCard/
+    # ActionCard to be undefined everywhere.  Inline scripts have no fetch step and
+    # are guaranteed to run in order before ReactDOM.render fires.
+    static_prefix = "/static/ui/"
     script_tags_list = []
     for path in (script_paths or DASHBOARD_UI_SCRIPTS):
-        if dashboard_root and path.startswith(pages_prefix):
-            rel = path[len("/static/ui/"):]  # e.g. "pages/home/home.js"
+        inlined = False
+        if dashboard_root and path.startswith(static_prefix):
+            rel = path[len(static_prefix):]  # e.g. "core.js" or "pages/home/home.js"
             file_path = pathlib.Path(dashboard_root) / "ui" / rel
             try:
                 content = file_path.read_text(encoding="utf-8")
                 script_tags_list.append(
                     f'  <script type="text/babel">\n{content}\n  </script>'
                 )
-                continue
+                inlined = True
             except Exception:
                 pass
-        script_tags_list.append(
-            f'  <script type="text/babel" src="{html.escape(path)}"></script>'
-        )
+        if not inlined:
+            script_tags_list.append(
+                f'  <script type="text/babel" src="{html.escape(path)}"></script>'
+            )
     script_tags = "\n".join(script_tags_list)
     return """<!doctype html>
 <html>
