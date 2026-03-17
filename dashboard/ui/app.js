@@ -257,7 +257,7 @@ function App() {
 
   const refreshPageServices = React.useCallback((targetPage) => {
     if (targetPage === "services") return loadServices.current();
-    if (targetPage === "mongo") return loadMongoServices.current();
+    if (targetPage === "mongo" || String(targetPage || "").startsWith("mongo-")) return loadMongoServices.current();
     if (targetPage === "s3") return loadS3Services.current();
     if (targetPage === "docker") return loadDockerServices.current();
     if (targetPage === "proxy") return loadProxyServices.current();
@@ -269,7 +269,7 @@ function App() {
   }, []);
 
   const refreshPageStatus = React.useCallback((targetPage) => {
-    if (targetPage === "mongo") return loadMongoInfo.current();
+    if (targetPage === "mongo" || String(targetPage || "").startsWith("mongo-")) return loadMongoInfo.current();
     if (targetPage === "s3") return loadS3Info.current();
     if (targetPage === "docker") return loadDockerInfo.current();
     if (targetPage === "proxy") return loadProxyInfo.current();
@@ -285,13 +285,13 @@ function App() {
   }, [refreshPageServices, refreshPageStatus]);
 
   React.useEffect(() => {
-    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-")) {
+    if (page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("mongo-") || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-")) {
       refreshPageContext(page);
     }
   }, [page, refreshPageContext]);
 
   React.useEffect(() => {
-    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-"))) {
+    if (!(page === "services" || page === "dotnet" || page === "s3" || page === "mongo" || String(page).startsWith("mongo-") || page === "docker" || page === "proxy" || page === "python" || page === "website" || String(page).startsWith("dotnet-") || String(page).startsWith("python-"))) {
       return undefined;
     }
     const t = setInterval(() => {
@@ -538,6 +538,8 @@ function App() {
     if (page === "dotnet") return "DotNet";
     if (page === "s3") return "S3";
     if (page === "mongo") return "MongoDB";
+    if (page === "mongo-native") return "MongoDB > Native";
+    if (page === "mongo-docker") return "MongoDB > Docker";
     if (page === "docker") return "Docker";
     if (page === "proxy") return "Proxy";
     if (page === "python") return "Python";

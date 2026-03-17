@@ -4,120 +4,129 @@
 
   ns.pages.mongo = function renderMongoPage(p) {
     const {
-      Alert, Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
-      ActionCard, ActionIcon,
-      cfg, run, selectableIps, serviceBusy,
+      Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
+      NavCard, ActionIcon,
+      cfg, serviceBusy,
       mongo, mongoDocker, mongoWebsiteUrl, mongoDisplayServices,
       mongoCompassDownloadUrl, mongoCompassUri,
       isScopeLoading, loadMongoInfo, loadMongoServices,
       hasStoppedServices, batchServiceAction, copyText, tryOpenCompass, promptOpenMongoWebsite,
-      isServiceRunningStatus, formatServiceState, onServiceAction,
+      isServiceRunningStatus, formatServiceState, onServiceAction, setPage,
       renderServiceUrls, renderServicePorts,
       DownloadCompassIcon, CopyCompassIcon, TryOpenCompassIcon, OpenCompassStyleIcon,
       RefreshSmallIcon, StartAllIcon, StopAllIcon,
     } = p;
 
+    // Group services by instance: derive a group key from name prefix
+    function groupServices(svcs) {
+      const groups = {};
+      (svcs || []).forEach((svc) => {
+        const raw = String(svc.name || "");
+        const key = raw.includes("-") ? raw.split("-").slice(0, -1).join("-") || raw : raw;
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(svc);
+      });
+      return groups;
+    }
+
+    function renderServiceGroup(groupKey, svcs) {
+      const allRunning = svcs.every((s) => isServiceRunningStatus(s.status, s.sub_status));
+      const allStopped = svcs.every((s) => !isServiceRunningStatus(s.status, s.sub_status));
+      const isDbGroup = svcs.some((s) => /(mongo|mongod|mongodb)/i.test(String(s.name || "").replace(/-?(web|ui|express)$/i, "")));
+      return (
+        <Paper key={groupKey} variant="outlined" sx={{ p: 1.5, mb: 1.5, borderRadius: 2, border: "1px solid #dbe5f6" }}>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }} sx={{ mb: 1 }}>
+            <Typography variant="subtitle2" fontWeight={700} sx={{ flexGrow: 1 }}>{groupKey}</Typography>
+            {isDbGroup && (
+              <>
+                <ActionIcon title="Copy Compass URI" onClick={() => copyText(mongoCompassUri, "Compass connection URI")} IconComp={CopyCompassIcon} fallback="CP" />
+                <ActionIcon title="Try Open Compass" onClick={tryOpenCompass} IconComp={TryOpenCompassIcon} fallback="OP" />
+                {!!mongoWebsiteUrl && (
+                  <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={promptOpenMongoWebsite} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
+                )}
+              </>
+            )}
+            <Button
+              size="small"
+              variant="outlined"
+              color={allStopped ? "success" : "error"}
+              disabled={serviceBusy}
+              onClick={() => batchServiceAction(svcs, "MongoDB", allStopped ? "start" : "stop")}
+              sx={{ textTransform: "none", fontSize: 12 }}
+            >
+              {allStopped ? "Start All" : "Stop All"}
+            </Button>
+          </Stack>
+          {svcs.map((svc) => (
+            <Paper key={`mg-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 0.75, borderRadius: 1.5, bgcolor: "#f8faff" }}>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                <Box sx={{ minWidth: 200 }}>
+                  <Typography variant="body2"><b>{svc.name}</b> <Typography component="span" variant="caption" color="text.secondary">({svc.kind || "service"})</Typography></Typography>
+                  {renderServiceUrls(svc)}
+                  {renderServicePorts(svc)}
+                </Box>
+                <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status) || "-"} />
+                <Box sx={{ flexGrow: 1 }} />
+                <Button size="small" variant="outlined" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"} disabled={serviceBusy} onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
+                  {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                </Button>
+                <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
+                <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
+              </Stack>
+            </Paper>
+          ))}
+        </Paper>
+      );
+    }
+
+    const groups = groupServices(mongoDisplayServices);
+
+    const servicePanel = (
+      <Grid item xs={12}>
+        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+          <CardContent>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+              <Typography variant="h6" fontWeight={800}>MongoDB Services</Typography>
+              <Box sx={{ flexGrow: 1 }} />
+              <ActionIcon title="Download Compass" onClick={() => window.open(mongoCompassDownloadUrl, "_blank", "noopener,noreferrer")} IconComp={DownloadCompassIcon} fallback="DL" />
+              <Button
+                type="button"
+                variant="outlined"
+                disabled={isScopeLoading("mongo")}
+                onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])}
+                sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
+              >
+                Refresh
+              </Button>
+              {mongoDisplayServices.length > 0 && (
+                <Button
+                  type="button"
+                  variant="contained"
+                  color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
+                  disabled={serviceBusy || mongoDisplayServices.length === 0}
+                  onClick={() => batchServiceAction(mongoDisplayServices, "MongoDB", hasStoppedServices(mongoDisplayServices) ? "start" : "stop")}
+                  sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
+                >
+                  {hasStoppedServices(mongoDisplayServices) ? "Start All" : "Stop All"}
+                </Button>
+              )}
+            </Stack>
+            <Box sx={{ mt: 1.2, maxHeight: 400, overflow: "auto" }}>
+              {mongoDisplayServices.length === 0 && <Typography variant="body2" color="text.secondary">No MongoDB services found.</Typography>}
+              {Object.entries(groups).map(([key, svcs]) => renderServiceGroup(key, svcs))}
+            </Box>
+          </CardContent>
+        </Card>
+      </Grid>
+    );
+
     if (cfg.os === "windows") {
       return (
         <Grid container spacing={2}>
-          <Grid item xs={12} md={8}>
-            <ActionCard
-              title="Install MongoDB (Windows)"
-              description="Install MongoDB as a native Windows service. Leave HTTP Port or HTTPS Port empty to skip that protocol."
-              action="/run/mongo_windows"
-              fields={[
-                { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
-                { name: "LOCALMONGO_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
-                { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "Leave empty to skip HTTPS", checkPort: true },
-                { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017", checkPort: true },
-                { name: "LOCALMONGO_WEB_PORT", label: "Local Web UI Port", defaultValue: "8081", placeholder: "8081" },
-                { name: "LOCALMONGO_ADMIN_USER", label: "MongoDB Admin User", defaultValue: "admin" },
-                { name: "LOCALMONGO_ADMIN_PASSWORD", label: "MongoDB Admin Password", type: "password", defaultValue: "StrongPassword123" },
-                { name: "LOCALMONGO_UI_USER", label: "Web UI User", defaultValue: "admin" },
-                { name: "LOCALMONGO_UI_PASSWORD", label: "Web UI Password", type: "password", defaultValue: "StrongPassword123" },
-              ]}
-              onRun={run}
-              color="#7c3aed"
-            />
+          <Grid item xs={12} md={6}>
+            <NavCard title="Native" text="Install MongoDB as a Windows service." onClick={() => setPage("mongo-native")} />
           </Grid>
-          <Grid item xs={12} md={4}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
-              <CardContent>
-                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Requirements</Typography>
-                <Typography variant="body2">Windows service: native `mongod` install</Typography>
-                <Typography variant="body2">Docker: optional, not required</Typography>
-                <Typography variant="body2">MongoDB: {mongo.installed ? `Installed (${mongo.server_version || "native"})` : "Not installed yet"}</Typography>
-                {!!mongo.web_version && <Typography variant="body2">Web Version: {mongo.web_version}</Typography>}
-                {!!mongoWebsiteUrl && <Typography variant="body2" sx={{ mt: 1 }}>HTTPS URL: {mongoWebsiteUrl}</Typography>}
-                {!!mongo.connection_string && <Typography variant="body2">Connection: {mongo.connection_string}</Typography>}
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-              <CardContent>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                  <Typography variant="h6" fontWeight={800}>MongoDB Services</Typography>
-                  <Box sx={{ flexGrow: 1 }} />
-                  <ActionIcon title="Download Compass" onClick={() => window.open(mongoCompassDownloadUrl, "_blank", "noopener,noreferrer")} IconComp={DownloadCompassIcon} fallback="DL" />
-                  <ActionIcon title="Copy Compass URI" onClick={() => copyText(mongoCompassUri, "Compass connection URI")} IconComp={CopyCompassIcon} fallback="CP" />
-                  <ActionIcon title="Try Open Compass" onClick={tryOpenCompass} IconComp={TryOpenCompassIcon} fallback="OP" />
-                  {!!mongoWebsiteUrl && (
-                    <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={promptOpenMongoWebsite} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
-                  )}
-                  <Button
-                    type="button"
-                    variant="outlined"
-                    disabled={isScopeLoading("mongo")}
-                    onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])}
-                    startIcon={RefreshSmallIcon ? <RefreshSmallIcon fontSize="small" /> : null}
-                    sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
-                  >
-                    Refresh
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="contained"
-                    color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
-                    disabled={serviceBusy || mongoDisplayServices.length === 0}
-                    onClick={() => batchServiceAction(mongoDisplayServices, "MongoDB", hasStoppedServices(mongoDisplayServices) ? "start" : "stop")}
-                    startIcon={(hasStoppedServices(mongoDisplayServices) ? StartAllIcon : StopAllIcon) ? React.createElement(hasStoppedServices(mongoDisplayServices) ? StartAllIcon : StopAllIcon, { fontSize: "small" }) : null}
-                    sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
-                  >
-                    {hasStoppedServices(mongoDisplayServices) ? "Start All" : "Stop All"}
-                  </Button>
-                </Stack>
-                <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
-                  {mongoDisplayServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}
-                  {mongoDisplayServices.map((svc) => (
-                    <Paper key={`mongo-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                        <Box sx={{ minWidth: 250 }}>
-                          <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
-                          {renderServiceUrls(svc)}
-                          {renderServicePorts(svc)}
-                        </Box>
-                        <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
-                        <Box sx={{ flexGrow: 1 }} />
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
-                          disabled={serviceBusy}
-                          onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
-                          sx={{ textTransform: "none" }}
-                        >
-                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                        </Button>
-                        <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
-                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
+          {servicePanel}
         </Grid>
       );
     }
@@ -125,124 +134,15 @@
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <ActionCard
-              title={`Install MongoDB (${cfg.os === "linux" ? "Linux" : "macOS"})`}
-              description="Deploy MongoDB natively with a Compass-style web admin UI. Leave HTTP Port or HTTPS Port empty to skip that protocol."
-              action="/run/mongo_unix"
-              fields={[
-                { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
-                { name: "LOCALMONGO_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
-                { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "Leave empty to skip HTTPS", checkPort: true },
-                { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017", checkPort: true },
-                { name: "LOCALMONGO_WEB_PORT", label: "Local Web UI Port", defaultValue: "8081", placeholder: "8081" },
-                { name: "LOCALMONGO_ADMIN_USER", label: "MongoDB Admin User", defaultValue: "admin" },
-                { name: "LOCALMONGO_ADMIN_PASSWORD", label: "MongoDB Admin Password", type: "password", defaultValue: "StrongPassword123" },
-                { name: "LOCALMONGO_UI_USER", label: "Web UI User", defaultValue: "admin" },
-                { name: "LOCALMONGO_UI_PASSWORD", label: "Web UI Password", type: "password", defaultValue: "StrongPassword123" },
-              ]}
-              onRun={run}
-              color="#7c3aed"
-            />
+            <NavCard title="Native" text="Install MongoDB natively with a Compass-style web UI." onClick={() => setPage("mongo-native")} />
           </Grid>
           <Grid item xs={12} md={6}>
-            <ActionCard
-              title="Deploy MongoDB (Docker)"
-              description="Run MongoDB and mongo-express web UI in Docker containers. Leave HTTP Port or HTTPS Port empty to skip that protocol."
-              action="/run/mongo_docker"
-              fields={[
-                { name: "LOCALMONGO_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
-                { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "Leave empty to skip HTTPS", checkPort: true },
-                { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017", checkPort: true },
-                { name: "LOCALMONGO_WEB_PORT", label: "Web UI Port (internal)", defaultValue: "8081", placeholder: "8081" },
-                { name: "LOCALMONGO_ADMIN_USER", label: "MongoDB Admin User", defaultValue: "admin" },
-                { name: "LOCALMONGO_ADMIN_PASSWORD", label: "MongoDB Admin Password", type: "password", defaultValue: "StrongPassword123" },
-                { name: "LOCALMONGO_UI_USER", label: "Web UI User", defaultValue: "admin" },
-                { name: "LOCALMONGO_UI_PASSWORD", label: "Web UI Password", type: "password", defaultValue: "StrongPassword123" },
-              ]}
-              onRun={run}
-              color="#166534"
-            />
+            <NavCard title="Docker" text="Deploy MongoDB and web UI in Docker containers." onClick={() => setPage("mongo-docker")} />
           </Grid>
-          <Grid item xs={12} md={4}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
-              <CardContent>
-                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Requirements</Typography>
-                <Typography variant="body2">Docker: {mongoDocker.installed ? `Installed (${mongoDocker.version || "unknown"})` : (cfg.os === "linux" ? "Will be installed if missing" : "Docker Desktop must be running")}</Typography>
-                <Typography variant="body2">HTTPS Proxy: Built into Mongo setup</Typography>
-                <Typography variant="body2">MongoDB: {mongo.installed ? `Installed (${mongo.server_version || "docker"})` : "Not installed yet"}</Typography>
-                {!!mongoWebsiteUrl && <Typography variant="body2" sx={{ mt: 1 }}>HTTPS URL: {mongoWebsiteUrl}</Typography>}
-                {!!mongo.connection_string && <Typography variant="body2">Connection: {mongo.connection_string}</Typography>}
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={12}>
-            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-              <CardContent>
-                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                  <Typography variant="h6" fontWeight={800}>MongoDB Services</Typography>
-                  <Box sx={{ flexGrow: 1 }} />
-                  <ActionIcon title="Download Compass" onClick={() => window.open(mongoCompassDownloadUrl, "_blank", "noopener,noreferrer")} IconComp={DownloadCompassIcon} fallback="DL" />
-                  <ActionIcon title="Copy Compass URI" onClick={() => copyText(mongoCompassUri, "Compass connection URI")} IconComp={CopyCompassIcon} fallback="CP" />
-                  <ActionIcon title="Try Open Compass" onClick={tryOpenCompass} IconComp={TryOpenCompassIcon} fallback="OP" />
-                  {!!mongoWebsiteUrl && (
-                    <ActionIcon title="Open Compass-Style UI" disabled={serviceBusy} onClick={promptOpenMongoWebsite} variant="contained" IconComp={OpenCompassStyleIcon} fallback="UI" />
-                  )}
-                  <Button
-                    type="button"
-                    variant="outlined"
-                    disabled={isScopeLoading("mongo")}
-                    onClick={() => Promise.all([loadMongoInfo.current(), loadMongoServices.current()])}
-                    startIcon={RefreshSmallIcon ? <RefreshSmallIcon fontSize="small" /> : null}
-                    sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
-                  >
-                    Refresh
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="contained"
-                    color={hasStoppedServices(mongoDisplayServices) ? "success" : "error"}
-                    disabled={serviceBusy || mongoDisplayServices.length === 0}
-                    onClick={() => batchServiceAction(mongoDisplayServices, "MongoDB", hasStoppedServices(mongoDisplayServices) ? "start" : "stop")}
-                    startIcon={(hasStoppedServices(mongoDisplayServices) ? StartAllIcon : StopAllIcon) ? React.createElement(hasStoppedServices(mongoDisplayServices) ? StartAllIcon : StopAllIcon, { fontSize: "small" }) : null}
-                    sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700 }}
-                  >
-                    {hasStoppedServices(mongoDisplayServices) ? "Start All" : "Stop All"}
-                  </Button>
-                </Stack>
-                <Box sx={{ mt: 1.2, maxHeight: 320, overflow: "auto" }}>
-                  {mongoDisplayServices.length === 0 && <Typography variant="body2">No MongoDB-related services found.</Typography>}
-                  {mongoDisplayServices.map((svc) => (
-                    <Paper key={`mongo-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                        <Box sx={{ minWidth: 250 }}>
-                          <Typography variant="body2"><b>{svc.name}</b> ({svc.kind})</Typography>
-                          {renderServiceUrls(svc)}
-                          {renderServicePorts(svc)}
-                        </Box>
-                        <Chip size="small" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "success" : "default"} label={formatServiceState(svc.status, svc.sub_status)} />
-                        <Box sx={{ flexGrow: 1 }} />
-                        <Button
-                          size="small"
-                          variant="outlined"
-                          color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
-                          disabled={serviceBusy}
-                          onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
-                          sx={{ textTransform: "none" }}
-                        >
-                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                        </Button>
-                        <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
-                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Box>
-              </CardContent>
-            </Card>
-          </Grid>
+          {servicePanel}
         </Grid>
       );
     }
-    return <Alert severity="info">MongoDB installer is not configured for this OS.</Alert>;
+    return null;
   };
 })();

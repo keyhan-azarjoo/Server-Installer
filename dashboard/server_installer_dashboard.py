@@ -7801,6 +7801,8 @@ def run_dashboard_update(live_cb=None):
             "dashboard/ui/pages/services/services.js",
             "dashboard/ui/pages/s3/s3.js",
             "dashboard/ui/pages/mongo/mongo.js",
+            "dashboard/ui/pages/mongo/mongo-native.js",
+            "dashboard/ui/pages/mongo/mongo-docker.js",
             "dashboard/ui/pages/docker/docker.js",
             "dashboard/ui/pages/proxy/proxy.js",
             "dashboard/ui/pages/dotnet/dotnet.js",
