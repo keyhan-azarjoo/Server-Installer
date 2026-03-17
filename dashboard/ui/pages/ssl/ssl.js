@@ -12,8 +12,6 @@
       isScopeLoading,
     } = p;
 
-    const { CircularProgress: MuiCP } = MaterialUI;
-
     // ── State ─────────────────────────────────────────────────────────────────
     const [certs, setCerts]         = React.useState([]);
     const [certsLoading, setCL]     = React.useState(false);

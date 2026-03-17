@@ -350,11 +350,11 @@ def render_dashboard_page(config, script_paths=None, dashboard_root=None):
     .terminal-log { white-space: pre-wrap; word-break: break-word; font-family: Consolas, monospace; font-size: 12px; }
   </style>
   <script>window.__APP_CONFIG__ = __CONFIG__;</script>
-  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <script crossorigin src="https://unpkg.com/@mui/material@5.16.14/umd/material-ui.production.min.js"></script>
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <script crossorigin src="https://unpkg.com/@mui/icons-material@5.16.14/umd/material-icons.production.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script crossorigin src="https://cdn.jsdelivr.net/npm/@mui/material@5.16.14/umd/material-ui.production.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mui/icons-material@5.16.14/umd/material-icons.production.min.js" onerror="window.MaterialIcons=window.MaterialIcons||{};"></script>
   <script>window.MaterialUIIcons = window.MaterialIcons || {};</script>
 </head>
 <body>

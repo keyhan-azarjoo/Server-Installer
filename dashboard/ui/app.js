@@ -1581,7 +1581,10 @@ function App() {
   const renderPage = () => {
     const pageRenderer = (window.ServerInstallerUI && window.ServerInstallerUI.pages) ? window.ServerInstallerUI.pages[page] : null;
     if (pageRenderer) {
-      return pageRenderer(commonProps);
+      // Use React.createElement so each page function gets its own fiber node and
+      // can use hooks without violating the Rules of Hooks (hook count per component
+      // must be stable, but differs between pages).
+      return React.createElement(pageRenderer, commonProps);
     }
     return <Alert severity="info">No actions available for this page on {cfg.os_label}.</Alert>;
   };
