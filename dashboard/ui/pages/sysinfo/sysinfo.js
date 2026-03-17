@@ -2,7 +2,7 @@
   const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
 
-  ns.pages.sysinfo = function renderSysinfoPage(p) {
+  function SysinfoInner(p) {
     const {
       Grid, Card, CardContent, Typography, Stack, Button, Box, Chip, Select, MenuItem, FormControl, InputLabel,
       systemInfo, dotnet, docker, iis, mongo, pythonService, proxy,
@@ -12,7 +12,6 @@
     const [dashCert, setDashCert] = React.useState(null);
     const [certMode, setCertMode] = React.useState("self-signed");
     const [certName, setCertName] = React.useState("");
-    const [certLoading, setCertLoading] = React.useState(false);
 
     React.useEffect(() => {
       fetch("/api/dashboard/cert")
@@ -132,11 +131,11 @@
                     <Button
                       variant="contained"
                       size="small"
-                      disabled={certLoading || (certMode === "managed" && !certName)}
+                      disabled={certMode === "managed" && !certName}
                       onClick={handleApplyCert}
                       sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }}
                     >
-                      Apply & Restart Dashboard
+                      Apply &amp; Restart Dashboard
                     </Button>
                   </Stack>
                   {certMode === "self-signed" && (
@@ -158,5 +157,11 @@
         </Grid>
       </Grid>
     );
+  }
+
+  // Wrap in React.createElement so hooks inside SysinfoInner have their own fiber
+  // and work correctly regardless of whether app.js calls pages directly or via createElement.
+  ns.pages.sysinfo = function renderSysinfoPage(p) {
+    return React.createElement(SysinfoInner, p);
   };
 })();

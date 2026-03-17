@@ -2,7 +2,7 @@
   const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
 
-  ns.pages.ssl = function renderSslPage(p) {
+  function SslInner(p) {
     const {
       Alert, Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
       TextField, MenuItem, Select, FormControl, InputLabel,
@@ -505,5 +505,10 @@
         )}
       </Grid>
     );
+  }
+
+  // Wrap in React.createElement so hooks inside SslInner have their own fiber.
+  ns.pages.ssl = function renderSslPage(p) {
+    return React.createElement(SslInner, p);
   };
 })();

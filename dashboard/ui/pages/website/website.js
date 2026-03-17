@@ -2,7 +2,7 @@
   const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
 
-  ns.pages.website = function renderWebsitePage(p) {
+  function WebsiteInner(p) {
     const {
       Alert, Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
       TextField, MenuItem, Select, FormControl, InputLabel,
@@ -242,5 +242,9 @@
         </Grid>
       </Grid>
     );
+  }
+
+  ns.pages.website = function renderWebsitePage(p) {
+    return React.createElement(WebsiteInner, p);
   };
 })();
