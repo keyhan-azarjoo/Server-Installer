@@ -7602,16 +7602,23 @@ def run_dashboard_update(live_cb=None):
         if live_cb:
             live_cb(f"[WARN] {len(failed)} file(s) could not be downloaded; using cached versions.\n")
 
+    # Clear bytecode caches so restarted process loads the new .py files.
+    for cache_dir in (ROOT / "dashboard").rglob("__pycache__"):
+        try:
+            shutil.rmtree(cache_dir, ignore_errors=True)
+        except Exception:
+            pass
+
     if live_cb:
         live_cb("[INFO] All files synced. Restarting dashboard service...\n")
 
     def _restart():
         time.sleep(2)
         if os.name == "nt":
-            # Windows: we cannot stop-then-start the service from within this process
-            # because sc.exe stop causes SvcStop()->stop_dashboard() to kill THIS process
-            # before sc.exe start can run.  Spawn a fully detached PowerShell process
-            # that outlives us and restarts the service (or the scheduled task).
+            # Windows: spawn a fully detached PowerShell that stops the service,
+            # waits for it to fully stop, then starts it again.  Using two separate
+            # commands (Stop + Start) instead of Restart-Service avoids a race where
+            # the service process is killed mid-restart before the start completes.
             state_file = ROOT / "dashboard" / "service-state.json"
             service_name = "ServerInstallerDashboard"
             try:
@@ -7623,8 +7630,13 @@ def run_dashboard_update(live_cb=None):
                 ps_cmd = (
                     f"Start-Sleep 3; "
                     f"$svc = Get-Service -Name '{service_name}' -ErrorAction SilentlyContinue; "
-                    f"if ($svc) {{ Restart-Service -Name '{service_name}' -Force -ErrorAction SilentlyContinue }} "
-                    f"else {{ schtasks /Run /TN '{service_name}' 2>$null | Out-Null }}"
+                    f"if ($svc) {{"
+                    f"  Stop-Service -Name '{service_name}' -Force -ErrorAction SilentlyContinue; "
+                    f"  Start-Sleep 3; "
+                    f"  Start-Service -Name '{service_name}' -ErrorAction SilentlyContinue "
+                    f"}} else {{"
+                    f"  schtasks /Run /TN '{service_name}' 2>$null | Out-Null"
+                    f"}}"
                 )
                 subprocess.Popen(
                     [
@@ -7794,6 +7806,8 @@ def run_linux_docker_deploy(form, live_cb=None):
     host_port = (form.get("DOCKER_HOST_PORT", ["8080"])[0] or "8080").strip()
     if not host_port.isdigit():
         return 1, "Docker host port must be numeric."
+    http_port = (form.get("HTTP_PORT", [""])[0] or "").strip()
+    https_port = (form.get("HTTPS_PORT", [""])[0] or "").strip()
 
     source_dir = prepare_source_dir(source_value, live_cb=live_cb)
     app_dir, dll_name = find_app_dll_dir(source_dir)
@@ -7845,6 +7859,61 @@ def run_linux_docker_deploy(form, live_cb=None):
         return code, output or "docker run failed."
 
     extra = f"\nDocker deploy complete.\nContainer: {container_name}\nHost port: {host_port}\n"
+
+    if http_port or https_port:
+        nginx_http = http_port or "80"
+        nginx_https = https_port or "443"
+        service_name = container_name
+        cert_dir = f"/etc/nginx/ssl/{service_name}"
+        nginx_script = f"""
+set -euo pipefail
+command -v nginx >/dev/null 2>&1 || {{ echo "nginx not found; skipping nginx setup."; exit 0; }}
+mkdir -p "{cert_dir}"
+if [[ ! -f "{cert_dir}/server.crt" || ! -f "{cert_dir}/server.key" ]]; then
+  HOST=$(hostname -I | awk '{{print $1}}')
+  SAN="IP:$HOST"
+  openssl req -x509 -nodes -newkey rsa:2048 \\
+    -keyout "{cert_dir}/server.key" -out "{cert_dir}/server.crt" \\
+    -days 825 -subj "/CN=$HOST" -addext "subjectAltName=$SAN" 2>/dev/null
+  chmod 600 "{cert_dir}/server.key"
+fi
+cat > "/etc/nginx/conf.d/{service_name}.conf" <<'NGINX'
+server {{
+    listen {nginx_http};
+    server_name _;
+    return 308 https://$host:{nginx_https}$request_uri;
+}}
+server {{
+    listen {nginx_https} ssl;
+    server_name _;
+    ssl_certificate {cert_dir}/server.crt;
+    ssl_certificate_key {cert_dir}/server.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    location / {{
+        proxy_pass http://127.0.0.1:{host_port};
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+    }}
+}}
+NGINX
+nginx -t && (systemctl is-active --quiet nginx && systemctl reload nginx || systemctl restart nginx)
+echo "Nginx configured: HTTP={nginx_http} -> HTTPS={nginx_https} -> container port {host_port}"
+"""
+        sudo_prefix = []
+        if os.geteuid() != 0 and subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            sudo_prefix = ["sudo"]
+        nginx_code, nginx_out = run_process(sudo_prefix + ["bash", "-c", nginx_script], live_cb=live_cb)
+        if nginx_code != 0 and live_cb:
+            live_cb(f"[WARN] nginx setup returned non-zero; container is still running on port {host_port}.\n")
+        if nginx_code == 0:
+            extra += f"HTTP URL:  http://$(hostname -I | awk '{{print $1}}'):{nginx_http}\n"
+            extra += f"HTTPS URL: https://$(hostname -I | awk '{{print $1}}'):{nginx_https}\n"
+
     return 0, (output or "") + extra
 
 
