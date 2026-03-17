@@ -21,9 +21,8 @@
               { name: "SOURCE_VALUE", label: "Source Path or URL", placeholder: "/srv/app or https://...", enableUpload: true },
               { name: "DOMAIN_NAME", label: "Domain Name" },
               { name: "SERVICE_NAME", label: "Service Name", defaultValue: "dotnet-app" },
-              { name: "SERVICE_PORT", label: "Service Internal Port", defaultValue: "5000" },
-              { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "80", placeholder: "Leave empty to skip HTTP" },
-              { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: "443", placeholder: "Leave empty to skip HTTPS" },
+              { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "80", placeholder: "Leave empty to skip HTTP", checkPort: true },
+              { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: "443", placeholder: "Leave empty to skip HTTPS", checkPort: true },
             ]}
             onRun={run}
           />

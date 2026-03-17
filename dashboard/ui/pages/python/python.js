@@ -46,10 +46,9 @@
                 disabled: selectableIps.length === 0,
                 placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
               },
-              { name: "PYTHON_JUPYTER_PORT", label: "Jupyter Internal Port", defaultValue: pythonPort, required: true, placeholder: "8888" },
               { name: "PYTHON_NOTEBOOK_DIR", label: "Notebook Directory", defaultValue: pythonNotebookDir, placeholder: defaultNotebookDirForOs(cfg.os) },
-              { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "80", placeholder: "Leave empty to skip HTTP" },
-              { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: "443", placeholder: "Leave empty to skip HTTPS" },
+              { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "80", placeholder: "Leave empty to skip HTTP", checkPort: true },
+              { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: "443", placeholder: "Leave empty to skip HTTPS", checkPort: true },
             ]}
             onRun={run}
             color="#2563eb"

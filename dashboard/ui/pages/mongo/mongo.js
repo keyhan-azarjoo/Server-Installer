@@ -27,9 +27,9 @@
               action="/run/mongo_windows"
               fields={[
                 { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
-                { name: "LOCALMONGO_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP" },
-                { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "Leave empty to skip HTTPS" },
-                { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017" },
+                { name: "LOCALMONGO_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
+                { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "Leave empty to skip HTTPS", checkPort: true },
+                { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017", checkPort: true },
                 { name: "LOCALMONGO_WEB_PORT", label: "Local Web UI Port", defaultValue: "8081", placeholder: "8081" },
                 { name: "LOCALMONGO_ADMIN_USER", label: "MongoDB Admin User", defaultValue: "admin" },
                 { name: "LOCALMONGO_ADMIN_PASSWORD", label: "MongoDB Admin Password", type: "password", defaultValue: "StrongPassword123" },
@@ -131,9 +131,9 @@
               action="/run/mongo_unix"
               fields={[
                 { name: "LOCALMONGO_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: selectableIps.length === 1 ? selectableIps[0] : "", required: true, placeholder: "Select IP" },
-                { name: "LOCALMONGO_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP" },
-                { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "Leave empty to skip HTTPS" },
-                { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017" },
+                { name: "LOCALMONGO_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
+                { name: "LOCALMONGO_HTTPS_PORT", label: "HTTPS Port", defaultValue: "9445", placeholder: "Leave empty to skip HTTPS", checkPort: true },
+                { name: "LOCALMONGO_MONGO_PORT", label: "MongoDB Port", defaultValue: "27017", placeholder: "27017", checkPort: true },
                 { name: "LOCALMONGO_WEB_PORT", label: "Local Web UI Port", defaultValue: "8081", placeholder: "8081" },
                 { name: "LOCALMONGO_ADMIN_USER", label: "MongoDB Admin User", defaultValue: "admin" },
                 { name: "LOCALMONGO_ADMIN_PASSWORD", label: "MongoDB Admin Password", type: "password", defaultValue: "StrongPassword123" },

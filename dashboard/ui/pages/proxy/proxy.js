@@ -39,8 +39,8 @@
                 { name: "PROXY_DOMAIN", label: "Domain", placeholder: "Required for real-domain / iran-optimized layers" },
                 { name: "PROXY_EMAIL", label: "Email", placeholder: "Required for real-domain / iran-optimized layers" },
                 { name: "PROXY_DUCKDNS_TOKEN", label: "DuckDNS Token", placeholder: "Optional unless using DuckDNS", trailingAction: { label: "Open DuckDNS", href: "https://www.duckdns.org/" } },
-                { name: "PROXY_PANEL_HTTP_PORT", label: "Proxy Dashboard HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP" },
-                { name: "PROXY_PANEL_PORT", label: "Proxy Dashboard HTTPS Port", defaultValue: String((proxy.panel_url || "").match(/:(\d+)\s*$/)?.[1] || "8443"), placeholder: "Leave empty to skip HTTPS" },
+                { name: "PROXY_PANEL_HTTP_PORT", label: "Proxy Dashboard HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
+                { name: "PROXY_PANEL_PORT", label: "Proxy Dashboard HTTPS Port", defaultValue: String((proxy.panel_url || "").match(/:(\d+)\s*$/)?.[1] || "8443"), placeholder: "Leave empty to skip HTTPS", checkPort: true },
                 ...(selectableIps.length > 0 ? [{ name: "PROXY_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: proxyHost, required: true, placeholder: "Select IP" }] : []),
                 ...(cfg.os === "windows" ? [{ name: "PROXY_WSL_DISTRO", label: "WSL Distro", defaultValue: proxy.distro || "Ubuntu" }] : []),
               ]}
