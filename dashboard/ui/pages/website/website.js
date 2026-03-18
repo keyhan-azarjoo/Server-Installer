@@ -13,7 +13,7 @@
       isScopeLoading, loadWebsiteInfo, loadWebsiteServices,
       onServiceAction, openWebsiteRun,
       isServiceRunningStatus, formatServiceState, renderServiceStatus,
-      renderServiceUrls, renderServicePorts,
+      renderServiceUrls, renderServicePorts, renderFolderIcon,
       scopeErrors,
       defaultWebsiteDirForOs,
       setPage, setFileManagerPath,
@@ -427,15 +427,7 @@
                           Open
                         </Button>
                       )}
-                      {!!(svc.project_path && setFileManagerPath && setPage) && (
-                        <Button
-                          size="small" variant="outlined"
-                          onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }}
-                          sx={{ textTransform: "none" }}
-                        >
-                          Open Folder
-                        </Button>
-                      )}
+                      {renderFolderIcon(svc)}
                       <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => openWebsiteRun(svc)} sx={{ textTransform: "none" }}>
                         Update Files
                       </Button>

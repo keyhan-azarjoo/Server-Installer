@@ -14,6 +14,7 @@ const {
   RefreshSmallIcon,
   StartAllIcon,
   StopAllIcon,
+  FolderIcon,
   DRAWER_W = 250,
   DRAWER_MIN = 82,
 } = core;
@@ -644,6 +645,18 @@ function App() {
     );
   };
 
+  const renderFolderIcon = (svc) => {
+    if (!svc?.project_path || !setPage || !setFileManagerPath) return null;
+    return (
+      <IconOnlyAction
+        title={svc.project_path}
+        IconComp={FolderIcon}
+        fallback="📁"
+        onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }}
+      />
+    );
+  };
+
   const renderServicePorts = () => null;
 
   const onServiceAction = async (action, svc) => {
@@ -965,6 +978,7 @@ function App() {
                   </Box>
                   {renderServiceStatus(svc)}
                   <Box sx={{ flexGrow: 1 }} />
+                  {renderFolderIcon(svc)}
                   <Button size="small" variant="contained" disabled={serviceBusy} onClick={() => setUpdateSourceDlg({ svc, path: "" })} sx={{ textTransform: "none" }}>
                     Update Files
                   </Button>
@@ -997,7 +1011,7 @@ function App() {
         </CardContent>
       </Card>
     </Grid>
-  ), [isScopeLoading, openPythonApiRun, onServiceAction, pythonApiRuns, renderServicePorts, renderServiceUrls, serviceBusy]);
+  ), [isScopeLoading, openPythonApiRun, onServiceAction, pythonApiRuns, renderServicePorts, renderServiceUrls, renderFolderIcon, serviceBusy]);
 
   const software = systemInfo?.software || {};
   const mongoStatusInfo = mongoInfoState || systemInfo || {};
@@ -1526,7 +1540,7 @@ function App() {
     cfg,
     // Icons
     DownloadCompassIcon, CopyCompassIcon, TryOpenCompassIcon, OpenCompassStyleIcon,
-    RefreshSmallIcon, StartAllIcon, StopAllIcon,
+    RefreshSmallIcon, StartAllIcon, StopAllIcon, FolderIcon,
     // Utilities
     clampPercent, defaultNotebookDirForOs, defaultPythonApiDirForOs, defaultWebsiteDirForOs,
     extractLabeledUrl, formatBytes, formatUptime, getSelectableIps, uniqUrls,
@@ -1585,7 +1599,7 @@ function App() {
     refreshPageServices, refreshPageStatus, refreshPageContext,
     poll, run, runDashboardUpdate, runPythonInstallWithCurrentSettings,
     goBack, onPortAction, onServicePortAction,
-    renderServiceUrls, renderServicePorts, renderServiceStatus,
+    renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
     onServiceAction, stopServicesBatch, batchServiceAction, hasStoppedServices,
     onProxyServiceAction, actionLabel,
     openPythonApiRun, runPythonApiUpdateSource,

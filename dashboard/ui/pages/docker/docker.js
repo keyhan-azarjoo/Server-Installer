@@ -11,7 +11,7 @@
       isScopeLoading, loadDockerInfo, loadDockerServices,
       hasStoppedServices, batchServiceAction, copyText,
       isServiceRunningStatus, formatServiceState, onServiceAction,
-      renderServiceUrls, renderServicePorts, renderServiceStatus,
+      renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
       scopeErrors,
     } = p;
     return (
@@ -117,6 +117,7 @@
                         {renderServiceStatus(svc)}
                         <Chip size="small" color={autostart ? "primary" : "default"} label={autostart ? "autostart:on" : "autostart:off"} />
                         <Box sx={{ flexGrow: 1 }} />
+                        {renderFolderIcon(svc)}
                         <Button
                           size="small"
                           variant="outlined"

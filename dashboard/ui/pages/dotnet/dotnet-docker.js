@@ -11,7 +11,7 @@
       isScopeLoading, loadDockerInfo, loadDockerServices,
       hasStoppedServices, batchServiceAction,
       isServiceRunningStatus, formatServiceState, onServiceAction,
-      renderServiceUrls, renderServicePorts, renderServiceStatus,
+      renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
       setPage, setFileManagerPath,
     } = p;
 
@@ -105,9 +105,7 @@
                         </Box>
                         {renderServiceStatus(svc)}
                         <Box sx={{ flexGrow: 1 }} />
-                        {!!(svc.project_path && setFileManagerPath && setPage) && (
-                          <Button size="small" variant="outlined" onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }} sx={{ textTransform: "none" }}>Open Folder</Button>
-                        )}
+                        {renderFolderIcon(svc)}
                         <Button
                           size="small"
                           variant="outlined"

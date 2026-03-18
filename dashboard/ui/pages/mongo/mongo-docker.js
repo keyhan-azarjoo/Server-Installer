@@ -29,7 +29,7 @@
       isScopeLoading, loadMongoInfo, loadMongoServices,
       hasStoppedServices, batchServiceAction, copyText, tryOpenCompass, promptOpenMongoWebsite,
       isServiceRunningStatus, formatServiceState, onServiceAction,
-      renderServiceUrls, renderServicePorts, renderServiceStatus,
+      renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
       DownloadCompassIcon, CopyCompassIcon, TryOpenCompassIcon, OpenCompassStyleIcon,
       setPage, setFileManagerPath,
     } = p;
@@ -238,9 +238,7 @@
                           </Box>
                           {renderServiceStatus(svc)}
                           <Box sx={{ flexGrow: 1 }} />
-                          {!!(svc.project_path && setFileManagerPath && setPage) && (
-                            <Button size="small" variant="outlined" onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }} sx={{ textTransform: "none" }}>Open Folder</Button>
-                          )}
+                          {renderFolderIcon(svc)}
                           <Button size="small" variant="outlined" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"} disabled={serviceBusy} onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
                             {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
                           </Button>

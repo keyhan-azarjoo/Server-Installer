@@ -10,7 +10,7 @@
       proxy, proxyServices, systemInfo,
       isScopeLoading, loadProxyInfo, loadProxyServices,
       hasStoppedServices, batchServiceAction, onProxyServiceAction,
-      isServiceRunningStatus, formatServiceState, renderServiceStatus,
+      isServiceRunningStatus, formatServiceState, renderServiceStatus, renderFolderIcon,
       windowsAdminRequired, windowsAdminReason,
       setPage, setFileManagerPath,
     } = p;
@@ -113,9 +113,7 @@
                           </Box>
                           {renderServiceStatus(svc)}
                           <Box sx={{ flexGrow: 1 }} />
-                          {!!(svc.project_path && setFileManagerPath && setPage) && (
-                            <Button size="small" variant="outlined" onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }} sx={{ textTransform: "none" }}>Open Folder</Button>
-                          )}
+                          {renderFolderIcon(svc)}
                           <Button size="small" variant="outlined" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"} disabled={serviceBusy} onClick={() => onProxyServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
                             {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
                           </Button>

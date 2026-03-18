@@ -2512,7 +2512,7 @@ def run_windows_website_service(form=None, live_cb=None):
     rc, out = run_capture([venv_python, str(service_script), "start"], timeout=120)
     if rc != 0:
         return 1, out or f"Failed to start Windows website service '{deploy['runtime_name']}'."
-    manage_firewall_port("open", deploy["site_port"], "tcp")
+    manage_firewall_port("open", deploy["site_port"], "tcp", host=deploy.get("host"))
     url = f"http://{deploy['host']}" if int(deploy["site_port"]) == 80 else f"http://{deploy['host']}:{deploy['site_port']}"
     _write_website_state_entry({
         "name": deploy["runtime_name"],
@@ -2632,7 +2632,7 @@ def run_unix_website_service(form=None, live_cb=None):
             "publish_rel": deploy["publish_rel"],
             "plist_name": plist_name,
         })
-        manage_firewall_port("open", deploy["site_port"], "tcp")
+        manage_firewall_port("open", deploy["site_port"], "tcp", host=deploy.get("host"))
         return 0, f"Website launchd service deployed.\nService: {plist_name}\nURL: {url}\nContent: {deploy['publish_root']}\n"
     unit_name = f"{deploy['runtime_name']}.service"
     unit_temp = Path(deploy["deploy_root"]) / unit_name
@@ -2661,7 +2661,7 @@ def run_unix_website_service(form=None, live_cb=None):
     rc, out = run_capture(prefix + ["systemctl", "enable", "--now", unit_name], timeout=60)
     if rc != 0:
         return 1, out or f"Failed to enable website service '{unit_name}'."
-    manage_firewall_port("open", deploy["site_port"], "tcp")
+    manage_firewall_port("open", deploy["site_port"], "tcp", host=deploy.get("host"))
     _write_website_state_entry({
         "name": unit_name,
         "form_name": deploy["site_name"],
@@ -2765,7 +2765,7 @@ def run_website_docker(form=None, live_cb=None):
     )
     if code != 0:
         return code, output or "docker run failed."
-    manage_firewall_port("open", deploy["site_port"], "tcp")
+    manage_firewall_port("open", deploy["site_port"], "tcp", host=deploy.get("host"))
     url = f"http://{deploy['host']}" if int(deploy["site_port"]) == 80 else f"http://{deploy['host']}:{deploy['site_port']}"
     _write_website_state_entry({
         "name": container_name,
@@ -2824,7 +2824,7 @@ def run_windows_website_iis(form=None, live_cb=None):
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=180)
     if rc != 0:
         return 1, out or f"Failed to create IIS website '{deploy['site_name']}'."
-    manage_firewall_port("open", deploy["site_port"], "tcp")
+    manage_firewall_port("open", deploy["site_port"], "tcp", host=deploy.get("host"))
     url = f"http://{deploy['host']}" if int(deploy["site_port"]) == 80 else f"http://{deploy['host']}:{deploy['site_port']}"
     _write_website_state_entry({
         "name": deploy["site_name"],
@@ -3047,7 +3047,7 @@ def run_windows_python_api_service(form=None, live_cb=None):
             runtime_log = ""
         detail = runtime_log[-4000:] if runtime_log else (output or "Service did not reach the Running state.")
         return 1, f"Windows service '{service_name}' failed to start.\nService state: {service_state or 'unknown'}\n{detail}"
-    manage_firewall_port("open", deploy["https_port"], "tcp")
+    manage_firewall_port("open", deploy["https_port"], "tcp", host=deploy.get("host"))
     url = f"https://{deploy['host']}:{deploy['https_port']}"
     _update_python_api_state(service_name, {
         "kind": "service",
@@ -3128,10 +3128,10 @@ def run_unix_python_api_service(form=None, live_cb=None):
     rc_enable, out_enable = run_capture(prefix + ["systemctl", "enable", "--now", unit_name], timeout=60)
     if rc_enable != 0:
         return 1, out_enable or f"Failed to enable and start {unit_name}."
-    manage_firewall_port("open", deploy["https_port"], "tcp")
+    manage_firewall_port("open", deploy["https_port"], "tcp", host=deploy.get("host"))
     http_port = deploy.get("http_port", "")
     if http_port:
-        manage_firewall_port("open", http_port, "tcp")
+        manage_firewall_port("open", http_port, "tcp", host=deploy.get("host"))
         _setup_nginx_http_redirect(service_name, http_port, deploy["https_port"], live_cb=live_cb)
     url = f"https://{deploy['host']}:{deploy['https_port']}"
     _update_python_api_state(service_name, {
@@ -3231,10 +3231,10 @@ def run_python_api_docker(form=None, live_cb=None):
     )
     if code != 0:
         return code, output or "docker run failed."
-    manage_firewall_port("open", deploy["https_port"], "tcp")
+    manage_firewall_port("open", deploy["https_port"], "tcp", host=deploy.get("host"))
     http_port = deploy.get("http_port", "")
     if http_port:
-        manage_firewall_port("open", http_port, "tcp")
+        manage_firewall_port("open", http_port, "tcp", host=deploy.get("host"))
         _setup_nginx_http_redirect(deployment_name, http_port, deploy["https_port"], live_cb=live_cb)
     url = f"https://{deploy['host']}:{deploy['https_port']}"
     _update_python_api_state(deployment_name, {
@@ -3397,9 +3397,9 @@ def run_windows_python_api_iis(form=None, live_cb=None):
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=180)
     if rc != 0:
         return 1, out or f"Failed to create IIS site '{site_name}'."
-    manage_firewall_port("open", https_port, "tcp")
+    manage_firewall_port("open", https_port, "tcp", host=deploy.get("host"))
     if http_port:
-        manage_firewall_port("open", http_port, "tcp")
+        manage_firewall_port("open", http_port, "tcp", host=deploy.get("host"))
     url = f"https://{deploy['host']}:{https_port}"
     _update_python_api_state(site_key, {
         "kind": "iis_site",
@@ -3598,7 +3598,7 @@ def start_python_jupyter(host="", port="8888", notebook_dir="", auth_username=""
     if os.name == "nt":
         if host not in ("127.0.0.1", "localhost", "::1"):
             bind_host = "0.0.0.0"
-        ok_fw, _ = manage_firewall_port("open", port, "tcp")
+        ok_fw, _ = manage_firewall_port("open", port, "tcp", host=host)
         if not ok_fw and live_cb:
             live_cb(f"[WARN] Failed to open Windows Firewall for TCP {port}. Jupyter may be unreachable from other devices.\n")
     PYTHON_JUPYTER_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -4530,9 +4530,26 @@ echo "nginx HTTP redirect configured: port {http_port} -> HTTPS {https_port}"
     run_process(sudo_prefix + ["bash", "-c", nginx_script], live_cb=live_cb)
 
 
-def manage_firewall_port(action, port, protocol):
+def _is_internal_ip(ip):
+    """Return True if ip is a loopback, link-local, or RFC-1918 private address."""
+    if not ip:
+        return False
+    ip = str(ip).strip().lower()
+    if ip in ("localhost", "::1", "0:0:0:0:0:0:0:1", "0.0.0.0"):
+        return True
+    try:
+        import ipaddress
+        addr = ipaddress.ip_address(ip)
+        return addr.is_loopback or addr.is_private or addr.is_link_local
+    except ValueError:
+        return False
+
+
+def manage_firewall_port(action, port, protocol, host=None):
     action = (action or "").strip().lower()
     protocol = (protocol or "").strip().lower()
+    if action == "open" and host and _is_internal_ip(host):
+        return True, f"Skipped firewall: port {port} bound to internal host {host}"
     if action not in ("open", "close"):
         return False, "Action must be open or close."
     if protocol not in ("tcp", "udp"):
@@ -7586,13 +7603,13 @@ echo "nginx configured: HTTPS={https_port} -> web UI port {internal_web_port}"
         if nginx_code == 0:
             extra += f"MongoDB Web UI HTTPS: https://{resolved_ip}:{https_port}\n"
             if http_port:
-                manage_firewall_port("open", http_port, "tcp")
+                manage_firewall_port("open", http_port, "tcp", host=resolved_ip)
                 _setup_nginx_http_redirect(service_name, http_port, https_port, live_cb=live_cb)
                 extra += f"HTTP URL: http://{resolved_ip}:{http_port} (redirects to HTTPS)\n"
         else:
             if live_cb:
                 live_cb(f"[WARN] nginx setup failed. Web UI available only at http://127.0.0.1:{internal_web_port}\n")
-        manage_firewall_port("open", https_port, "tcp")
+        manage_firewall_port("open", https_port, "tcp", host=resolved_ip)
 
     if live_cb:
         live_cb(extra)

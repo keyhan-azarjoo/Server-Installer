@@ -11,7 +11,7 @@
       isScopeLoading, loadDotnetInfo, loadDotnetServices, loadDockerServices,
       hasStoppedServices, batchServiceAction, setPage,
       isServiceRunningStatus, formatServiceState, onServiceAction,
-      renderServiceUrls, renderServicePorts, renderServiceStatus,
+      renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
     } = p;
 
     const dotnetDockerServices = (dockerServices || []).filter((s) => {
@@ -34,6 +34,7 @@
               </Box>
               {renderServiceStatus(svc)}
               <Box sx={{ flexGrow: 1 }} />
+              {renderFolderIcon(svc)}
               <Button
                 size="small"
                 variant="outlined"

@@ -13,6 +13,7 @@
     RefreshSmallIcon: MuiIcons.RefreshRounded || MuiIcons.SyncRounded || MuiIcons.Refresh || null,
     StartAllIcon: MuiIcons.PlayArrowRounded || MuiIcons.PlayArrow || null,
     StopAllIcon: MuiIcons.StopRounded || MuiIcons.Stop || null,
+    FolderIcon: MuiIcons.FolderOpenRounded || MuiIcons.FolderOpen || MuiIcons.FolderRounded || MuiIcons.Folder || null,
     DRAWER_W: 250,
     DRAWER_MIN: 82,
   };

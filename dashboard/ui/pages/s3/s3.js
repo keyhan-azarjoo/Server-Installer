@@ -12,7 +12,7 @@
       isScopeLoading, loadS3Info, loadS3Services,
       hasStoppedServices, batchServiceAction, copyText,
       isServiceRunningStatus, formatServiceState, onServiceAction,
-      renderServiceUrls, renderServicePorts, renderServiceStatus,
+      renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
       OpenCompassStyleIcon, TryOpenCompassIcon, CopyCompassIcon,
       setPage, setFileManagerPath,
     } = p;
@@ -99,9 +99,7 @@
                         </Box>
                         {renderServiceStatus(svc)}
                         <Box sx={{ flexGrow: 1 }} />
-                        {!!(svc.project_path && setFileManagerPath && setPage) && (
-                          <Button size="small" variant="outlined" onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }} sx={{ textTransform: "none" }}>Open Folder</Button>
-                        )}
+                        {renderFolderIcon(svc)}
                         <Button
                           size="small"
                           variant="outlined"
@@ -190,9 +188,7 @@
                         </Box>
                         {renderServiceStatus(svc)}
                         <Box sx={{ flexGrow: 1 }} />
-                        {!!(svc.project_path && setFileManagerPath && setPage) && (
-                          <Button size="small" variant="outlined" onClick={() => { setFileManagerPath(svc.project_path); setPage("files"); }} sx={{ textTransform: "none" }}>Open Folder</Button>
-                        )}
+                        {renderFolderIcon(svc)}
                         <Button
                           size="small"
                           variant="outlined"
