@@ -5,7 +5,7 @@
   ns.pages["dotnet-docker"] = function renderDotnetDockerPage(p) {
     const {
       Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
-      ActionCard,
+      ActionCard, Divider,
       cfg, run, serviceBusy,
       dockerServices,
       isScopeLoading, loadDockerInfo, loadDockerServices,
@@ -15,10 +15,30 @@
       setPage, setFileManagerPath,
     } = p;
 
+    const dockerInfoCard = (
+      <Grid item xs={12} md={4}>
+        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+          <CardContent>
+            <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Docker Deploy Target</Typography>
+            <Typography variant="body2" sx={{ mb: 1 }}>Docker is installed automatically if not present.</Typography>
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="body2" sx={{ mb: 1 }}><b>Source Path or URL</b> — local folder, a <code>.zip</code> archive, or a GitHub URL. A <code>Dockerfile</code> is auto-generated if not found.</Typography>
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="body2" sx={{ mb: 1 }}><b>Container Name</b> — name of the Docker container. Redeploying the same name stops and recreates the container with updated files.</Typography>
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="body2" sx={{ mb: 1 }}><b>.NET Channel</b> — base image version, e.g. <code>8.0</code> or <code>9.0</code>.</Typography>
+            <Divider sx={{ my: 1 }} />
+            <Typography variant="body2" sx={{ mb: 1 }}><b>HTTP Port</b> — serve plain HTTP on this port. Leave empty to disable HTTP.</Typography>
+            <Typography variant="body2"><b>HTTPS Port</b> — serve HTTPS (TLS) on this port. Leave empty to disable HTTPS.</Typography>
+          </CardContent>
+        </Card>
+      </Grid>
+    );
+
     if (cfg.os === "windows") {
       return (
         <Grid container spacing={2}>
-          <Grid item xs={12} md={6}>
+          <Grid item xs={12} md={8}>
             <ActionCard
               title="Deploy Docker"
               description="Deploy application to Docker. Docker will be installed automatically if not present. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
@@ -33,6 +53,7 @@
               color="#334155"
             />
           </Grid>
+          {dockerInfoCard}
         </Grid>
       );
     }
@@ -43,7 +64,7 @@
       });
       return (
         <Grid container spacing={2}>
-          <Grid item xs={12} md={6}>
+          <Grid item xs={12} md={8}>
             <ActionCard
               title="Deploy Docker"
               description="Build and run Docker container for your .NET app. Docker will be installed automatically if not present. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
@@ -58,6 +79,7 @@
               color="#334155"
             />
           </Grid>
+          {dockerInfoCard}
           <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
             <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
               <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>

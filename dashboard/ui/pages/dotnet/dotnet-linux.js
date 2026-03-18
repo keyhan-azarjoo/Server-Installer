@@ -5,7 +5,7 @@
   ns.pages["dotnet-linux"] = function renderDotnetLinuxPage(p) {
     const {
       Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
-      ActionCard,
+      ActionCard, Divider,
       cfg, run, serviceBusy,
       dotnetServices,
       isScopeLoading, loadDotnetServices,
@@ -21,7 +21,7 @@
 
     return (
       <Grid container spacing={2}>
-        <Grid item xs={12}>
+        <Grid item xs={12} md={8}>
           <ActionCard
             title="Deploy Linux"
             description="Deploy application on Linux. .NET and prerequisites are installed automatically. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
@@ -36,6 +36,23 @@
             ]}
             onRun={run}
           />
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+            <CardContent>
+              <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Linux Deploy Target</Typography>
+              <Typography variant="body2" sx={{ mb: 1 }}><b>.NET Channel</b> — runtime version to install, e.g. <code>8.0</code> or <code>9.0</code>. .NET and nginx are installed automatically if not present.</Typography>
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="body2" sx={{ mb: 1 }}><b>Source Path or URL</b> — local folder, a <code>.zip</code>/<code>.tar.gz</code> archive, or a GitHub repo URL.</Typography>
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="body2" sx={{ mb: 1 }}><b>Domain Name</b> — public domain for the site (e.g. <code>app.example.com</code>). Leave empty to use the server IP. If a domain is set, a port already in use by another service will be shared as a new nginx virtual host.</Typography>
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="body2" sx={{ mb: 1 }}><b>Service Name</b> — the systemd service name. Redeploying the same name replaces the app files and restarts the service.</Typography>
+              <Divider sx={{ my: 1 }} />
+              <Typography variant="body2" sx={{ mb: 1 }}><b>HTTP Port</b> — serve plain HTTP on this port. Leave empty to disable HTTP.</Typography>
+              <Typography variant="body2"><b>HTTPS Port</b> — serve HTTPS (TLS) on this port. Leave empty to disable HTTPS.</Typography>
+            </CardContent>
+          </Card>
         </Grid>
         <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
