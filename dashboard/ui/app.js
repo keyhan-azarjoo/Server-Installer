@@ -1,5 +1,5 @@
 const {
-  Alert, AppBar, Box, Button, Card, CardContent, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, Drawer,
+  Alert, AppBar, Box, Button, Card, CardContent, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer,
   FormControl, Grid, IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, TextField, Toolbar, Tooltip, Typography
 } = MaterialUI;
 
@@ -1683,7 +1683,7 @@ function App() {
   const commonProps = {
     // MUI components
     Alert, AppBar, Box, Button, Card, CardContent, Chip, CssBaseline, Dialog, DialogActions,
-    DialogContent, DialogTitle, Drawer, FormControl, Grid, IconButton, InputLabel,
+    DialogContent, DialogTitle, Divider, Drawer, FormControl, Grid, IconButton, InputLabel,
     LinearProgress, MenuItem, Paper, Select, Stack, TextField, Toolbar, Tooltip, Typography,
     // Shared components
     ActionCard, NavCard,

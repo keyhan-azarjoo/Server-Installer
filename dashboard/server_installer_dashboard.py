@@ -9968,7 +9968,286 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self.write_html(page_output(title, output, code))
 
+    def _handle_ws_pty(self):
+        """Handle /ws/pty WebSocket PTY upgrade in the threaded HTTP server."""
+        import hashlib, base64, struct, threading
+        from urllib.parse import urlparse, parse_qs as _pqs
+
+        self.close_connection = True
+
+        if (not self.is_local_client()) and (not self.is_auth()):
+            self.send_response(401)
+            self.send_header("WWW-Authenticate", 'Basic realm="Dashboard"')
+            self.end_headers()
+            return
+
+        parsed = urlparse(self.path)
+        params = _pqs(parsed.query, keep_blank_values=True)
+        cwd_val = (params.get("cwd", [""])[0] or "").strip() or None
+        try:
+            cols = max(10, min(512, int(params.get("cols", ["80"])[0] or 80)))
+        except Exception:
+            cols = 80
+        try:
+            rows = max(2, min(200, int(params.get("rows", ["24"])[0] or 24)))
+        except Exception:
+            rows = 24
+
+        ws_key = self.headers.get("Sec-WebSocket-Key", "")
+        accept = base64.b64encode(
+            hashlib.sha1((ws_key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()
+        ).decode()
+
+        self.send_response(101, "Switching Protocols")
+        self.send_header("Upgrade", "websocket")
+        self.send_header("Connection", "Upgrade")
+        self.send_header("Sec-WebSocket-Accept", accept)
+        self.end_headers()
+        self.wfile.flush()
+
+        rfile = self.rfile
+        wfile = self.wfile
+        send_lock = threading.Lock()
+
+        def _read_exact(n):
+            if n == 0:
+                return b""
+            buf = b""
+            while len(buf) < n:
+                try:
+                    chunk = rfile.read(n - len(buf))
+                except Exception:
+                    return None
+                if not chunk:
+                    return None
+                buf += chunk
+            return buf
+
+        def ws_recv():
+            try:
+                h = _read_exact(2)
+                if not h:
+                    return None
+                opcode = h[0] & 0x0F
+                masked = bool(h[1] & 0x80)
+                length = h[1] & 0x7F
+                if length == 126:
+                    e = _read_exact(2)
+                    if not e:
+                        return None
+                    length = struct.unpack("!H", e)[0]
+                elif length == 127:
+                    e = _read_exact(8)
+                    if not e:
+                        return None
+                    length = struct.unpack("!Q", e)[0]
+                mask = _read_exact(4) if masked else b"\x00\x00\x00\x00"
+                if mask is None:
+                    return None
+                raw = _read_exact(length)
+                if raw is None:
+                    return None
+                payload = bytearray(raw)
+                if masked:
+                    for i in range(len(payload)):
+                        payload[i] ^= mask[i % 4]
+                return opcode, bytes(payload)
+            except Exception:
+                return None
+
+        def ws_send(opcode, payload):
+            if isinstance(payload, str):
+                payload = payload.encode("utf-8", errors="replace")
+            n = len(payload)
+            hdr = bytearray([0x80 | opcode])
+            if n < 126:
+                hdr.append(n)
+            elif n < 65536:
+                hdr.append(126)
+                hdr.extend(struct.pack("!H", n))
+            else:
+                hdr.append(127)
+                hdr.extend(struct.pack("!Q", n))
+            with send_lock:
+                try:
+                    wfile.write(bytes(hdr) + payload)
+                    wfile.flush()
+                    return True
+                except Exception:
+                    return False
+
+        done = threading.Event()
+
+        if os.name == "nt":
+            try:
+                import winpty as _winpty
+            except ImportError:
+                ws_send(0x1, "\r\nError: pywinpty not installed.\r\n")
+                ws_send(0x8, b"")
+                return
+            shell = os.environ.get("COMSPEC", "cmd.exe")
+            try:
+                proc = _winpty.PtyProcess.spawn(shell, dimensions=(rows, cols), cwd=cwd_val)
+            except Exception as ex:
+                ws_send(0x1, f"\r\nFailed to start terminal: {ex}\r\n")
+                ws_send(0x8, b"")
+                return
+
+            def _pty_read():
+                try:
+                    while not done.is_set():
+                        try:
+                            data = proc.read(4096)
+                            if data:
+                                ws_send(0x1, data)
+                            elif not proc.isalive():
+                                break
+                        except EOFError:
+                            break
+                        except Exception:
+                            break
+                finally:
+                    done.set()
+
+            def _ws_read():
+                nonlocal cols, rows
+                try:
+                    while not done.is_set():
+                        frame = ws_recv()
+                        if frame is None:
+                            break
+                        op, pl = frame
+                        if op == 0x8:
+                            break
+                        if op == 0x9:
+                            ws_send(0xA, pl)
+                            continue
+                        if op in (0x1, 0x2):
+                            text = pl.decode("utf-8", errors="replace") if isinstance(pl, bytes) else pl
+                            if text.startswith('{"type":"resize"'):
+                                try:
+                                    r = json.loads(text)
+                                    proc.setwinsize(max(2, int(r.get("rows", rows))), max(10, int(r.get("cols", cols))))
+                                except Exception:
+                                    pass
+                            else:
+                                try:
+                                    proc.write(text)
+                                except Exception:
+                                    break
+                finally:
+                    done.set()
+
+            t1 = threading.Thread(target=_pty_read, daemon=True)
+            t2 = threading.Thread(target=_ws_read, daemon=True)
+            t1.start()
+            t2.start()
+            done.wait()
+            try:
+                proc.terminate()
+            except Exception:
+                pass
+        else:
+            try:
+                import pty as _pty
+                import termios as _termios
+                import fcntl as _fcntl
+            except ImportError as ex:
+                ws_send(0x1, f"\r\nError: {ex}\r\n")
+                ws_send(0x8, b"")
+                return
+            shell = os.environ.get("SHELL", "/bin/bash")
+            master_fd = slave_fd = proc = None
+            try:
+                master_fd, slave_fd = _pty.openpty()
+                try:
+                    _fcntl.ioctl(slave_fd, _termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
+                except Exception:
+                    pass
+                env = {**os.environ, "TERM": "xterm-256color"}
+                proc = subprocess.Popen(
+                    [shell], stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
+                    cwd=cwd_val, env=env, close_fds=True, start_new_session=True,
+                )
+                os.close(slave_fd)
+                slave_fd = None
+            except Exception as ex:
+                for fd in [slave_fd, master_fd]:
+                    if fd is not None:
+                        try:
+                            os.close(fd)
+                        except Exception:
+                            pass
+                ws_send(0x1, f"\r\nFailed to start terminal: {ex}\r\n")
+                ws_send(0x8, b"")
+                return
+
+            def _pty_read():
+                try:
+                    while not done.is_set():
+                        try:
+                            data = os.read(master_fd, 4096)
+                            if data:
+                                ws_send(0x2, data)
+                            else:
+                                break
+                        except (OSError, IOError):
+                            break
+                finally:
+                    done.set()
+
+            def _ws_read():
+                nonlocal cols, rows
+                try:
+                    while not done.is_set():
+                        frame = ws_recv()
+                        if frame is None:
+                            break
+                        op, pl = frame
+                        if op == 0x8:
+                            break
+                        if op == 0x9:
+                            ws_send(0xA, pl)
+                            continue
+                        if op in (0x1, 0x2):
+                            if pl.startswith(b'{"type":"resize"'):
+                                try:
+                                    r = json.loads(pl.decode("utf-8", errors="replace"))
+                                    if r.get("type") == "resize":
+                                        _fcntl.ioctl(master_fd, _termios.TIOCSWINSZ,
+                                                     struct.pack("HHHH", max(2, int(r.get("rows", rows))), max(10, int(r.get("cols", cols))), 0, 0))
+                                except Exception:
+                                    pass
+                            else:
+                                try:
+                                    os.write(master_fd, pl)
+                                except Exception:
+                                    break
+                finally:
+                    done.set()
+
+            t1 = threading.Thread(target=_pty_read, daemon=True)
+            t2 = threading.Thread(target=_ws_read, daemon=True)
+            t1.start()
+            t2.start()
+            done.wait()
+            if proc:
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+            try:
+                os.close(master_fd)
+            except Exception:
+                pass
+
     def do_GET(self):
+        if self.path == "/ws/pty" or self.path.startswith("/ws/pty?"):
+            conn_hdr = self.headers.get("Connection", "")
+            upg_hdr = self.headers.get("Upgrade", "")
+            if "upgrade" in conn_hdr.lower() and upg_hdr.lower() == "websocket":
+                self._handle_ws_pty()
+                return
         if self.path.startswith("/static/"):
             static_rel = self.path.split("?", 1)[0].replace("/static/", "", 1).lstrip("/")
             static_root = (ROOT / "dashboard").resolve()

@@ -356,8 +356,10 @@ def render_dashboard_page(config, script_paths=None, dashboard_root=None):
   <script src="https://cdn.jsdelivr.net/npm/@babel/standalone/babel.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@mui/icons-material@5.16.14/umd/material-icons.production.min.js" onerror="window.MaterialIcons=window.MaterialIcons||{};"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@4.19.0/css/xterm.css">
-  <script src="https://cdn.jsdelivr.net/npm/xterm@4.19.0/lib/xterm.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.7.0/lib/xterm-addon-fit.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm@4.19.0/lib/xterm.js" onerror="window.__xtermFailed=true"></script>
+  <script>if(window.__xtermFailed||!window.Terminal)document.write('<scr'+'ipt src="https://cdnjs.cloudflare.com/ajax/libs/xterm/4.19.0/xterm.min.js"><\/'+'script>');</script>
+  <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.7.0/lib/xterm-addon-fit.js" onerror="window.__fitFailed=true"></script>
+  <script>if(window.__fitFailed||!window.FitAddon)document.write('<scr'+'ipt src="https://unpkg.com/xterm-addon-fit@0.7.0/lib/xterm-addon-fit.js"><\/'+'script>');</script>
   <script>window.MaterialUIIcons = window.MaterialIcons || {};</script>
 </head>
 <body>

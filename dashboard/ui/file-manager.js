@@ -143,19 +143,22 @@
       if (!el) return;
       const T = window.Terminal;
       if (!T) {
-        el.textContent = "xterm.js not available. Check CDN connection.";
+        el.style.cssText = "display:flex;align-items:center;justify-content:center;background:#fff;color:#333;font-family:monospace;font-size:13px;padding:24px;";
+        el.textContent = "Terminal unavailable: xterm.js could not be loaded. Check server internet access or CDN connectivity.";
         return;
       }
       const term = new T({
-        cursorBlink: true, fontFamily: "Consolas,'Courier New',monospace", fontSize: 13,
+        cursorBlink: true,
+        fontFamily: "'SF Mono', Monaco, Menlo, Consolas, 'Courier New', monospace",
+        fontSize: 13,
         theme: {
-          background:"#1e1e2e", foreground:"#cdd6f4", cursor:"#f5e0dc",
-          selectionBackground:"#363659",
-          black:"#45475a", red:"#f38ba8", green:"#a6e3a1", yellow:"#f9e2af",
-          blue:"#89b4fa", magenta:"#f5c2e7", cyan:"#94e2d5", white:"#bac2de",
-          brightBlack:"#585b70", brightRed:"#f38ba8", brightGreen:"#a6e3a1",
-          brightYellow:"#f9e2af", brightBlue:"#89b4fa", brightMagenta:"#f5c2e7",
-          brightCyan:"#94e2d5", brightWhite:"#a6adc8",
+          background: "#ffffff", foreground: "#1d1d1d", cursor: "#333333",
+          selectionBackground: "#b3d5ff",
+          black: "#000000", red: "#c41a16", green: "#007400", yellow: "#836c28",
+          blue: "#0000ff", magenta: "#a90d91", cyan: "#318495", white: "#898989",
+          brightBlack: "#5c5c5c", brightRed: "#c41a16", brightGreen: "#007400",
+          brightYellow: "#836c28", brightBlue: "#0000ff", brightMagenta: "#a90d91",
+          brightCyan: "#318495", brightWhite: "#ffffff",
         },
       });
       const FA = window.FitAddon;
@@ -214,7 +217,7 @@
 
     return (
       <Box ref={containerRef} sx={{
-        width:"100%", height:"100%", flexGrow:1, bgcolor:"#1e1e2e", overflow:"hidden",
+        width:"100%", height:"100%", flexGrow:1, bgcolor:"#ffffff", overflow:"hidden",
         "& .xterm": { height:"100%", padding:"4px" },
         "& .xterm-viewport": { overflowY:"auto !important" },
       }} />
