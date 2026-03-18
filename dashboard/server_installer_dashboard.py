@@ -115,6 +115,47 @@ REPO_RAW_BASE = os.environ.get(
     "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main",
 )
 
+def _repo_api_url():
+    """Derive the GitHub API commits URL from REPO_RAW_BASE."""
+    # REPO_RAW_BASE = https://raw.githubusercontent.com/<owner>/<repo>/<branch>
+    raw = REPO_RAW_BASE.rstrip("/")
+    parts = raw.split("/")
+    # parts[-3]=owner, parts[-2]=repo, parts[-1]=branch
+    if len(parts) >= 3:
+        owner, repo, branch = parts[-3], parts[-2], parts[-1]
+        return f"https://api.github.com/repos/{owner}/{repo}/commits/{branch}"
+    return None
+
+def _fetch_remote_commit_sha(timeout=8):
+    """Return the latest commit SHA on the remote branch, or empty string on failure."""
+    api_url = _repo_api_url()
+    if not api_url:
+        return ""
+    try:
+        req = urllib.request.Request(
+            api_url,
+            headers={"User-Agent": "dashboard-version-check/1.0", "Accept": "application/vnd.github.v3+json"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            return str(data.get("sha", "")).strip()
+    except Exception:
+        return ""
+
+INSTALLED_COMMIT_FILE = Path(__file__).parent / "installed-commit.txt"
+
+def _read_installed_commit():
+    try:
+        return INSTALLED_COMMIT_FILE.read_text(encoding="utf-8").strip()
+    except Exception:
+        return ""
+
+def _save_installed_commit(sha):
+    try:
+        INSTALLED_COMMIT_FILE.write_text(sha.strip(), encoding="utf-8")
+    except Exception:
+        pass
+
 WINDOWS_SETUP_MODULES = [
     "DotNet/windows/modules/common.ps1",
     "DotNet/windows/modules/iis-mode.ps1",
@@ -8999,6 +9040,13 @@ def run_dashboard_update(live_cb=None):
         except Exception:
             pass
 
+    # Record the remote commit SHA so the next version-check knows what was installed.
+    remote_sha = _fetch_remote_commit_sha(timeout=8)
+    if remote_sha:
+        _save_installed_commit(remote_sha)
+        if live_cb:
+            live_cb(f"[INFO] Recorded installed commit: {remote_sha[:12]}\n")
+
     if live_cb:
         live_cb("[INFO] All files synced. Restarting dashboard service...\n")
 
@@ -10322,24 +10370,19 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
             try:
-                local_ver = ""
-                version_file = ROOT / "dashboard" / "version.txt"
-                if version_file.exists():
-                    local_ver = version_file.read_text(encoding="utf-8").strip()
-                remote_ver = ""
-                try:
-                    remote_url = f"{REPO_RAW_BASE}/dashboard/version.txt"
-                    req = urllib.request.Request(remote_url, headers={"User-Agent": "dashboard-version-check/1.0"})
-                    with urllib.request.urlopen(req, timeout=5) as resp:
-                        remote_ver = resp.read().decode("utf-8", errors="replace").strip()
-                except Exception:
-                    pass
-                update_available = bool(remote_ver and local_ver and remote_ver != local_ver)
+                installed_sha = _read_installed_commit()
+                remote_sha = _fetch_remote_commit_sha(timeout=8)
+                if not remote_sha:
+                    # Network unavailable — can't determine; return null so button stays hidden
+                    self.write_json({"ok": True, "update_available": None,
+                                     "installed": installed_sha, "remote": ""}, HTTPStatus.OK)
+                    return
+                update_available = bool(not installed_sha or remote_sha != installed_sha)
                 self.write_json({
                     "ok": True,
-                    "local_version": local_ver,
-                    "remote_version": remote_ver,
                     "update_available": update_available,
+                    "installed": installed_sha[:12] if installed_sha else "",
+                    "remote": remote_sha[:12],
                 }, HTTPStatus.OK)
             except Exception as ex:
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
