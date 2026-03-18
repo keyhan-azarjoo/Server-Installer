@@ -4665,17 +4665,43 @@ def get_listening_ports(limit=200):
     else:
         rc, out = run_capture(["ss", "-ltnupH"], timeout=30)
         if rc == 0 and out:
+            import re as _re
+            seen = {}  # (proto, port) -> dict
             for line in out.splitlines():
                 parts = [p for p in line.split() if p]
                 if len(parts) < 5:
                     continue
                 proto = parts[0]
                 local_addr = parts[4]
-                proc = parts[6] if len(parts) > 6 else ""
+                proc_str = " ".join(parts[5:]) if len(parts) > 5 else ""
                 port = parse_port_from_addr(local_addr)
                 if not (port and port.isdigit()):
                     continue
-                ports.append({"proto": proto, "port": int(port), "process": proc, "state": parts[1]})
+                proc_names = list(dict.fromkeys(_re.findall(r'"([^"]+)"', proc_str)))
+                pid_list = list(dict.fromkeys(_re.findall(r'pid=(\d+)', proc_str)))
+                key = (proto, int(port))
+                if key not in seen:
+                    seen[key] = {
+                        "proto": proto,
+                        "port": int(port),
+                        "process": proc_names[0] if proc_names else "",
+                        "pid": pid_list[0] if pid_list else "",
+                        "processes": proc_names,
+                        "pids": pid_list,
+                        "state": parts[1],
+                    }
+                else:
+                    for n in proc_names:
+                        if n not in seen[key]["processes"]:
+                            seen[key]["processes"].append(n)
+                    for pid in pid_list:
+                        if pid not in seen[key]["pids"]:
+                            seen[key]["pids"].append(pid)
+                    if seen[key]["processes"]:
+                        seen[key]["process"] = seen[key]["processes"][0]
+                    if seen[key]["pids"]:
+                        seen[key]["pid"] = seen[key]["pids"][0]
+            ports = list(seen.values())
 
     ports.sort(key=lambda x: (x.get("port", 0), x.get("proto", "")))
     return ports[:limit]

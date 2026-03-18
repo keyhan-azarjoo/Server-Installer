@@ -606,6 +606,28 @@ function App() {
     }
   };
 
+  const closeListeningPort = async (port, protocol) => {
+    if (!port) return;
+    const ok = window.confirm(`Close port ${port}/${String(protocol || "tcp").toUpperCase()}? This will update the firewall rules.`);
+    if (!ok) return;
+    setPortBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("action", "close");
+      fd.append("port", String(port));
+      fd.append("protocol", protocol || "tcp");
+      const r = await fetch("/api/system/port", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.message || "Port close failed.");
+      setInfoMessage(j.message || `Port ${port} closed.`);
+      loadSystem.current();
+    } catch (err) {
+      setInfoMessage(`Close port failed: ${err}`);
+    } finally {
+      setPortBusy(false);
+    }
+  };
+
   const onServicePortAction = async (svc, portItem, action) => {
     if (!portItem || !portItem.port) return;
     setServiceBusy(true);
@@ -1681,7 +1703,7 @@ function App() {
     loadScopedStatus, loadServiceScope,
     refreshPageServices, refreshPageStatus, refreshPageContext,
     poll, run, runDashboardUpdate, runPythonInstallWithCurrentSettings,
-    goBack, onPortAction, onServicePortAction,
+    goBack, onPortAction, closeListeningPort, onServicePortAction,
     renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
     renderStartupTypeDropdown,
     onServiceAction, stopServicesBatch, batchServiceAction, hasStoppedServices,
