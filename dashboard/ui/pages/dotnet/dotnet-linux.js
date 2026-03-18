@@ -21,13 +21,10 @@
 
     return (
       <Grid container spacing={2}>
-        <Grid item xs={12} md={6}>
-          <ActionCard title="Install Linux" description="Install Linux prerequisites." action="/run/linux_prereq" fields={[{ name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" }]} onRun={run} color="#0f766e" />
-        </Grid>
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12}>
           <ActionCard
             title="Deploy Linux"
-            description="Deploy application on Linux. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
+            description="Deploy application on Linux. .NET and prerequisites are installed automatically. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
             action="/run/linux"
             fields={[
               { name: "DOTNET_CHANNEL", label: ".NET Channel", defaultValue: "8.0" },
