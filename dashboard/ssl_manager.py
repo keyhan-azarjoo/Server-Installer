@@ -318,19 +318,47 @@ def ssl_import_pfx(pfx_bytes: bytes, password: str, domain: str,
 # ─── Let's Encrypt (certbot) ─────────────────────────────────────────────────
 
 def _find_certbot():
-    """Find certbot binary."""
+    """Find certbot binary, including Python Scripts directory (common on Windows)."""
     w = shutil.which("certbot")
     if w:
         return w
-    # Common install paths on Linux
+    # Check alongside the running Python interpreter (covers pip-installed scripts)
+    scripts_dir = Path(sys.executable).parent
+    for candidate in [
+        scripts_dir / "certbot.exe",
+        scripts_dir / "certbot",
+        scripts_dir / "Scripts" / "certbot.exe",
+        scripts_dir / "Scripts" / "certbot",
+    ]:
+        if candidate.is_file():
+            return str(candidate)
+    # Common install paths on Linux / macOS
     for p in ["/usr/bin/certbot", "/usr/local/bin/certbot", "/snap/bin/certbot"]:
         if os.path.isfile(p):
             return p
+    # Module-based fallback: check if certbot is importable
+    try:
+        r = subprocess.run(
+            [sys.executable, "-m", "certbot", "--version"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if r.returncode == 0:
+            # Return a sentinel so callers know to use `python -m certbot`
+            return "__module__"
+    except Exception:
+        pass
     return None
 
 
+def _certbot_cmd(certbot_path):
+    """Return the command list prefix for certbot."""
+    if certbot_path == "__module__":
+        return [sys.executable, "-m", "certbot"]
+    return [certbot_path]
+
+
 def _install_certbot_if_needed(live_cb=None):
-    """Try to install certbot. Returns path or None."""
+    """Try to install certbot. Returns path/sentinel or None."""
     def log(s):
         if live_cb:
             live_cb(s + "\n")
@@ -360,19 +388,30 @@ def _install_certbot_if_needed(live_cb=None):
                     log(f"certbot installed: {found}")
                     return found
     else:
-        # Windows: pip install certbot-windows or certbot
+        # Windows: install via pip into the current Python environment
         log("On Windows, trying: pip install certbot")
         r = subprocess.run(
-            [sys.executable, "-m", "pip", "install", "certbot"],
-            capture_output=True, text=True, timeout=180,
+            [sys.executable, "-m", "pip", "install", "--upgrade", "certbot"],
+            capture_output=True, text=True, timeout=240,
         )
         if r.returncode == 0:
             found = _find_certbot()
             if found:
+                log(f"certbot installed: {found}")
                 return found
-        log("certbot not available via pip on Windows.")
-        log("Alternative: install via https://certbot.eff.org/ or use Certify The Web (GUI).")
-        log("Or use the 'DNS-01 manual challenge' option below with win-acme / Certify The Web.")
+            # pip succeeded but binary lookup failed — try as a module directly
+            try:
+                rv = subprocess.run(
+                    [sys.executable, "-m", "certbot", "--version"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if rv.returncode == 0:
+                    log("certbot available as Python module.")
+                    return "__module__"
+            except Exception:
+                pass
+        log(f"pip output: {r.stdout.strip()[-800:] if r.stdout else ''}{r.stderr.strip()[-400:] if r.stderr else ''}")
+        log("certbot could not be installed via pip.")
 
     return None
 
@@ -428,8 +467,8 @@ def run_ssl_letsencrypt(form, live_cb=None) -> tuple:
     for d in all_domains:
         domain_args += ["-d", d]
 
-    cmd = [
-        certbot, "certonly",
+    cmd = _certbot_cmd(certbot) + [
+        "certonly",
         "--non-interactive", "--agree-tos",
         "--email", email,
         "--cert-name", domain,
@@ -519,8 +558,8 @@ def run_ssl_renew_all(form, live_cb=None) -> tuple:
     certbot_work = certs_dir / "_certbot" / "work"
     certbot_logs = certs_dir / "_certbot" / "logs"
 
-    cmd = [
-        certbot, "renew", "--non-interactive",
+    cmd = _certbot_cmd(certbot) + [
+        "renew", "--non-interactive",
         "--config-dir", str(certbot_config),
         "--work-dir", str(certbot_work),
         "--logs-dir", str(certbot_logs),
