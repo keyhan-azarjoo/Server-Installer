@@ -5804,8 +5804,8 @@ def manage_service(action, name, kind, detail=""):
     kind = (kind or "service").strip().lower()
     svc_name = _safe_service_name(name)
     is_managed_jupyter_service = svc_name in (JUPYTER_SYSTEMD_SERVICE, "serverinstaller-jupyter")
-    if action not in ("start", "stop", "restart", "delete", "autostart_on", "autostart_off"):
-        return False, "Supported actions: start, stop, restart, delete, autostart_on, autostart_off."
+    if action not in ("start", "stop", "restart", "delete", "autostart_on", "autostart_off", "set_startup_type"):
+        return False, "Supported actions: start, stop, restart, delete, autostart_on, autostart_off, set_startup_type."
     if not svc_name:
         return False, "Invalid service name."
 
@@ -5818,6 +5818,13 @@ def manage_service(action, name, kind, detail=""):
         if action == "autostart_off":
             rc, out = run_capture(["docker", "update", "--restart", "no", svc_name], timeout=30)
             return rc == 0, (out or f"Auto-start disabled for docker container '{svc_name}'.")
+        if action == "set_startup_type":
+            _DOCKER_POLICIES = {"unless-stopped", "always", "on-failure", "no"}
+            policy = (detail or "").strip().lower()
+            if policy not in _DOCKER_POLICIES:
+                return False, f"Invalid restart policy '{policy}'. Valid: {', '.join(sorted(_DOCKER_POLICIES))}"
+            rc, out = run_capture(["docker", "update", "--restart", policy, svc_name], timeout=30)
+            return rc == 0, (out or f"Restart policy set to '{policy}' for '{svc_name}'.")
         if action == "delete":
             rc, out = run_capture(["docker", "rm", "-f", svc_name], timeout=60)
             if rc == 0 and _is_python_name(svc_name):
@@ -5863,6 +5870,10 @@ def manage_service(action, name, kind, detail=""):
         if action == "autostart_off":
             rc, out = run_capture(["schtasks", "/Change", "/TN", svc_name, "/DISABLE"], timeout=30)
             return rc == 0, (out or f"Task '{svc_name}' auto-start disabled.")
+        if action == "set_startup_type":
+            flag = "/ENABLE" if (detail or "").strip().lower() == "enabled" else "/DISABLE"
+            rc, out = run_capture(["schtasks", "/Change", "/TN", svc_name, flag], timeout=30)
+            return rc == 0, (out or f"Task '{svc_name}' startup type updated.")
         return False, "Unsupported task action."
 
     if kind == "iis_site" and os.name == "nt":
@@ -5888,8 +5899,8 @@ def manage_service(action, name, kind, detail=""):
             if ok and _is_website_name(svc_name):
                 _cleanup_website_artifacts(svc_name)
             return ok, message
-        if action in ("autostart_on", "autostart_off"):
-            val = "$true" if action == "autostart_on" else "$false"
+        if action in ("autostart_on", "autostart_off", "set_startup_type"):
+            val = "$true" if action == "autostart_on" or (action == "set_startup_type" and (detail or "").strip().lower() == "auto") else "$false"
             rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"Import-Module WebAdministration; Set-ItemProperty \"IIS:\\Sites\\{svc_name}\" -Name serverAutoStart -Value {val}"], timeout=30)
             return rc == 0, (out or f"IIS site '{svc_name}' auto-start updated.")
         return False, "Unsupported IIS action."
@@ -5995,6 +6006,15 @@ def manage_service(action, name, kind, detail=""):
             if ok and _is_website_name(svc_name):
                 _cleanup_website_artifacts(svc_name, remove_files=False)
             return ok, message
+        if action == "set_startup_type":
+            _WIN_TYPES = {"Automatic", "Manual", "Disabled"}
+            startup_type = (detail or "").strip()
+            if startup_type not in _WIN_TYPES:
+                return False, f"Invalid startup type '{startup_type}'. Valid: Automatic, Manual, Disabled"
+            cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command",
+                   f"Set-Service -Name '{svc_name}' -StartupType {startup_type} -ErrorAction Stop"]
+            rc, out = run_capture(cmd, timeout=60)
+            return rc == 0, (out or f"Startup type set to '{startup_type}' for '{svc_name}'.")
         ps_map = {
             "start": f"Start-Service -Name '{svc_name}' -ErrorAction Stop",
             "stop": f"Stop-Service -Name '{svc_name}' -Force -ErrorAction Stop",
@@ -6024,6 +6044,12 @@ def manage_service(action, name, kind, detail=""):
                 rc, out = run_capture(prefix + ["systemctl", "disable", unit], timeout=60)
                 if rc == 0:
                     return True, (out or f"Auto-start disabled for {unit}.")
+                continue
+            if action == "set_startup_type":
+                sub = "enable" if (detail or "").strip().lower() == "enabled" else "disable"
+                rc, out = run_capture(prefix + ["systemctl", sub, unit], timeout=60)
+                if rc == 0:
+                    return True, (out or f"Startup type updated for {unit}.")
                 continue
             if action == "delete":
                 if unit.startswith("/") or ".." in unit:

@@ -9,6 +9,7 @@
       scopeErrors, filteredServices, serviceBusy,
       isServiceRunningStatus, formatServiceState, onServiceAction, actionLabel,
       renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
+      renderStartupTypeDropdown,
       setPage, setFileManagerPath,
     } = p;
     return (
@@ -29,8 +30,6 @@
                 {filteredServices.length === 0 && <Typography variant="body2">No services found.</Typography>}
                 {filteredServices.map((svc) => {
                   const status = String(svc.status || "");
-                  const stopDisabled = serviceBusy || /stopped|inactive|exited|dead/i.test(status);
-                  const autostart = !!svc.autostart;
                   return (
                     <Paper key={`${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
                       <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
@@ -40,8 +39,8 @@
                         </Box>
                         <Chip size="small" label={svc.kind || "service"} />
                         {renderServiceStatus(svc)}
-                        <Chip size="small" color={autostart ? "primary" : "default"} label={autostart ? "autostart:on" : "autostart:off"} />
                         <Box sx={{ flexGrow: 1 }} />
+                        {renderStartupTypeDropdown(svc)}
                         {renderFolderIcon(svc)}
                         <Button
                           size="small"
@@ -54,8 +53,6 @@
                           {isServiceRunningStatus(status, svc.sub_status) ? "Stop" : "Start"}
                         </Button>
                         <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>{actionLabel("restart")}</Button>
-                        <Button size="small" variant="outlined" disabled={serviceBusy || autostart} onClick={() => onServiceAction("autostart_on", svc)} sx={{ textTransform: "none" }}>{actionLabel("autostart_on")}</Button>
-                        <Button size="small" variant="outlined" disabled={serviceBusy || !autostart} onClick={() => onServiceAction("autostart_off", svc)} sx={{ textTransform: "none" }}>{actionLabel("autostart_off")}</Button>
                         <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>{actionLabel("delete")}</Button>
                       </Stack>
                       {renderServiceUrls(svc)}

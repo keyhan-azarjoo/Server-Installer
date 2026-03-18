@@ -629,20 +629,33 @@ function App() {
     const urls = (Array.isArray(svc?.urls) ? svc.urls : []).filter((u) => /^https?:\/\//i.test(String(u || "")));
     if (urls.length === 0) return null;
     return (
-      <Box sx={{ mt: 0.5, display: "flex", flexWrap: "wrap", gap: 0.75 }}>
-        {urls.map((u) => (
-          <Typography
-            key={`${svc.name}-${u}`}
-            variant="caption"
-            component="a"
-            href={u}
-            target="_blank"
-            rel="noopener noreferrer"
-            sx={{ color: "primary.main", wordBreak: "break-all", cursor: "pointer", "&:hover": { textDecoration: "underline" } }}
-          >
-            {u}
-          </Typography>
-        ))}
+      <Box sx={{ mt: 0.5, display: "flex", flexWrap: "wrap", gap: 0.75, alignItems: "center" }}>
+        {urls.map((u) => {
+          const isHttp = /^http:\/\//i.test(u);
+          return (
+            <Stack key={`${svc.name}-${u}`} direction="row" alignItems="center" spacing={0.25}>
+              <Typography
+                variant="caption"
+                component="span"
+                onClick={() => window.open(u, "_blank", "noopener,noreferrer")}
+                sx={{ color: "primary.main", wordBreak: "break-all", cursor: "pointer", "&:hover": { textDecoration: "underline" } }}
+              >
+                {u}
+              </Typography>
+              {isHttp && (
+                <Typography
+                  component="span"
+                  variant="caption"
+                  title="Copy HTTP URL (browser HTTPS-only mode may block direct clicks)"
+                  onClick={() => copyText(u, "URL")}
+                  sx={{ cursor: "pointer", color: "text.disabled", fontSize: 10, lineHeight: 1, "&:hover": { color: "primary.main" } }}
+                >
+                  [copy]
+                </Typography>
+              )}
+            </Stack>
+          );
+        })}
       </Box>
     );
   };
@@ -671,6 +684,69 @@ function App() {
   };
 
   const renderServicePorts = () => null;
+
+  const _getStartupTypeConfig = (svc) => {
+    const kind = (svc?.kind || "").toLowerCase();
+    const platform = (svc?.platform || "").toLowerCase();
+    if (kind === "docker") {
+      return { options: ["unless-stopped", "always", "on-failure", "no"], current: svc.autostart ? "unless-stopped" : "no" };
+    }
+    if (kind === "task") {
+      return { options: ["Enabled", "Disabled"], current: svc.autostart ? "Enabled" : "Disabled" };
+    }
+    if (kind === "iis_site") {
+      return { options: ["auto", "disabled"], current: svc.autostart ? "auto" : "disabled" };
+    }
+    if (kind === "service") {
+      if (platform === "windows") {
+        return { options: ["Automatic", "Manual", "Disabled"], current: svc.start_type || (svc.autostart ? "Automatic" : "Disabled") };
+      }
+      return { options: ["enabled", "disabled"], current: svc.autostart ? "enabled" : "disabled" };
+    }
+    return null;
+  };
+
+  const onStartupTypeChange = async (svc, value) => {
+    setServiceBusy(true);
+    try {
+      const body = new URLSearchParams();
+      body.set("action", "set_startup_type");
+      body.set("name", svc.name);
+      body.set("kind", svc.kind || "service");
+      body.set("detail", value);
+      const r = await fetch("/api/system/service", {
+        method: "POST",
+        headers: { "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.message || "Failed to update startup type.");
+      setInfoMessage(j.message || `Startup type set to ${value}.`);
+      await loadServices.current();
+    } catch (err) {
+      setInfoMessage(`Error: ${err.message}`);
+    } finally {
+      setServiceBusy(false);
+    }
+  };
+
+  const renderStartupTypeDropdown = (svc) => {
+    const config = _getStartupTypeConfig(svc);
+    if (!config) return null;
+    return (
+      <Select
+        size="small"
+        value={config.current}
+        disabled={serviceBusy}
+        onChange={(e) => onStartupTypeChange(svc, e.target.value)}
+        sx={{ fontSize: 12, minWidth: 112, height: 28, ".MuiSelect-select": { py: "3px" } }}
+      >
+        {config.options.map((opt) => (
+          <MenuItem key={opt} value={opt} sx={{ fontSize: 12 }}>{opt}</MenuItem>
+        ))}
+      </Select>
+    );
+  };
 
   const onServiceAction = async (action, svc) => {
     if (!svc || !svc.name) return;
@@ -1613,6 +1689,7 @@ function App() {
     poll, run, runDashboardUpdate, runPythonInstallWithCurrentSettings,
     goBack, onPortAction, onServicePortAction,
     renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
+    renderStartupTypeDropdown,
     onServiceAction, stopServicesBatch, batchServiceAction, hasStoppedServices,
     onProxyServiceAction, actionLabel,
     openPythonApiRun, runPythonApiUpdateSource,
