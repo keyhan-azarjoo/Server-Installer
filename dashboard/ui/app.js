@@ -613,17 +613,7 @@ function App() {
     );
   };
 
-  const renderServicePorts = (svc) => {
-    const ports = Array.isArray(svc?.ports) ? svc.ports : [];
-    if (ports.length === 0) return null;
-    return (
-      <Stack direction={{ xs: "column", md: "row" }} spacing={0.5} alignItems={{ xs: "stretch", md: "center" }} sx={{ mt: 0.6 }} flexWrap="wrap">
-        {ports.map((p) => (
-          <Chip key={`${svc.name}-${p.port}-${p.protocol}`} size="small" label={`${p.protocol || "tcp"}:${p.port}`} />
-        ))}
-      </Stack>
-    );
-  };
+  const renderServicePorts = () => null;
 
   const onServiceAction = async (action, svc) => {
     if (!svc || !svc.name) return;
