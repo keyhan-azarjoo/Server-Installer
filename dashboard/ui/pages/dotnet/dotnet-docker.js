@@ -19,12 +19,9 @@
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <ActionCard title="Install Docker" description="Install Docker prerequisites and .NET runtime." action="/run/windows_setup_docker" fields={[{ name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" }]} onRun={run} color="#1f2937" />
-          </Grid>
-          <Grid item xs={12} md={6}>
             <ActionCard
               title="Deploy Docker"
-              description="Deploy application to Docker. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
+              description="Deploy application to Docker. Docker will be installed automatically if not present. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
               action="/run/windows_docker"
               fields={[
                 { name: "SourceValue", label: "Source Path or URL", enableUpload: true },
@@ -47,12 +44,9 @@
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={6}>
-            <ActionCard title="Install Docker" description="Install Docker Engine on Linux." action="/run/linux_setup_docker" fields={[]} onRun={run} color="#1f2937" />
-          </Grid>
-          <Grid item xs={12} md={6}>
             <ActionCard
               title="Deploy Docker"
-              description="Build and run Docker container for your .NET app. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
+              description="Build and run Docker container for your .NET app. Docker will be installed automatically if not present. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
               action="/run/linux_docker"
               fields={[
                 { name: "CONTAINER_NAME", label: "Container Name", defaultValue: "dotnetapp", required: true },

@@ -17,27 +17,29 @@
     } = p;
     return (
       <Grid container spacing={2}>
-        <Grid item xs={12} md={6}>
-          {cfg.os === "windows" ? (
-            <ActionCard
-              title="Install Docker (Windows)"
-              description="Install Docker only on Windows."
-              action="/run/windows_docker_engine"
-              fields={[]}
-              onRun={run}
-              color="#1f2937"
-            />
-          ) : (
-            <ActionCard
-              title="Install Docker (Linux)"
-              description="Install Docker Engine on Linux/macOS-compatible hosts."
-              action="/run/linux_setup_docker"
-              fields={[]}
-              onRun={run}
-              color="#1f2937"
-            />
-          )}
-        </Grid>
+        {!docker.installed && (
+          <Grid item xs={12} md={6}>
+            {cfg.os === "windows" ? (
+              <ActionCard
+                title="Install Docker (Windows)"
+                description="Install Docker Engine on Windows."
+                action="/run/windows_docker_engine"
+                fields={[]}
+                onRun={run}
+                color="#1f2937"
+              />
+            ) : (
+              <ActionCard
+                title="Install Docker (Linux)"
+                description="Install Docker Engine on Linux/macOS-compatible hosts."
+                action="/run/linux_setup_docker"
+                fields={[]}
+                onRun={run}
+                color="#1f2937"
+              />
+            )}
+          </Grid>
+        )}
         <Grid item xs={12} md={6}>
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
             <CardContent>
