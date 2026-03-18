@@ -653,32 +653,17 @@ function App() {
     if (urls.length === 0) return null;
     return (
       <Box sx={{ mt: 0.5, display: "flex", flexWrap: "wrap", gap: 0.75, alignItems: "center" }}>
-        {urls.map((u) => {
-          const isHttp = /^http:\/\//i.test(u);
-          return (
-            <Stack key={`${svc.name}-${u}`} direction="row" alignItems="center" spacing={0.25}>
-              <Typography
-                variant="caption"
-                component="span"
-                onClick={() => window.open(u, "_blank", "noopener,noreferrer")}
-                sx={{ color: "primary.main", wordBreak: "break-all", cursor: "pointer", "&:hover": { textDecoration: "underline" } }}
-              >
-                {u}
-              </Typography>
-              {isHttp && (
-                <Typography
-                  component="span"
-                  variant="caption"
-                  title="Copy HTTP URL (browser HTTPS-only mode may block direct clicks)"
-                  onClick={() => copyText(u, "URL")}
-                  sx={{ cursor: "pointer", color: "text.disabled", fontSize: 10, lineHeight: 1, "&:hover": { color: "primary.main" } }}
-                >
-                  [copy]
-                </Typography>
-              )}
-            </Stack>
-          );
-        })}
+        {urls.map((u) => (
+          <Typography
+            key={`${svc.name}-${u}`}
+            variant="caption"
+            component="span"
+            onClick={() => window.open(u, "_blank", "noopener,noreferrer")}
+            sx={{ color: "primary.main", wordBreak: "break-all", cursor: "pointer", "&:hover": { textDecoration: "underline" } }}
+          >
+            {u}
+          </Typography>
+        ))}
       </Box>
     );
   };
