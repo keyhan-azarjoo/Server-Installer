@@ -8267,6 +8267,231 @@ EOF
     return run_process(cmd, env=env, live_cb=live_cb, input_text=scripted_input)
 
 
+def run_linux_s3_docker_installer(form=None, live_cb=None):
+    if os.name == "nt":
+        return 1, "Linux S3 Docker installer can only run on Linux/macOS hosts."
+    form = form or {}
+
+    api_port  = (form.get("LOCALS3_HTTPS_PORT",   ["9443"])[0] or "9443").strip()
+    cons_port = (form.get("LOCALS3_CONSOLE_PORT", ["18443"])[0] or "18443").strip()
+    minio_api = (form.get("LOCALS3_API_PORT",     ["9000"])[0] or "9000").strip()
+    minio_ui  = (form.get("LOCALS3_UI_PORT",      ["9001"])[0] or "9001").strip()
+    root_user = (form.get("LOCALS3_ROOT_USER",    ["admin"])[0] or "admin").strip()
+    root_pass = (form.get("LOCALS3_ROOT_PASSWORD",["StrongPassword123"])[0] or "StrongPassword123").strip()
+
+    requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
+    if not requested_host or requested_host in ("localhost", "127.0.0.1"):
+        requested_host = choose_s3_host(requested_host)
+
+    for label, val in [("API HTTPS", api_port), ("Console HTTPS", cons_port),
+                       ("MinIO API", minio_api), ("MinIO UI", minio_ui)]:
+        if not val.isdigit():
+            return 1, f"{label} port must be numeric."
+
+    sudo_prefix = []
+    if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0:
+        if subprocess.run(["which", "sudo"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0:
+            sudo_prefix = ["sudo"]
+
+    host = shlex.quote(requested_host)
+    script = rf"""
+set -euo pipefail
+
+HOST={host}
+API_PORT={shlex.quote(api_port)}
+CONS_PORT={shlex.quote(cons_port)}
+MINIO_API={shlex.quote(minio_api)}
+MINIO_UI={shlex.quote(minio_ui)}
+ROOT_USER={shlex.quote(root_user)}
+ROOT_PASS={shlex.quote(root_pass)}
+
+PROJECT=/opt/locals3/docker
+CERT_DIR="$PROJECT/certs"
+NGINX_DIR="$PROJECT/nginx"
+VOLUME=locals3-docker-minio-data
+MINIO_IMAGE=minio/minio:latest
+LABEL=com.locals3.installer=true
+
+echo "[1/7] Ensuring Docker is installed and running..."
+if ! command -v docker >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq
+    apt-get install -y -qq docker.io docker-compose-plugin || apt-get install -y -qq docker.io
+  elif command -v dnf >/dev/null 2>&1; then
+    dnf install -y -q docker docker-compose-plugin || dnf install -y -q docker
+  elif command -v yum >/dev/null 2>&1; then
+    yum install -y -q docker
+  elif command -v brew >/dev/null 2>&1; then
+    brew install --quiet docker docker-compose
+  else
+    echo "[ERROR] Cannot install Docker: no known package manager found."
+    exit 1
+  fi
+fi
+if command -v systemctl >/dev/null 2>&1; then
+  systemctl enable --now docker >/dev/null 2>&1 || true
+fi
+if ! docker info >/dev/null 2>&1; then
+  echo "[ERROR] Docker daemon is not responding. Start Docker and retry."
+  exit 1
+fi
+echo "      Docker is ready."
+
+echo "[2/7] Stopping previous LocalS3 Docker containers (if any)..."
+docker rm -f locals3-minio locals3-nginx >/dev/null 2>&1 || true
+if [ -f "$PROJECT/docker-compose.yml" ]; then
+  docker compose -f "$PROJECT/docker-compose.yml" down >/dev/null 2>&1 || true
+fi
+
+echo "[3/7] Creating project directories..."
+mkdir -p "$CERT_DIR" "$NGINX_DIR"
+
+echo "[4/7] Generating self-signed TLS certificate..."
+SAN="DNS:localhost,IP:127.0.0.1"
+if echo "$HOST" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'; then
+  SAN="$SAN,IP:$HOST"
+elif [ "$HOST" != "localhost" ]; then
+  SAN="$SAN,DNS:$HOST"
+fi
+openssl req -x509 -nodes -newkey rsa:2048 -days 825 \
+  -keyout "$CERT_DIR/localhost.key" \
+  -out "$CERT_DIR/localhost.crt" \
+  -subj "/CN=$HOST" \
+  -addext "subjectAltName=$SAN" \
+  2>/dev/null
+echo "      Certificate generated."
+
+if [ "$HOST" = "localhost" ] || echo "$HOST" | grep -qE '^127\.'; then
+  DISPLAY_HOST="127.0.0.1"
+else
+  DISPLAY_HOST="$HOST"
+fi
+CONSOLE_REDIRECT_URL="http://${{DISPLAY_HOST}}:${{CONS_PORT}}"
+
+echo "[5/7] Writing nginx config..."
+cat > "$NGINX_DIR/default.conf" <<NGINXEOF
+server {{
+    listen 443 ssl;
+    server_name $HOST localhost;
+    ssl_certificate     /etc/nginx/certs/localhost.crt;
+    ssl_certificate_key /etc/nginx/certs/localhost.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+    client_max_body_size 5g;
+    location / {{
+        proxy_pass         http://locals3-minio:9000;
+        proxy_http_version 1.1;
+        proxy_set_header   Host \$http_host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto https;
+        proxy_read_timeout 3600;
+        proxy_buffering    off;
+        client_max_body_size 5g;
+    }}
+}}
+server {{
+    listen 4443;
+    server_name $HOST localhost;
+    client_max_body_size 5g;
+    location / {{
+        proxy_pass         http://locals3-minio:9001;
+        proxy_http_version 1.1;
+        proxy_set_header   Host \$http_host;
+        proxy_set_header   X-Real-IP \$remote_addr;
+        proxy_set_header   X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto https;
+        proxy_set_header   Upgrade \$http_upgrade;
+        proxy_set_header   Connection "upgrade";
+        proxy_read_timeout 3600;
+        proxy_buffering    off;
+    }}
+}}
+NGINXEOF
+
+echo "[6/7] Writing docker-compose.yml and starting containers..."
+cat > "$PROJECT/docker-compose.yml" <<COMPOSEEOF
+services:
+  locals3-minio:
+    image: $MINIO_IMAGE
+    container_name: locals3-minio
+    labels:
+      - "$LABEL"
+      - "com.locals3.role=minio"
+    environment:
+      MINIO_ROOT_USER: "$ROOT_USER"
+      MINIO_ROOT_PASSWORD: "$ROOT_PASS"
+      MINIO_BROWSER_REDIRECT_URL: "$CONSOLE_REDIRECT_URL"
+    command: server /data --address ":9000" --console-address ":9001"
+    volumes:
+      - $VOLUME:/data
+    ports:
+      - "${{MINIO_API}}:9000"
+      - "${{MINIO_UI}}:9001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  locals3-nginx:
+    image: nginx:alpine
+    container_name: locals3-nginx
+    labels:
+      - "$LABEL"
+      - "com.locals3.role=nginx"
+    ports:
+      - "${{API_PORT}}:443"
+      - "${{CONS_PORT}}:4443"
+    volumes:
+      - $NGINX_DIR:/etc/nginx/conf.d:ro
+      - $CERT_DIR:/etc/nginx/certs:ro
+    depends_on:
+      - locals3-minio
+    restart: unless-stopped
+
+volumes:
+  $VOLUME:
+COMPOSEEOF
+
+docker compose -f "$PROJECT/docker-compose.yml" up -d
+
+echo "[7/7] Waiting for MinIO to become healthy..."
+ELAPSED=0
+until docker inspect locals3-minio --format='{{{{.State.Health.Status}}}}' 2>/dev/null | grep -q healthy; do
+  sleep 3; ELAPSED=$((ELAPSED+3))
+  if [ "$ELAPSED" -ge 90 ]; then
+    echo "[WARN] MinIO health check timed out. Container may still be starting."
+    break
+  fi
+done
+
+# Open firewall ports
+for port in "$API_PORT" "$CONS_PORT"; do
+  if command -v ufw >/dev/null 2>&1; then ufw allow "${{port}}/tcp" >/dev/null 2>&1 || true; fi
+  if command -v firewall-cmd >/dev/null 2>&1; then
+    firewall-cmd --quiet --add-port="${{port}}/tcp" >/dev/null 2>&1 || true
+    firewall-cmd --quiet --permanent --add-port="${{port}}/tcp" >/dev/null 2>&1 || true
+  fi
+done
+
+echo ""
+echo "===== INSTALLATION COMPLETE ====="
+echo "API URL:      https://${{DISPLAY_HOST}}:${{API_PORT}}"
+echo "Console URL:  http://${{DISPLAY_HOST}}:${{CONS_PORT}}"
+echo "Username:     $ROOT_USER"
+echo "Password:     $ROOT_PASS"
+echo ""
+echo "Project dir:  $PROJECT"
+"""
+    cmd = ["bash", "-c", script]
+    if sudo_prefix:
+        cmd = sudo_prefix + cmd
+    return run_process(cmd, live_cb=live_cb)
+
+
 def run_linux_s3_stop(live_cb=None):
     if os.name == "nt":
         return 1, "Linux S3 stop can only run on Linux/macOS hosts."
@@ -10049,12 +10274,18 @@ class Handler(BaseHTTPRequestHandler):
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/s3_linux":
-            title = "S3 Installer (Linux/macOS)"
+            selected_mode = (form.get("LOCALS3_MODE", ["os"])[0] or "os").strip().lower()
+            if selected_mode == "docker":
+                title = "Install S3 (Linux Docker)"
+                runner = lambda cb, f=form: run_linux_s3_docker_installer(f, live_cb=cb)
+            else:
+                title = "S3 Installer (Linux/macOS)"
+                runner = lambda cb, f=form: run_linux_s3_installer(f, live_cb=cb)
             if self.is_fetch():
-                job_id = start_live_job(title, lambda cb: run_linux_s3_installer(form, live_cb=cb))
+                job_id = start_live_job(title, runner)
                 self.write_json({"job_id": job_id, "title": title})
             else:
-                code, output = run_linux_s3_installer(form)
+                code, output = runner(None)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/s3_linux_stop":
