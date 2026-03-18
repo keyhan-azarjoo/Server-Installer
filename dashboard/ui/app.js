@@ -76,6 +76,7 @@ function App() {
   const [websiteInfoState, setWebsiteInfoState] = React.useState(null);
   const [pythonApiEditor, setPythonApiEditor] = React.useState(null);
   const [pythonApiEditorSeed, setPythonApiEditorSeed] = React.useState(0);
+  const [serviceEditDlg, setServiceEditDlg] = React.useState(null);
   const [updateSourceDlg, setUpdateSourceDlg] = React.useState(null);
   const [websiteEditor, setWebsiteEditor] = React.useState(null);
   const [websiteEditorSeed, setWebsiteEditorSeed] = React.useState(0);
@@ -707,6 +708,34 @@ function App() {
 
   const renderServicePorts = () => null;
 
+  const EditSettingsIcon = React.useMemo(() => {
+    const path = "M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.488.488 0 0 0-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54a.484.484 0 0 0-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.485.485 0 0 0-.59.22L2.74 8.87a.49.49 0 0 0 .12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32a.49.49 0 0 0-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z";
+    return ({ size = 18, color = "currentColor" }) => (
+      <svg viewBox="0 0 24 24" width={size} height={size} fill={color}><path d={path} /></svg>
+    );
+  }, []);
+
+  const renderEditServiceIcon = (svc) => {
+    if (!svc?.name) return null;
+    const ports = Array.isArray(svc.ports) ? svc.ports : [];
+    if (ports.length === 0 && !svc.host) return null;
+    return (
+      <Tooltip title="Edit port / host">
+        <IconButton
+          size="small"
+          onClick={() => setServiceEditDlg({
+            svc,
+            newPort: String(ports[0]?.port || ""),
+            newHost: String(svc.host || ""),
+          })}
+          sx={{ color: "text.secondary", "&:hover": { color: "primary.main" } }}
+        >
+          <EditSettingsIcon size={16} />
+        </IconButton>
+      </Tooltip>
+    );
+  };
+
   const _getStartupTypeConfig = (svc) => {
     const kind = (svc?.kind || "").toLowerCase();
     const platform = (svc?.platform || "").toLowerCase();
@@ -999,6 +1028,38 @@ function App() {
     setPythonApiEditorSeed((prev) => prev + 1);
     setPage(targetPage);
   }, [cfg.os]);
+
+  const onServiceBindingChange = React.useCallback(async () => {
+    if (!serviceEditDlg) return;
+    const { svc, newPort, newHost } = serviceEditDlg;
+    const oldPort = Array.isArray(svc.ports) && svc.ports[0] ? svc.ports[0].port : null;
+    setServiceBusy(true);
+    try {
+      const body = new URLSearchParams();
+      body.set("action", "change_binding");
+      body.set("name", svc.name);
+      body.set("kind", svc.kind || "service");
+      body.set("detail", JSON.stringify({
+        old_port: oldPort,
+        new_port: newPort ? parseInt(newPort, 10) : null,
+        new_host: newHost || null,
+      }));
+      const r = await fetch("/api/system/service", {
+        method: "POST",
+        headers: { "X-Requested-With": "fetch", "Content-Type": "application/x-www-form-urlencoded" },
+        body: body.toString(),
+      });
+      const j = await r.json();
+      if (!j.ok) throw new Error(j.message || "Binding change failed.");
+      setInfoMessage(j.message || "Binding updated.");
+      setServiceEditDlg(null);
+      await refreshPageContext(page);
+    } catch (err) {
+      setInfoMessage(`Binding change failed: ${err}`);
+    } finally {
+      setServiceBusy(false);
+    }
+  }, [serviceEditDlg, page, refreshPageContext]);
 
   const runPythonApiUpdateSource = React.useCallback(async (svc, sourcePath) => {
     const title = "Update API Files";
@@ -1704,6 +1765,8 @@ function App() {
     refreshPageServices, refreshPageStatus, refreshPageContext,
     poll, run, runDashboardUpdate, runPythonInstallWithCurrentSettings,
     goBack, onPortAction, closeListeningPort, onServicePortAction,
+    renderEditServiceIcon, onServiceBindingChange,
+    serviceEditDlg, setServiceEditDlg,
     renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
     renderStartupTypeDropdown,
     onServiceAction, stopServicesBatch, batchServiceAction, hasStoppedServices,
@@ -1824,9 +1887,54 @@ function App() {
     </Dialog>
   ) : null;
 
+  const serviceEditDialog = serviceEditDlg ? (
+    <Dialog open onClose={() => setServiceEditDlg(null)} maxWidth="xs" fullWidth>
+      <DialogTitle>Edit Binding — {serviceEditDlg.svc.name}</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          <TextField
+            fullWidth
+            size="small"
+            label="Port"
+            value={serviceEditDlg.newPort}
+            onChange={(e) => setServiceEditDlg((prev) => ({ ...prev, newPort: e.target.value.replace(/\D/g, "") }))}
+            inputProps={{ maxLength: 5 }}
+            helperText={`Current: ${Array.isArray(serviceEditDlg.svc.ports) && serviceEditDlg.svc.ports[0] ? serviceEditDlg.svc.ports[0].port : "—"}`}
+          />
+          <TextField
+            fullWidth
+            size="small"
+            label="Host / IP (optional)"
+            value={serviceEditDlg.newHost}
+            onChange={(e) => setServiceEditDlg((prev) => ({ ...prev, newHost: e.target.value }))}
+            placeholder="0.0.0.0 or leave empty"
+            helperText={`Current: ${serviceEditDlg.svc.host || "—"}`}
+          />
+          <Typography variant="caption" color="text.secondary">
+            Kind: <b>{serviceEditDlg.svc.kind || "service"}</b>.
+            The firewall will be updated automatically. For IIS sites the binding is updated directly.
+            For other service kinds, restart the service after applying.
+          </Typography>
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={() => setServiceEditDlg(null)} sx={{ textTransform: "none" }}>Cancel</Button>
+        <Button
+          variant="contained"
+          disabled={serviceBusy || !serviceEditDlg.newPort}
+          onClick={onServiceBindingChange}
+          sx={{ textTransform: "none" }}
+        >
+          Apply
+        </Button>
+      </DialogActions>
+    </Dialog>
+  ) : null;
+
   return (
     <Box sx={{ display: "flex", minHeight: "100%" }}>
       <CssBaseline />
+      {serviceEditDialog}
       {updateSourceDialog}
       <AppBar position="fixed" sx={{ zIndex: 1300, ml: `${mainMargin}px`, width: `calc(100% - ${mainMargin}px)`, background: "linear-gradient(90deg,#081726,#1a3f66)", transition: "all .2s ease" }}>
         <Toolbar sx={{ gap: 1 }}>

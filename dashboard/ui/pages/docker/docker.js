@@ -12,6 +12,7 @@
       hasStoppedServices, batchServiceAction, copyText,
       isServiceRunningStatus, formatServiceState, onServiceAction,
       renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
+      renderEditServiceIcon,
       scopeErrors,
     } = p;
     return (
@@ -118,6 +119,7 @@
                         <Chip size="small" color={autostart ? "primary" : "default"} label={autostart ? "autostart:on" : "autostart:off"} />
                         <Box sx={{ flexGrow: 1 }} />
                         {renderFolderIcon(svc)}
+                        {renderEditServiceIcon(svc)}
                         <Button
                           size="small"
                           variant="outlined"

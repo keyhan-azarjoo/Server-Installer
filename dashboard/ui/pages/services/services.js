@@ -9,7 +9,7 @@
       scopeErrors, filteredServices, serviceBusy,
       isServiceRunningStatus, formatServiceState, onServiceAction, actionLabel,
       renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
-      renderStartupTypeDropdown,
+      renderStartupTypeDropdown, renderEditServiceIcon,
       setPage, setFileManagerPath,
     } = p;
     return (
@@ -42,6 +42,7 @@
                         <Box sx={{ flexGrow: 1 }} />
                         {renderStartupTypeDropdown(svc)}
                         {renderFolderIcon(svc)}
+                        {renderEditServiceIcon(svc)}
                         <Button
                           size="small"
                           variant="outlined"

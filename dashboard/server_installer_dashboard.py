@@ -6024,8 +6024,47 @@ def manage_service(action, name, kind, detail=""):
     kind = (kind or "service").strip().lower()
     svc_name = _safe_service_name(name)
     is_managed_jupyter_service = svc_name in (JUPYTER_SYSTEMD_SERVICE, "serverinstaller-jupyter")
-    if action not in ("start", "stop", "restart", "delete", "autostart_on", "autostart_off", "set_startup_type"):
-        return False, "Supported actions: start, stop, restart, delete, autostart_on, autostart_off, set_startup_type."
+    if action not in ("start", "stop", "restart", "delete", "autostart_on", "autostart_off", "set_startup_type", "change_binding"):
+        return False, "Supported actions: start, stop, restart, delete, autostart_on, autostart_off, set_startup_type, change_binding."
+
+    if action == "change_binding":
+        import json as _json
+        try:
+            params = _json.loads(detail) if detail else {}
+        except Exception:
+            return False, "Invalid binding params (expected JSON)."
+        old_port = params.get("old_port")
+        new_port = params.get("new_port")
+        new_host = (params.get("new_host") or "").strip()
+        if not new_port or int(new_port) < 1 or int(new_port) > 65535:
+            return False, "Invalid new port number."
+        new_port = int(new_port)
+        old_port = int(old_port) if old_port else None
+        messages = []
+        # IIS site: update binding via PowerShell
+        if kind == "iis_site" and os.name == "nt":
+            if not is_windows_admin():
+                return False, "Administrator is required to update IIS bindings."
+            bind_ip = new_host or "*"
+            ps = (
+                f"Import-Module WebAdministration; "
+                f"Get-WebBinding -Name '{svc_name}' | Remove-WebBinding; "
+                f"New-WebBinding -Name '{svc_name}' -Protocol http -Port {new_port} -IPAddress '{bind_ip}'; "
+                f"Start-Website -Name '{svc_name}' -ErrorAction SilentlyContinue"
+            )
+            rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=60)
+            if not rc == 0:
+                return False, (out or f"Failed to update IIS binding for '{svc_name}'.")
+            messages.append(f"IIS binding updated to port {new_port}.")
+        else:
+            messages.append(f"Service binding change requested for '{svc_name}' (kind={kind}). Firewall will be updated; restart the service to apply new port.")
+        # Update firewall: close old port, open new port
+        if old_port and old_port != new_port:
+            manage_firewall_port("close", str(old_port), "tcp")
+            messages.append(f"Closed firewall port {old_port}/tcp.")
+        manage_firewall_port("open", str(new_port), "tcp")
+        messages.append(f"Opened firewall port {new_port}/tcp.")
+        return True, " ".join(messages)
     if not svc_name:
         return False, "Invalid service name."
 
