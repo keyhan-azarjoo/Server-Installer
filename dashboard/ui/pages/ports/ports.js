@@ -48,7 +48,8 @@
                   label="Port"
                   value={portValue}
                   onChange={(e) => setPortValue(e.target.value.replace(/\D/g, ""))}
-                  inputProps={{ maxLength: 5 }}
+                  inputProps={{ maxLength: 5, autoComplete: "off", "data-lpignore": "true", "data-form-type": "other" }}
+                  autoComplete="off"
                   sx={{ width: 120 }}
                 />
                 <FormControl size="small" sx={{ width: 120 }}>
