@@ -1,3 +1,4 @@
+dashboard/version.txt
 dashboard/download-manifest.txt
 dashboard/start-server-dashboard.py
 dashboard/server_installer_dashboard.py

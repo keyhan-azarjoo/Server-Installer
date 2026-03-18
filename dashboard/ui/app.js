@@ -78,6 +78,7 @@ function App() {
   const [pythonApiEditorSeed, setPythonApiEditorSeed] = React.useState(0);
   const [serviceEditDlg, setServiceEditDlg] = React.useState(null);
   const [updateSourceDlg, setUpdateSourceDlg] = React.useState(null);
+  const [updateAvailable, setUpdateAvailable] = React.useState(null); // null=checking, true=update ready, false=up-to-date
   const [websiteEditor, setWebsiteEditor] = React.useState(null);
   const [websiteEditorSeed, setWebsiteEditorSeed] = React.useState(0);
   const [fileManagerPath, setFileManagerPath] = React.useState("");
@@ -477,6 +478,15 @@ function App() {
       setTermState("Error");
     }
   };
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/dashboard/version-check", { headers: { "X-Requested-With": "fetch" } })
+      .then((r) => r.json())
+      .then((j) => { if (!cancelled) setUpdateAvailable(j.ok ? j.update_available : null); })
+      .catch(() => { if (!cancelled) setUpdateAvailable(null); });
+    return () => { cancelled = true; };
+  }, []);
 
   const runDashboardUpdate = async () => {
     const title = "Dashboard Update";
@@ -1823,14 +1833,16 @@ function App() {
         {collapsed ? "Files" : "File Manager"}
       </Button>
       <Box sx={{ flexGrow: 1 }} />
-      <Button
-        fullWidth
-        variant="outlined"
-        sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: "#dbeafe", borderColor: "rgba(219,234,254,.35)" }}
-        onClick={runDashboardUpdate}
-      >
-        {collapsed ? "Update" : "Update Dashboard"}
-      </Button>
+      {updateAvailable === true && (
+        <Button
+          fullWidth
+          variant="outlined"
+          sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: "#fde68a", borderColor: "rgba(253,230,138,.5)" }}
+          onClick={runDashboardUpdate}
+        >
+          {collapsed ? "Update" : "Update Dashboard"}
+        </Button>
+      )}
     </Box>
   );
 

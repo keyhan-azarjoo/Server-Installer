@@ -10317,6 +10317,33 @@ class Handler(BaseHTTPRequestHandler):
                 traceback.print_exc()
                 self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
             return
+        if self.path.startswith("/api/dashboard/version-check"):
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                local_ver = ""
+                version_file = ROOT / "dashboard" / "version.txt"
+                if version_file.exists():
+                    local_ver = version_file.read_text(encoding="utf-8").strip()
+                remote_ver = ""
+                try:
+                    remote_url = f"{REPO_RAW_BASE}/dashboard/version.txt"
+                    req = urllib.request.Request(remote_url, headers={"User-Agent": "dashboard-version-check/1.0"})
+                    with urllib.request.urlopen(req, timeout=5) as resp:
+                        remote_ver = resp.read().decode("utf-8", errors="replace").strip()
+                except Exception:
+                    pass
+                update_available = bool(remote_ver and local_ver and remote_ver != local_ver)
+                self.write_json({
+                    "ok": True,
+                    "local_version": local_ver,
+                    "remote_version": remote_ver,
+                    "update_available": update_available,
+                }, HTTPStatus.OK)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
         if self.path.startswith("/api/dashboard/cert"):
             if (not self.is_local_client()) and (not self.is_auth()):
                 self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
