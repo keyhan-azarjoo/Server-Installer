@@ -35,8 +35,10 @@
 
   // InstanceRow is defined OUTSIDE MongoNativeInner to prevent remount-on-rerender (which loses focus)
   function InstanceRow({ inst, idx, instances, selectableIps, serviceBusy, updateInstance, removeInstance, deployOne,
-    TextField, Select, MenuItem, FormControl, InputLabel, Stack, Button, Paper, Typography, InputAdornment, IconButton }) {
+    existingInstanceNames,
+    TextField, Select, MenuItem, FormControl, InputLabel, Stack, Button, Paper, Typography, InputAdornment, IconButton, Alert }) {
     const [showPwd, setShowPwd] = React.useState(false);
+    const nameExists = existingInstanceNames && existingInstanceNames.has((inst.instanceName || "").trim().toLowerCase());
     return (
       <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderRadius: 2, border: "1px solid #e0e7ff" }}>
         <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="flex-start" flexWrap="wrap">
@@ -45,7 +47,10 @@
             label="Instance Name" size="small" sx={{ minWidth: 160 }}
             value={inst.instanceName}
             onChange={(e) => updateInstance(inst.id, "instanceName", e.target.value)}
-            helperText="Unique ID (letters, numbers, -)"
+            helperText={nameExists ? "⚠ Name already exists" : "Unique ID (letters, numbers, -)"}
+            FormHelperTextProps={{ sx: nameExists ? { color: "warning.main", fontWeight: 600 } : {} }}
+            color={nameExists ? "warning" : undefined}
+            focused={nameExists ? true : undefined}
           />
           {/* IP */}
           {(() => {
@@ -82,6 +87,11 @@
             }}
           />
         </Stack>
+        {nameExists && (
+          <Alert severity="warning" sx={{ mt: 1, py: 0.3, fontSize: "0.8rem" }}>
+            An instance named <b>{inst.instanceName}</b> already exists. Deploying will overwrite it.
+          </Alert>
+        )}
         <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} alignItems="center">
           <Button
             size="small" variant="contained"
@@ -129,6 +139,20 @@
     const [instances, setInstances] = React.useState(() => [makeDefaultInstance(0, selectableIps)]);
     const [deployingIdx, setDeployingIdx] = React.useState(null);
     const [deployErrors, setDeployErrors] = React.useState({});
+    // Per-service URI visibility: { [svc.name]: bool }
+    const [shownUris, setShownUris] = React.useState({});
+    const toggleUri = (name) => setShownUris((prev) => ({ ...prev, [name]: !prev[name] }));
+
+    // Set of existing instance names (derived from live services)
+    const existingInstanceNames = React.useMemo(() => {
+      return new Set(
+        nativeServices.map((s) => {
+          // Service names are like "LocalMongoDB-localmongo" or "localmongodb-localmongo"
+          const parts = s.name.split("-");
+          return parts.slice(1).join("-").toLowerCase();
+        })
+      );
+    }, [nativeServices]);
 
     // Keep first instance's IP in sync when selectableIps loads
     React.useEffect(() => {
@@ -187,7 +211,8 @@
     }
 
     const rowProps = { selectableIps, serviceBusy, updateInstance, removeInstance, deployOne,
-      TextField, Select, MenuItem, FormControl, InputLabel, Stack, Button, Paper, Typography, InputAdornment, IconButton };
+      existingInstanceNames,
+      TextField, Select, MenuItem, FormControl, InputLabel, Stack, Button, Paper, Typography, InputAdornment, IconButton, Alert };
 
     return (
       <Grid container spacing={2}>
@@ -275,6 +300,7 @@
                 )}
                 {nativeServices.map((svc) => {
                   const svcUri = svc.compass_uri || "";
+                  const uriVisible = !!shownUris[svc.name];
                   return (
                     <Paper key={`mgn-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
                       <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
@@ -283,7 +309,29 @@
                           {renderServiceUrls(svc)}
                           {renderServicePorts(svc)}
                           {!!svcUri && (
-                            <Typography variant="caption" color="text.secondary" sx={{ display: "block", wordBreak: "break-all" }}>{svcUri}</Typography>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              onClick={() => toggleUri(svc.name)}
+                              sx={{
+                                display: "block", wordBreak: "break-all", cursor: "pointer",
+                                userSelect: uriVisible ? "text" : "none",
+                                filter: uriVisible ? "none" : "blur(4px)",
+                                transition: "filter 0.2s",
+                                title: uriVisible ? "" : "Click to reveal",
+                              }}
+                            >
+                              {svcUri}
+                            </Typography>
+                          )}
+                          {!!svcUri && (
+                            <Typography
+                              variant="caption"
+                              onClick={() => toggleUri(svc.name)}
+                              sx={{ cursor: "pointer", color: "primary.main", fontSize: "0.7rem" }}
+                            >
+                              {uriVisible ? "Hide" : "Show connection string"}
+                            </Typography>
                           )}
                         </Box>
                         {renderServiceStatus(svc)}
