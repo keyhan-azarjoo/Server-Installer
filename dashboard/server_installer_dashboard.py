@@ -5619,9 +5619,12 @@ def get_service_items():
                 ports = []
                 base_name = name.replace(".service", "")
                 if _is_locals3_name(base_name):
-                    urls, ports = _urls_from_nginx_conf("/etc/nginx/conf.d/locals3.conf", preferred_host=preferred_host)
+                    # Derive the instance name from the service name (e.g. "locals3-minio" -> "locals3", "foo-minio" -> "foo")
+                    inst_name = re.sub(r"[-_](?:minio|nginx)$", "", base_name, flags=re.IGNORECASE) or "locals3"
+                    urls, ports = _urls_from_nginx_conf(f"/etc/nginx/conf.d/{inst_name}.conf", preferred_host=preferred_host)
                     if not urls:
-                        urls, ports = _urls_from_nginx_conf("/opt/locals3/nginx/nginx-standalone.conf", preferred_host=preferred_host)
+                        urls, ports = _urls_from_nginx_conf(f"/opt/{inst_name}/nginx/nginx-standalone.conf", preferred_host=preferred_host)
+                    # Add direct MinIO ports from all instance service files
                     for mp in _get_linux_minio_direct_ports():
                         if not any(p.get("port") == mp["port"] for p in ports):
                             ports.append(mp)
@@ -7306,25 +7309,31 @@ def _linux_locals3_owns_port(port):
 
 
 def _get_linux_minio_direct_ports():
-    """Return port dicts for MinIO --address and --console-address ports from the systemd service."""
+    """Return port dicts for MinIO --address and --console-address ports from all systemd minio service files."""
     if os.name == "nt":
         return []
-    svc_file = Path("/etc/systemd/system/locals3-minio.service")
-    if not svc_file.exists():
-        return []
-    try:
-        text = svc_file.read_text(encoding="utf-8", errors="ignore")
-    except Exception:
+    svc_dir = Path("/etc/systemd/system")
+    if not svc_dir.exists():
         return []
     ports = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line.startswith("ExecStart="):
-            continue
-        for m in re.finditer(r"--(?:address|console-address)\s+:(\d+)", line):
-            port = int(m.group(1))
-            if port > 0 and not any(p["port"] == port for p in ports):
-                ports.append({"port": port, "protocol": "tcp"})
+    seen_ports = set()
+    try:
+        for svc_file in svc_dir.glob("*-minio.service"):
+            try:
+                text = svc_file.read_text(encoding="utf-8", errors="ignore")
+            except Exception:
+                continue
+            for line in text.splitlines():
+                line = line.strip()
+                if not line.startswith("ExecStart="):
+                    continue
+                for m in re.finditer(r"--(?:address|console-address)\s+:(\d+)", line):
+                    port = int(m.group(1))
+                    if port > 0 and port not in seen_ports:
+                        seen_ports.add(port)
+                        ports.append({"port": port, "protocol": "tcp"})
+    except Exception:
+        pass
     return ports
 
 
@@ -8359,6 +8368,10 @@ def run_linux_s3_installer(form=None, live_cb=None):
         scripted_input = f"{host_line}\n{lan_line}\n{https_flow}\n" + ("\n" * 200)
     env = os.environ.copy()
     forwarded_env = {}
+    instance_name = re.sub(r"[^a-z0-9-]", "-", (form.get("LOCALS3_INSTANCE_NAME", ["locals3"])[0] or "locals3").strip().lower()) or "locals3"
+    forwarded_env["INSTANCE"] = instance_name
+    env["INSTANCE"] = instance_name
+
     for key in [
         "LOCALS3_HOST",
         "LOCALS3_ENABLE_LAN",
@@ -8389,15 +8402,16 @@ def run_linux_s3_installer(form=None, live_cb=None):
     )
     safe_cleanup_fn = (
         'cleanup_previous_locals3(){ '
-        'local root="/opt/locals3"; '
-        '[ "$(detect_os)" = "macos" ] && root="/usr/local/locals3"; '
+        'local inst="${INSTANCE:-locals3}"; '
+        'local root="/opt/$inst"; '
+        '[ "$(detect_os)" = "macos" ] && root="/usr/local/$inst"; '
         'if has_cmd systemctl; then '
-        '  systemctl stop locals3-minio >/dev/null 2>&1 || true; '
-        '  systemctl stop locals3-nginx >/dev/null 2>&1 || true; '
+        '  systemctl stop "${inst}-minio" >/dev/null 2>&1 || true; '
+        '  systemctl stop "${inst}-nginx" >/dev/null 2>&1 || true; '
         'fi; '
-        'if [ -f /opt/locals3/nginx/nginx.pid ]; then '
-        '  kill "$(cat /opt/locals3/nginx/nginx.pid)" >/dev/null 2>&1 || true; '
-        '  rm -f /opt/locals3/nginx/nginx.pid || true; '
+        'if [ -f "/opt/$inst/nginx/nginx.pid" ]; then '
+        '  kill "$(cat "/opt/$inst/nginx/nginx.pid")" >/dev/null 2>&1 || true; '
+        '  rm -f "/opt/$inst/nginx/nginx.pid" || true; '
         'fi; '
         'if [ -d "$root" ]; then '
         '  rm -rf "${root}/data/.minio.sys" >/dev/null 2>&1 || true; '
@@ -8425,9 +8439,10 @@ pick_distinct_port() {
 
 configure_minio_linux() {
   local root="$1" api_port="$2" ui_port="$3" public_url="$4" console_browser_url="$5"
+  local inst="${INSTANCE:-locals3}"
   local bin="/usr/local/bin/minio"
   local data="${root}/data"
-  local envf="/etc/default/locals3-minio"
+  local envf="/etc/default/${inst}-minio"
   mkdir -p "$root" "$data"
 
   install_minio_binary "$bin"
@@ -8439,9 +8454,9 @@ MINIO_SERVER_URL=${public_url}
 MINIO_BROWSER_REDIRECT_URL=${console_browser_url}
 EOF
 
-  cat > /etc/systemd/system/locals3-minio.service <<EOF
+  cat > "/etc/systemd/system/${inst}-minio.service" <<EOF
 [Unit]
-Description=Local S3 MinIO
+Description=Local S3 MinIO (${inst})
 After=network.target
 
 [Service]
@@ -8454,22 +8469,23 @@ LimitNOFILE=65535
 WantedBy=multi-user.target
 EOF
   systemctl daemon-reload
-  systemctl enable --now locals3-minio
+  systemctl enable --now "${inst}-minio"
 }
 
 configure_minio_macos() {
   local root="$1" api_port="$2" ui_port="$3" public_url="$4" console_browser_url="$5"
+  local inst="${INSTANCE:-locals3}"
   local bin="/usr/local/bin/minio"
   [ -d /opt/homebrew/bin ] && bin="/opt/homebrew/bin/minio"
   local data="${root}/data"
-  local plist="/Library/LaunchDaemons/com.locals3.minio.plist"
+  local plist="/Library/LaunchDaemons/com.${inst}.minio.plist"
   mkdir -p "$root" "$data"
   install_minio_binary "$bin"
   cat > "$plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-  <key>Label</key><string>com.locals3.minio</string>
+  <key>Label</key><string>com.${inst}.minio</string>
   <key>ProgramArguments</key><array>
     <string>$bin</string><string>server</string><string>$data</string>
     <string>--address</string><string>:$api_port</string>
@@ -8488,8 +8504,8 @@ EOF
 
   launchctl bootout system "$plist" >/dev/null 2>&1 || true
   launchctl bootstrap system "$plist"
-  launchctl enable system/com.locals3.minio
-  launchctl kickstart -k system/com.locals3.minio
+  launchctl enable "system/com.${inst}.minio"
+  launchctl kickstart -k "system/com.${inst}.minio"
 }
 
 open_public_tcp_ports_linux() {
@@ -8598,8 +8614,8 @@ main() {
     console_url="https://${proxy_host}:${console_https_port}"
   fi
 
-  root="/opt/locals3"
-  [ "$os" = "macos" ] && root="/usr/local/locals3"
+  root="/opt/${INSTANCE:-locals3}"
+  [ "$os" = "macos" ] && root="/usr/local/${INSTANCE:-locals3}"
   cert_dir="${root}/certs"
   mkdir -p "$root" "$cert_dir"
 
@@ -8648,8 +8664,9 @@ main() {
     safe_nginx_fn = r'''
 configure_nginx_linux() {
   local domain="$1" api_https_port="$2" api_target_port="$3" console_https_port="$4" console_target_port="$5" cert_dir="$6"
+  local inst="${INSTANCE:-locals3}"
   local http_port="${LOCALS3_HTTP_PORT:-}"
-  cat > /etc/nginx/conf.d/locals3.conf <<EOF
+  cat > "/etc/nginx/conf.d/${inst}.conf" <<EOF
 server {
     listen ${api_https_port} ssl;
     server_name ${domain} localhost;
@@ -8692,7 +8709,7 @@ server {
 EOF
 
   if [ -n "$http_port" ]; then
-    cat >> /etc/nginx/conf.d/locals3.conf <<EOF
+    cat >> "/etc/nginx/conf.d/${inst}.conf" <<EOF
 
 server {
     listen ${http_port};
@@ -8735,7 +8752,7 @@ EOF
   fi
 
   warn "System nginx could not bind HTTPS ports ${api_https_port}/${console_https_port}. Trying isolated LocalS3 nginx..."
-  local standalone_dir="/opt/locals3/nginx"
+  local standalone_dir="/opt/${inst}/nginx"
   local standalone_conf="${standalone_dir}/nginx-standalone.conf"
   local standalone_pid="${standalone_dir}/nginx.pid"
   mkdir -p "$standalone_dir"
@@ -8868,6 +8885,7 @@ def run_linux_s3_docker_installer(form=None, live_cb=None):
     minio_ui  = (form.get("LOCALS3_UI_PORT",      ["9001"])[0] or "9001").strip()
     root_user = (form.get("LOCALS3_ROOT_USER",    ["admin"])[0] or "admin").strip()
     root_pass = (form.get("LOCALS3_ROOT_PASSWORD",["StrongPassword123"])[0] or "StrongPassword123").strip()
+    instance_name = re.sub(r"[^a-z0-9-]", "-", (form.get("LOCALS3_INSTANCE_NAME", ["locals3"])[0] or "locals3").strip().lower()) or "locals3"
 
     requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
     if not requested_host or requested_host in ("localhost", "127.0.0.1"):
@@ -8884,6 +8902,7 @@ def run_linux_s3_docker_installer(form=None, live_cb=None):
             sudo_prefix = ["sudo"]
 
     host = shlex.quote(requested_host)
+    inst = shlex.quote(instance_name)
     script = rf"""
 set -euo pipefail
 
@@ -8894,11 +8913,12 @@ MINIO_API={shlex.quote(minio_api)}
 MINIO_UI={shlex.quote(minio_ui)}
 ROOT_USER={shlex.quote(root_user)}
 ROOT_PASS={shlex.quote(root_pass)}
+INSTANCE={inst}
 
-PROJECT=/opt/locals3/docker
+PROJECT=/opt/${{INSTANCE}}/docker
 CERT_DIR="$PROJECT/certs"
 NGINX_DIR="$PROJECT/nginx"
-VOLUME=locals3-docker-minio-data
+VOLUME="${{INSTANCE}}-docker-minio-data"
 MINIO_IMAGE=minio/minio:latest
 LABEL=com.locals3.installer=true
 
@@ -8951,10 +8971,10 @@ else
 fi
 echo "      Docker is ready (compose: $COMPOSE_CMD)."
 
-echo "[2/7] Stopping previous LocalS3 Docker containers (if any)..."
-docker rm -f locals3-minio locals3-nginx >/dev/null 2>&1 || true
+echo "[2/7] Stopping previous instance containers (if any)..."
+docker rm -f "${{INSTANCE}}-minio" "${{INSTANCE}}-nginx" >/dev/null 2>&1 || true
 if [ -f "$PROJECT/docker-compose.yml" ]; then
-  $COMPOSE_CMD -f "$PROJECT/docker-compose.yml" down >/dev/null 2>&1 || true
+  $COMPOSE_CMD -p "${{INSTANCE}}" -f "$PROJECT/docker-compose.yml" down >/dev/null 2>&1 || true
 fi
 
 echo "[3/7] Creating project directories..."
@@ -8993,7 +9013,7 @@ server {{
     ssl_ciphers         HIGH:!aNULL:!MD5;
     client_max_body_size 5g;
     location / {{
-        proxy_pass         http://locals3-minio:9000;
+        proxy_pass         http://${{INSTANCE}}-minio:9000;
         proxy_http_version 1.1;
         proxy_set_header   Host \$http_host;
         proxy_set_header   X-Real-IP \$remote_addr;
@@ -9009,7 +9029,7 @@ server {{
     server_name $HOST localhost;
     client_max_body_size 5g;
     location / {{
-        proxy_pass         http://locals3-minio:9001;
+        proxy_pass         http://${{INSTANCE}}-minio:9001;
         proxy_http_version 1.1;
         proxy_set_header   Host \$http_host;
         proxy_set_header   X-Real-IP \$remote_addr;
@@ -9026,12 +9046,13 @@ NGINXEOF
 echo "[6/7] Writing docker-compose.yml and starting containers..."
 cat > "$PROJECT/docker-compose.yml" <<COMPOSEEOF
 services:
-  locals3-minio:
+  ${{INSTANCE}}-minio:
     image: $MINIO_IMAGE
-    container_name: locals3-minio
+    container_name: ${{INSTANCE}}-minio
     labels:
       - "$LABEL"
       - "com.locals3.role=minio"
+      - "com.locals3.instance=${{INSTANCE}}"
     environment:
       MINIO_ROOT_USER: "$ROOT_USER"
       MINIO_ROOT_PASSWORD: "$ROOT_PASS"
@@ -9050,12 +9071,14 @@ services:
       retries: 6
       start_period: 20s
 
-  locals3-nginx:
+  ${{INSTANCE}}-nginx:
     image: nginx:alpine
-    container_name: locals3-nginx
+    container_name: ${{INSTANCE}}-nginx
     labels:
       - "$LABEL"
       - "com.locals3.role=nginx"
+      - "com.locals3.instance=${{INSTANCE}}"
+      - "com.serverinstaller.https_port=${{API_PORT}}"
     ports:
       - "${{API_PORT}}:443"
       - "${{CONS_PORT}}:4443"
@@ -9063,18 +9086,18 @@ services:
       - $NGINX_DIR:/etc/nginx/conf.d:ro
       - $CERT_DIR:/etc/nginx/certs:ro
     depends_on:
-      - locals3-minio
+      - ${{INSTANCE}}-minio
     restart: unless-stopped
 
 volumes:
   $VOLUME:
 COMPOSEEOF
 
-$COMPOSE_CMD -f "$PROJECT/docker-compose.yml" up -d
+$COMPOSE_CMD -p "${{INSTANCE}}" -f "$PROJECT/docker-compose.yml" up -d
 
 echo "[7/7] Waiting for MinIO to become healthy..."
 ELAPSED=0
-until docker inspect locals3-minio --format='{{{{.State.Health.Status}}}}' 2>/dev/null | grep -q healthy; do
+until docker inspect "${{INSTANCE}}-minio" --format='{{{{.State.Health.Status}}}}' 2>/dev/null | grep -q healthy; do
   sleep 3; ELAPSED=$((ELAPSED+3))
   if [ "$ELAPSED" -ge 90 ]; then
     echo "[WARN] MinIO health check timed out. Container may still be starting."

@@ -23,9 +23,10 @@
           <Grid item xs={12} md={8}>
             <ActionCard
               title="Install S3 (Windows)"
-              description="Choose IIS or Docker mode, host type (local/DNS/IP), and ports. Leave HTTP Port or HTTPS Port empty to skip that protocol."
+              description="Choose IIS or Docker mode, host type (local/DNS/IP), and ports. Use a unique Instance Name to run multiple isolated S3 instances side by side. Leave HTTP Port or HTTPS Port empty to skip that protocol."
               action="/run/s3_windows"
               fields={[
+                { name: "LOCALS3_INSTANCE_NAME", label: "Instance Name", defaultValue: "locals3", placeholder: "locals3", required: true },
                 { name: "S3_MODE", label: "Mode", type: "select", options: s3WindowsModeOptions, defaultValue: "iis" },
                 { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: getDefaultSelectableIp(selectableIps), required: true, placeholder: "Select IP" },
                 { name: "LOCALS3_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
@@ -127,9 +128,10 @@
           <Grid item xs={12} md={8}>
             <ActionCard
               title="Install S3 (Linux/macOS)"
-              description="Run local S3 installer. Choose OS (native nginx proxy) or Docker (MinIO + nginx containers). Leave HTTP Port or HTTPS Port empty to skip that protocol."
+              description="Run local S3 installer. Choose OS (native nginx proxy) or Docker (MinIO + nginx containers). Use a unique Instance Name to run multiple isolated S3 instances side by side. Leave HTTP Port or HTTPS Port empty to skip that protocol."
               action="/run/s3_linux"
               fields={[
+                { name: "LOCALS3_INSTANCE_NAME", label: "Instance Name", defaultValue: "locals3", placeholder: "locals3", required: true },
                 { name: "LOCALS3_MODE", label: "Engine", type: "select", options: ["os", "docker"], defaultValue: "os" },
                 { name: "LOCALS3_HOST_IP", label: "Select IP", type: "select", options: selectableIps, defaultValue: getDefaultSelectableIp(selectableIps), required: true, placeholder: "Select IP" },
                 { name: "LOCALS3_HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
