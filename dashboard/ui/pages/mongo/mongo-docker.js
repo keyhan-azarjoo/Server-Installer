@@ -13,15 +13,97 @@
       webPort: String(8081 + base),
       adminUser: "admin",
       adminPassword: "StrongPassword123",
-      uiUser: "admin",
-      uiPassword: "StrongPassword123",
     };
+  }
+
+  // Eye icons (same as Native tab)
+  const EyeOpenSvg = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>
+    </svg>
+  );
+  const EyeOffSvg = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z"/>
+    </svg>
+  );
+
+  // Defined OUTSIDE MongoDockerInner so React never remounts it on parent re-render
+  function InstanceRow({ inst, idx, instances, cfg, serviceBusy, updateInstance, removeInstance, deployOne,
+    existingInstanceNames,
+    TextField, Stack, Button, Paper, Typography, InputAdornment, IconButton, Alert }) {
+    const [showPwd, setShowPwd] = React.useState(false);
+    const nameExists = existingInstanceNames && existingInstanceNames.has((inst.instanceName || "").trim().toLowerCase());
+    return (
+      <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderRadius: 2, border: "1px solid #d1fae5" }}>
+        <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="flex-start" flexWrap="wrap">
+          <TextField
+            label="Instance Name" size="small" sx={{ minWidth: 160 }}
+            value={inst.instanceName}
+            onChange={(e) => updateInstance(inst.id, "instanceName", e.target.value)}
+            helperText={nameExists ? "⚠ Name already exists" : "Unique ID (letters, numbers, -)"}
+            FormHelperTextProps={{ sx: nameExists ? { color: "warning.main", fontWeight: 600 } : {} }}
+            color={nameExists ? "warning" : undefined}
+            focused={nameExists ? true : undefined}
+          />
+          <TextField label="MongoDB Port" size="small" sx={{ minWidth: 120 }} value={inst.mongoPort} onChange={(e) => updateInstance(inst.id, "mongoPort", e.target.value)} />
+          <TextField
+            label={cfg.os === "windows" ? "HTTPS Port (skip on Win)" : "HTTPS Port"}
+            size="small" sx={{ minWidth: 130 }}
+            value={inst.httpsPort}
+            onChange={(e) => updateInstance(inst.id, "httpsPort", e.target.value)}
+            placeholder="skip if empty"
+          />
+          <TextField label="HTTP Port" size="small" sx={{ minWidth: 110 }} value={inst.httpPort} onChange={(e) => updateInstance(inst.id, "httpPort", e.target.value)} placeholder="skip if empty" />
+          <TextField label="Web UI Port" size="small" sx={{ minWidth: 110 }} value={inst.webPort} onChange={(e) => updateInstance(inst.id, "webPort", e.target.value)} />
+          <TextField label="Admin User" size="small" sx={{ minWidth: 110 }} value={inst.adminUser} onChange={(e) => updateInstance(inst.id, "adminUser", e.target.value)} />
+          <TextField
+            label="Admin Password" size="small" sx={{ minWidth: 160 }}
+            type={showPwd ? "text" : "password"}
+            value={inst.adminPassword}
+            onChange={(e) => updateInstance(inst.id, "adminPassword", e.target.value)}
+            InputProps={{
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton size="small" onClick={() => setShowPwd((v) => !v)} tabIndex={-1} edge="end">
+                    {showPwd ? <EyeOffSvg /> : <EyeOpenSvg />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            }}
+          />
+        </Stack>
+        {nameExists && (
+          <Alert severity="warning" sx={{ mt: 1, py: 0.3, fontSize: "0.8rem" }}>
+            An instance named <b>{inst.instanceName}</b> already exists. Deploying will overwrite it.
+          </Alert>
+        )}
+        <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} alignItems="center">
+          <Button
+            size="small" variant="contained"
+            disabled={serviceBusy || !inst.instanceName.trim() || !inst.mongoPort.trim()}
+            onClick={(e) => deployOne(inst, e)}
+            sx={{ textTransform: "none", bgcolor: "#166534", "&:hover": { bgcolor: "#14532d" }, fontWeight: 700 }}
+          >
+            Deploy Instance
+          </Button>
+          {instances.length > 1 && (
+            <Button size="small" variant="outlined" color="error" onClick={() => removeInstance(inst.id)} sx={{ textTransform: "none" }}>
+              Remove
+            </Button>
+          )}
+          <Typography variant="caption" color="text.secondary">
+            Instance #{idx + 1}
+          </Typography>
+        </Stack>
+      </Paper>
+    );
   }
 
   function MongoDockerInner(p) {
     const {
       Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
-      TextField, Alert,
+      TextField, InputAdornment, IconButton, Alert,
       ActionIcon,
       cfg, run, serviceBusy,
       mongo, mongoWebsiteUrl, mongoDisplayServices,
@@ -38,7 +120,6 @@
       (s) => String(s.kind || "").toLowerCase() === "docker"
     );
 
-    // Group Docker services by instance prefix
     function groupDockerServices(svcs) {
       const groups = {};
       svcs.forEach((svc) => {
@@ -53,6 +134,16 @@
     const groups = groupDockerServices(dockerServices);
 
     const [instances, setInstances] = React.useState(() => [makeDefaultDockerInstance(0)]);
+
+    // Set of existing instance names derived from live Docker services
+    const existingInstanceNames = React.useMemo(() => {
+      return new Set(
+        dockerServices.map((s) => {
+          const parts = s.name.split("-");
+          return parts.slice(1).join("-").toLowerCase();
+        })
+      );
+    }, [dockerServices]);
 
     function updateInstance(id, field, value) {
       setInstances((prev) => prev.map((inst) => inst.id === id ? { ...inst, [field]: value } : inst));
@@ -76,8 +167,8 @@
         LOCALMONGO_WEB_PORT: inst.webPort,
         LOCALMONGO_ADMIN_USER: inst.adminUser,
         LOCALMONGO_ADMIN_PASSWORD: inst.adminPassword,
-        LOCALMONGO_UI_USER: inst.uiUser,
-        LOCALMONGO_UI_PASSWORD: inst.uiPassword,
+        LOCALMONGO_UI_USER: inst.adminUser,
+        LOCALMONGO_UI_PASSWORD: inst.adminPassword,
       };
       Object.entries(fields).forEach(([name, value]) => {
         const inp = document.createElement("input");
@@ -91,50 +182,10 @@
       instances.forEach((inst) => deployOne(inst, e));
     }
 
-    function InstanceRow({ inst, idx }) {
-      return (
-        <Paper variant="outlined" sx={{ p: 1.5, mb: 1.5, borderRadius: 2, border: "1px solid #d1fae5" }}>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="flex-start" flexWrap="wrap">
-            <TextField
-              label="Instance Name" size="small" sx={{ minWidth: 160 }}
-              value={inst.instanceName}
-              onChange={(e) => updateInstance(inst.id, "instanceName", e.target.value)}
-              helperText="Unique ID (letters, numbers, -)"
-            />
-            <TextField label="MongoDB Port" size="small" sx={{ minWidth: 120 }} value={inst.mongoPort} onChange={(e) => updateInstance(inst.id, "mongoPort", e.target.value)} />
-            <TextField
-              label={cfg.os === "windows" ? "HTTPS Port (skip on Win)" : "HTTPS Port"}
-              size="small" sx={{ minWidth: 130 }}
-              value={inst.httpsPort}
-              onChange={(e) => updateInstance(inst.id, "httpsPort", e.target.value)}
-              placeholder="skip if empty"
-            />
-            <TextField label="HTTP Port" size="small" sx={{ minWidth: 110 }} value={inst.httpPort} onChange={(e) => updateInstance(inst.id, "httpPort", e.target.value)} placeholder="skip if empty" />
-            <TextField label="Web UI Port" size="small" sx={{ minWidth: 110 }} value={inst.webPort} onChange={(e) => updateInstance(inst.id, "webPort", e.target.value)} />
-            <TextField label="Admin User" size="small" sx={{ minWidth: 110 }} value={inst.adminUser} onChange={(e) => updateInstance(inst.id, "adminUser", e.target.value)} />
-            <TextField label="Admin Password" size="small" sx={{ minWidth: 140 }} type="password" value={inst.adminPassword} onChange={(e) => updateInstance(inst.id, "adminPassword", e.target.value)} />
-          </Stack>
-          <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} alignItems="center">
-            <Button
-              size="small" variant="contained"
-              disabled={serviceBusy || !inst.instanceName.trim() || !inst.mongoPort.trim()}
-              onClick={(e) => deployOne(inst, e)}
-              sx={{ textTransform: "none", bgcolor: "#166534", "&:hover": { bgcolor: "#14532d" }, fontWeight: 700 }}
-            >
-              Deploy Instance
-            </Button>
-            {instances.length > 1 && (
-              <Button size="small" variant="outlined" color="error" onClick={() => removeInstance(inst.id)} sx={{ textTransform: "none" }}>
-                Remove
-              </Button>
-            )}
-            <Typography variant="caption" color="text.secondary">
-              Instance #{idx + 1}
-            </Typography>
-          </Stack>
-        </Paper>
-      );
-    }
+    const rowProps = {
+      cfg, serviceBusy, updateInstance, removeInstance, deployOne, instances, existingInstanceNames,
+      TextField, Stack, Button, Paper, Typography, InputAdornment, IconButton, Alert,
+    };
 
     return (
       <Grid container spacing={2}>
@@ -168,7 +219,7 @@
                   : "Each instance runs as separate Docker containers with an optional nginx HTTPS proxy. Add as many as you need — each gets its own ports and containers."}
               </Typography>
               {instances.map((inst, idx) => (
-                <InstanceRow key={inst.id} inst={inst} idx={idx} />
+                <InstanceRow key={inst.id} inst={inst} idx={idx} {...rowProps} />
               ))}
             </CardContent>
           </Card>
