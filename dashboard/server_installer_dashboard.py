@@ -6043,14 +6043,19 @@ def _windows_cleanup_localmongo(svc_name="LocalMongoDB"):
         "    try{ $svc.Refresh(); if($svc.Status -eq 'Stopped'){ break } }catch{}\n"
         "    Start-Sleep -Seconds 1; $waited++\n"
         "  }\n"
-        # Kill any mongod.exe process whose command-line references this instance's data dir
-        f"  $dataDir = (Join-Path $env:ProgramData '{data_root_name}\\data').ToLower()\n"
+        # Kill ANY mongod.exe whose ExecutablePath or CommandLine lives inside this instance root.
+        # mongod is registered as "mongod.exe --config <root>\config\mongod.cfg", so matching
+        # only the data dir (as before) never matched. Matching the root path catches both
+        # zip-extracted binaries (exe inside root) and config-launched instances.
+        f"  $instRoot = (Join-Path $env:ProgramData '{data_root_name}').ToLower()\n"
         "  Get-WmiObject Win32_Process -Filter \"Name='mongod.exe'\" -ErrorAction SilentlyContinue | ForEach-Object {\n"
-        "    if($_.CommandLine -and $_.CommandLine.ToLower() -match [regex]::Escape($dataDir)){\n"
+        "    $exe = if($_.ExecutablePath){ $_.ExecutablePath.ToLower() } else { '' }\n"
+        "    $cmd = if($_.CommandLine){ $_.CommandLine.ToLower() } else { '' }\n"
+        "    if($exe.StartsWith($instRoot) -or $cmd -match [regex]::Escape($instRoot)){\n"
         "      Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue\n"
         "    }\n"
         "  }\n"
-        "  Start-Sleep -Seconds 1\n"
+        "  Start-Sleep -Seconds 2\n"
         f"  sc.exe delete '{safe}' | Out-Null\n"
         "  Start-Sleep -Seconds 2\n"
         "}\n"
