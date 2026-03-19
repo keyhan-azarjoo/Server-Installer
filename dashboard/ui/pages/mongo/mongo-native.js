@@ -107,7 +107,7 @@
   function MongoNativeInner(p) {
     const {
       Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
-      TextField, Select, MenuItem, FormControl, InputLabel, InputAdornment, IconButton, Alert,
+      TextField, Select, MenuItem, FormControl, InputLabel, InputAdornment, IconButton, Alert, Tooltip,
       ActionIcon,
       cfg, run, selectableIps, serviceBusy,
       mongo, mongoWebsiteUrl, mongoDisplayServices,
@@ -116,6 +116,8 @@
       hasStoppedServices, batchServiceAction, copyText, tryOpenCompass, promptOpenMongoWebsite,
       isServiceRunningStatus, formatServiceState, onServiceAction,
       renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
+      renderEditServiceIcon,
+      launchCompassProtocol,
       DownloadCompassIcon, CopyCompassIcon, TryOpenCompassIcon, OpenCompassStyleIcon,
       setPage, setFileManagerPath,
     } = p;
@@ -271,25 +273,46 @@
                 {nativeServices.length === 0 && (
                   <Typography variant="body2" color="text.secondary">No native MongoDB services found. Install above to see services here.</Typography>
                 )}
-                {nativeServices.map((svc) => (
-                  <Paper key={`mgn-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                    <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                      <Box sx={{ minWidth: 250 }}>
-                        <Typography variant="body2"><b>{svc.name}</b> <Typography component="span" variant="caption" color="text.secondary">({svc.kind || "service"})</Typography></Typography>
-                        {renderServiceUrls(svc)}
-                        {renderServicePorts(svc)}
-                      </Box>
-                      {renderServiceStatus(svc)}
-                      <Box sx={{ flexGrow: 1 }} />
-                      {renderFolderIcon(svc)}
-                      <Button size="small" variant="outlined" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"} disabled={serviceBusy} onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
-                        {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                      </Button>
-                      <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
-                      <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
-                    </Stack>
-                  </Paper>
-                ))}
+                {nativeServices.map((svc) => {
+                  const svcUri = svc.compass_uri || "";
+                  return (
+                    <Paper key={`mgn-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                        <Box sx={{ minWidth: 250 }}>
+                          <Typography variant="body2"><b>{svc.name}</b> <Typography component="span" variant="caption" color="text.secondary">({svc.kind || "service"})</Typography></Typography>
+                          {renderServiceUrls(svc)}
+                          {renderServicePorts(svc)}
+                          {!!svcUri && (
+                            <Typography variant="caption" color="text.secondary" sx={{ display: "block", wordBreak: "break-all" }}>{svcUri}</Typography>
+                          )}
+                        </Box>
+                        {renderServiceStatus(svc)}
+                        <Box sx={{ flexGrow: 1 }} />
+                        {renderFolderIcon(svc)}
+                        {!!svcUri && (
+                          <Tooltip title="Copy Compass URI">
+                            <span>
+                              <ActionIcon title="Copy URI" onClick={() => copyText(svcUri, "Compass URI")} IconComp={CopyCompassIcon} fallback="CP" />
+                            </span>
+                          </Tooltip>
+                        )}
+                        {!!svcUri && (
+                          <Tooltip title="Open in Compass">
+                            <span>
+                              <ActionIcon title="Open Compass" onClick={() => launchCompassProtocol(svcUri)} IconComp={TryOpenCompassIcon} fallback="OP" />
+                            </span>
+                          </Tooltip>
+                        )}
+                        {renderEditServiceIcon(svc)}
+                        <Button size="small" variant="outlined" color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"} disabled={serviceBusy} onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)} sx={{ textTransform: "none" }}>
+                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                        </Button>
+                        <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>Restart</Button>
+                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
+                      </Stack>
+                    </Paper>
+                  );
+                })}
               </Box>
             </CardContent>
           </Card>

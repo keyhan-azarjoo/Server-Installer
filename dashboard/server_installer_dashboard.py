@@ -5373,6 +5373,54 @@ def get_service_items():
     mongo_info = get_mongo_info()
     python_info = get_python_info()
 
+    # Build per-instance MongoDB metadata map: service_name -> metadata dict
+    all_mongo_meta: dict = {}
+    if os.name == "nt":
+        pd_path = Path(os.environ.get("ProgramData", r"C:\ProgramData"))
+        try:
+            for inst_dir in pd_path.glob("LocalMongoDB-*"):
+                meta_file = inst_dir / "install-info.json"
+                if meta_file.exists():
+                    try:
+                        meta = json.loads(meta_file.read_text(encoding="utf-8", errors="replace"))
+                        svc_nm = str(meta.get("service_name") or "").strip() or inst_dir.name
+                        all_mongo_meta[svc_nm] = meta
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        # Legacy fallback (no instance suffix)
+        legacy_meta_file = pd_path / "LocalMongoDB" / "install-info.json"
+        if legacy_meta_file.exists():
+            try:
+                meta = json.loads(legacy_meta_file.read_text(encoding="utf-8", errors="replace"))
+                svc_nm = str(meta.get("service_name") or "LocalMongoDB").strip()
+                if svc_nm not in all_mongo_meta:
+                    all_mongo_meta[svc_nm] = meta
+            except Exception:
+                pass
+
+    def _mongo_service_extra(name):
+        """Return ports, host, compass_uri for a native MongoDB service item."""
+        inst_meta = all_mongo_meta.get(name) or native_mongo
+        port_str = str(inst_meta.get("mongo_port") or inst_meta.get("port") or "").strip()
+        host_val = str(inst_meta.get("host") or "").strip()
+        admin_user = str(inst_meta.get("admin_user") or "admin").strip() or "admin"
+        admin_password = str(inst_meta.get("admin_password") or "").strip()
+        auth_enabled = bool(inst_meta.get("auth_enabled"))
+        port_list = [{"port": int(port_str), "protocol": "tcp"}] if port_str.isdigit() else []
+        display_host = host_val or preferred_host
+        if port_str.isdigit():
+            p = int(port_str)
+            if auth_enabled or admin_password:
+                from urllib.parse import quote as _q
+                compass_uri = f"mongodb://{_q(admin_user, safe='')}:{_q(admin_password or 'StrongPassword123', safe='')}@{display_host}:{p}/admin?authSource=admin"
+            else:
+                compass_uri = f"mongodb://{display_host}:{p}/admin"
+        else:
+            compass_uri = ""
+        return port_list, host_val, compass_uri, admin_user, admin_password
+
     if os.name == "nt":
         cmd = [
             "powershell.exe",
@@ -5394,18 +5442,26 @@ def get_service_items():
                     display_name = str(row.get("DisplayName", "")).strip()
                     if not managed_patterns.search(f"{name} {display_name}"):
                         continue
-                    items.append(
-                        {
-                            "kind": "service",
-                            "name": name,
-                            "display_name": display_name,
-                            "status": str(row.get("Status", "")).strip(),
-                            "start_type": str(row.get("StartType", "")).strip(),
-                            "platform": "windows",
-                            "urls": [],
-                            "ports": ([{"port": int(native_mongo.get("port")), "protocol": "tcp"}] if _is_mongo_name(name) and str(native_mongo.get("port", "")).isdigit() else []),
-                        }
-                    )
+                    if _is_mongo_name(name):
+                        port_list, host_val, compass_uri, adm_user, adm_pass = _mongo_service_extra(name)
+                    else:
+                        port_list, host_val, compass_uri, adm_user, adm_pass = [], "", "", "", ""
+                    item: dict = {
+                        "kind": "service",
+                        "name": name,
+                        "display_name": display_name,
+                        "status": str(row.get("Status", "")).strip(),
+                        "start_type": str(row.get("StartType", "")).strip(),
+                        "platform": "windows",
+                        "urls": [],
+                        "ports": port_list,
+                    }
+                    if _is_mongo_name(name):
+                        item["host"] = host_val
+                        item["compass_uri"] = compass_uri
+                        item["admin_user"] = adm_user
+                        item["admin_password"] = adm_pass
+                    items.append(item)
             except Exception:
                 pass
         # Include LocalS3 scheduled task as managed daemon.
