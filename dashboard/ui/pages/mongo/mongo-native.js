@@ -48,16 +48,17 @@
             helperText="Unique ID (letters, numbers, -)"
           />
           {/* IP */}
-          {selectableIps.length > 1 ? (
-            <FormControl size="small" sx={{ minWidth: 140 }}>
-              <InputLabel>Bind IP</InputLabel>
-              <Select label="Bind IP" value={inst.hostIp} onChange={(e) => updateInstance(inst.id, "hostIp", e.target.value)}>
-                {selectableIps.map((ip) => <MenuItem key={ip} value={ip}>{ip}</MenuItem>)}
-              </Select>
-            </FormControl>
-          ) : (
-            <TextField label="Bind IP" size="small" sx={{ minWidth: 140 }} value={inst.hostIp} disabled />
-          )}
+          {(() => {
+            const ipOptions = ["localhost", ...selectableIps.filter((ip) => ip !== "localhost" && ip !== "127.0.0.1")];
+            return (
+              <FormControl size="small" sx={{ minWidth: 140 }}>
+                <InputLabel>Bind IP</InputLabel>
+                <Select label="Bind IP" value={inst.hostIp} onChange={(e) => updateInstance(inst.id, "hostIp", e.target.value)}>
+                  {ipOptions.map((ip) => <MenuItem key={ip} value={ip}>{ip}</MenuItem>)}
+                </Select>
+              </FormControl>
+            );
+          })()}
           {/* Ports */}
           <TextField label="MongoDB Port" size="small" sx={{ minWidth: 120 }} value={inst.mongoPort} onChange={(e) => updateInstance(inst.id, "mongoPort", e.target.value)} />
           <TextField label="HTTPS Port" size="small" sx={{ minWidth: 110 }} value={inst.httpsPort} onChange={(e) => updateInstance(inst.id, "httpsPort", e.target.value)} placeholder="skip if empty" />
