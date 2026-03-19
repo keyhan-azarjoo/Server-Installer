@@ -5964,42 +5964,45 @@ def _safe_linux_app_path(path_value, svc_name=""):
     return ""
 
 
-def _windows_cleanup_localmongo():
+def _windows_cleanup_localmongo(svc_name="LocalMongoDB"):
     if not is_windows_admin():
         return False, "Administrator is required."
-    ps = r"""
-$ErrorActionPreference='SilentlyContinue'
-Import-Module WebAdministration -ErrorAction SilentlyContinue
-if (Test-Path "IIS:\Sites\LocalMongoDB") {
-  Stop-Website -Name 'LocalMongoDB' | Out-Null
-  Remove-Website -Name 'LocalMongoDB' | Out-Null
-}
-$svc = Get-CimInstance Win32_Service -Filter "Name='LocalMongoDB'" -ErrorAction SilentlyContinue
-if($svc){
-  Stop-Service -Name 'LocalMongoDB' -Force -ErrorAction SilentlyContinue
-  sc.exe delete "LocalMongoDB" | Out-Null
-}
-$bindings = @('0.0.0.0:9445','127.0.0.1:9445')
-foreach($binding in $bindings){
-  netsh http delete sslcert ipport=$binding 1>$null 2>$null | Out-Null
-}
-if(Get-Command docker -ErrorAction SilentlyContinue){
-  docker rm -f localmongo-https localmongo-web localmongo-mongodb 1>$null 2>$null | Out-Null
-  docker network rm localmongo-net 1>$null 2>$null | Out-Null
-  docker volume rm -f localmongo-data 1>$null 2>$null | Out-Null
-}
-schtasks /End /TN "LocalMongoDB-Autostart" 1>$null 2>$null | Out-Null
-schtasks /Delete /TN "LocalMongoDB-Autostart" /F 1>$null 2>$null | Out-Null
-$root = Join-Path $env:ProgramData 'LocalMongoDB'
-if(Test-Path $root){ Remove-Item -Recurse -Force -Path $root -ErrorAction SilentlyContinue }
-Get-NetFirewallRule -DisplayName 'ServerInstaller-Managed-TCP-27017' -ErrorAction SilentlyContinue | Remove-NetFirewallRule
-try {
-  $cert = Get-ChildItem Cert:\LocalMachine\Root | Where-Object { $_.Subject -match 'CN=Caddy Local Authority' -or $_.FriendlyName -match 'Caddy' }
-  foreach($item in $cert){ Remove-Item -Path $item.PSPath -Force -ErrorAction SilentlyContinue }
-} catch {}
-"""
+    safe = _safe_service_name(svc_name) or "LocalMongoDB"
+    # Derive data root from service name (LocalMongoDB-{instance} → ProgramData\LocalMongoDB-{instance})
+    data_root_name = safe  # same as service name
+    ps = (
+        "$ErrorActionPreference='SilentlyContinue'\n"
+        "Import-Module WebAdministration -ErrorAction SilentlyContinue\n"
+        f"if (Test-Path \"IIS:\\Sites\\{safe}\") {{\n"
+        f"  Stop-Website -Name '{safe}' | Out-Null\n"
+        f"  Remove-Website -Name '{safe}' | Out-Null\n"
+        "}\n"
+        f"$svc = Get-CimInstance Win32_Service -Filter \"Name='{safe}'\" -ErrorAction SilentlyContinue\n"
+        "if($svc){\n"
+        f"  Stop-Service -Name '{safe}' -Force -ErrorAction SilentlyContinue\n"
+        f"  sc.exe delete \"{safe}\" | Out-Null\n"
+        "}\n"
+        "$bindings = @('0.0.0.0:9445','127.0.0.1:9445')\n"
+        "foreach($binding in $bindings){\n"
+        "  netsh http delete sslcert ipport=$binding 1>$null 2>$null | Out-Null\n"
+        "}\n"
+        "if(Get-Command docker -ErrorAction SilentlyContinue){\n"
+        f"  docker rm -f {safe}-https {safe}-web {safe}-mongodb 1>$null 2>$null | Out-Null\n"
+        f"  docker network rm {safe}-net 1>$null 2>$null | Out-Null\n"
+        f"  docker volume rm -f {safe}-data 1>$null 2>$null | Out-Null\n"
+        "}\n"
+        f"schtasks /End /TN \"{safe}-Autostart\" 1>$null 2>$null | Out-Null\n"
+        f"schtasks /Delete /TN \"{safe}-Autostart\" /F 1>$null 2>$null | Out-Null\n"
+        f"$root = Join-Path $env:ProgramData '{data_root_name}'\n"
+        "if(Test-Path $root){ Remove-Item -Recurse -Force -Path $root -ErrorAction SilentlyContinue }\n"
+        "Get-NetFirewallRule -DisplayName 'ServerInstaller-Managed-TCP-27017' -ErrorAction SilentlyContinue | Remove-NetFirewallRule\n"
+        "try {\n"
+        "  $cert = Get-ChildItem Cert:\\LocalMachine\\Root | Where-Object { $_.Subject -match 'CN=Caddy Local Authority' -or $_.FriendlyName -match 'Caddy' }\n"
+        "  foreach($item in $cert){ Remove-Item -Path $item.PSPath -Force -ErrorAction SilentlyContinue }\n"
+        "} catch {}\n"
+    )
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=150)
-    return rc == 0, (out or "LocalMongoDB managed files cleaned.")
+    return rc == 0, (out or f"MongoDB instance '{safe}' removed.")
 
 
 def _linux_cleanup_localmongo(prefix):
@@ -6129,7 +6132,7 @@ def _windows_remove_iis_site_and_path(site_name):
     if not is_windows_admin():
         return False, "Administrator is required."
     if _is_mongo_name(site_name):
-        return _windows_cleanup_localmongo()
+        return _windows_cleanup_localmongo(svc_name)
     ps = (
         "Import-Module WebAdministration -ErrorAction SilentlyContinue; "
         f"$s=Get-Website -Name '{site_name}' -ErrorAction SilentlyContinue; "
@@ -6146,7 +6149,7 @@ def _windows_remove_service_and_files(svc_name):
     if not is_windows_admin():
         return False, "Administrator is required."
     if _is_mongo_name(svc_name):
-        return _windows_cleanup_localmongo()
+        return _windows_cleanup_localmongo(svc_name)
     website_payload = _website_state_payload(svc_name)
     ps = (
         f"$s=Get-CimInstance Win32_Service -Filter \"Name='{svc_name}'\" -ErrorAction SilentlyContinue; "
@@ -6245,7 +6248,7 @@ def manage_service(action, name, kind, detail=""):
                 else:
                     _linux_cleanup_locals3(_sudo_prefix())
             if _is_mongo_name(svc_name) and os.name == "nt":
-                _windows_cleanup_localmongo()
+                _windows_cleanup_localmongo(svc_name)
             elif _is_mongo_name(svc_name):
                 _linux_cleanup_localmongo(_sudo_prefix())
             return rc == 0, (out or f"Docker container '{svc_name}' deleted.")
@@ -6300,7 +6303,7 @@ def manage_service(action, name, kind, detail=""):
             if _is_locals3_name(svc_name):
                 return _windows_cleanup_locals3()
             if _is_mongo_name(svc_name):
-                return _windows_cleanup_localmongo()
+                return _windows_cleanup_localmongo(svc_name)
             ok, message = _windows_remove_iis_site_and_path(svc_name)
             if ok and _is_python_name(svc_name):
                 _cleanup_python_api_state_entry(svc_name, "iis_site")
@@ -6407,7 +6410,7 @@ def manage_service(action, name, kind, detail=""):
             if _is_locals3_name(svc_name):
                 return _windows_cleanup_locals3()
             if _is_mongo_name(svc_name):
-                return _windows_cleanup_localmongo()
+                return _windows_cleanup_localmongo(svc_name)
             ok, message = _windows_remove_service_and_files(svc_name)
             if ok and _is_python_name(svc_name):
                 _cleanup_python_api_state_entry(svc_name, "service")
