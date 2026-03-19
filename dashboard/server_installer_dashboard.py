@@ -8858,6 +8858,8 @@ else
     dnf install -y -q docker-compose 2>/dev/null || true
   elif command -v yum >/dev/null 2>&1; then
     yum install -y -q docker-compose 2>/dev/null || true
+  elif command -v brew >/dev/null 2>&1; then
+    brew install --quiet docker-compose 2>/dev/null || true
   fi
   if docker compose version >/dev/null 2>&1; then
     COMPOSE_CMD="docker compose"
