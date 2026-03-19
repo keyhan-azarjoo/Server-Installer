@@ -1200,6 +1200,23 @@ function App() {
   const pythonService = pythonSoftware.python_service || software.python_service || {};
   const websiteInfo = websiteSoftware.website || software.website || {};
   const listeningPorts = systemInfo?.listening_ports || [];
+
+  // Compute set of port numbers that belong to services managed by this installer
+  const managedPortSet = React.useMemo(() => {
+    const s = new Set();
+    const allSvcs = [
+      ...(services || []),
+      ...(s3PageServices || []), ...(mongoPageServices || []),
+      ...(dotnetPageServices || []), ...(dockerPageServices || []),
+      ...(proxyPageServices || []), ...(pythonPageServices || []),
+      ...(websitePageServices || []),
+    ];
+    allSvcs.forEach((svc) => {
+      (svc?.ports || []).forEach((p) => { const n = Number(p?.port); if (n > 0) s.add(n); });
+    });
+    return s;
+  }, [services, s3PageServices, mongoPageServices, dotnetPageServices, dockerPageServices, proxyPageServices, pythonPageServices, websitePageServices]);
+
   const cpuPercent = clampPercent(systemInfo?.cpu_usage_percent ?? ((systemInfo?.load?.["1m"] && systemInfo?.cpu_count) ? (systemInfo.load["1m"] / systemInfo.cpu_count) * 100 : 0));
   const memoryPercent = clampPercent(systemInfo?.memory?.used_percent);
   const netBps = (netRate.rxBps || 0) + (netRate.txBps || 0);
@@ -1741,7 +1758,7 @@ function App() {
     pythonStatusInfo, websiteStatusInfo,
     mongoSoftware, dotnetSoftware, dockerSoftware, proxySoftware, pythonSoftware, websiteSoftware,
     dotnet, docker, mongoDocker, iis, mongo, proxy, pythonService, websiteInfo,
-    listeningPorts, cpuPercent, memoryPercent, netBps, netPercent,
+    listeningPorts, managedPortSet, cpuPercent, memoryPercent, netBps, netPercent,
     apiAddressList, filteredServices,
     dotnetServices, s3Services, mongoServices, proxyServices, pythonServices, websiteServices,
     dockerServices,

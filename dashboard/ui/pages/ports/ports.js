@@ -9,7 +9,7 @@
       DialogContent, DialogActions, Divider,
       portValue, setPortValue, portProtocol, setPortProtocol, portBusy,
       onPortAction, closeListeningPort,
-      listeningPorts, isScopeLoading, loadSystem,
+      listeningPorts, managedPortSet, isScopeLoading, loadSystem,
     } = p;
 
     const [searchText, setSearchText] = React.useState("");
@@ -77,8 +77,9 @@
       });
     }, [portRows, searchText]);
 
-    const userRows   = React.useMemo(() => filteredRows.filter((r) => !isSystemPort(r)), [filteredRows, isSystemPort]);
-    const systemRows = React.useMemo(() => filteredRows.filter((r) =>  isSystemPort(r)), [filteredRows, isSystemPort]);
+    const installerRows = React.useMemo(() => filteredRows.filter((r) => managedPortSet && managedPortSet.has(r.port)), [filteredRows, managedPortSet]);
+    const userRows      = React.useMemo(() => filteredRows.filter((r) => !(managedPortSet && managedPortSet.has(r.port)) && !isSystemPort(r)), [filteredRows, managedPortSet, isSystemPort]);
+    const systemRows    = React.useMemo(() => filteredRows.filter((r) => !(managedPortSet && managedPortSet.has(r.port)) && isSystemPort(r)), [filteredRows, managedPortSet, isSystemPort]);
 
     const tcpCount = portRows.filter((r) => r.proto.startsWith("tcp")).length;
     const udpCount = portRows.filter((r) => r.proto.startsWith("udp")).length;
@@ -182,8 +183,9 @@
 
                 {/* Render a group of port rows */}
                 {[
-                  { label: "Application Ports", rows: userRows,   color: "#1e40af", bg: "#eff6ff" },
-                  { label: "System Ports",       rows: systemRows, color: "#6b7280", bg: "#f9fafb" },
+                  { label: "Installer Services", rows: installerRows, color: "#7c3aed", bg: "#f5f3ff" },
+                  { label: "Application Ports",  rows: userRows,      color: "#1e40af", bg: "#eff6ff" },
+                  { label: "System Ports",        rows: systemRows,    color: "#6b7280", bg: "#f9fafb" },
                 ].map(({ label, rows, color, bg }) => rows.length === 0 ? null : (
                   <Box key={label} sx={{ mb: 1.5 }}>
                     <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 1, py: 0.5, mb: 0.75 }}>
