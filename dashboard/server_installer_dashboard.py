@@ -7308,6 +7308,39 @@ def _docker_locals3_owns_port(port):
     return False
 
 
+def _docker_instance_owns_port(port, instance_name):
+    """Returns True if containers of the given S3 instance already own this host port."""
+    if os.name == "nt" or not command_exists("docker"):
+        return False
+    try:
+        p = int(str(port).strip())
+    except Exception:
+        return False
+    if p < 1 or p > 65535:
+        return False
+    rc, out = run_capture(
+        [
+            "docker",
+            "ps",
+            "-a",
+            "--filter",
+            f"label=com.locals3.instance={instance_name}",
+            "--format",
+            "{{.Names}}\t{{.Ports}}",
+        ],
+        timeout=15,
+    )
+    if rc != 0 or not out:
+        return False
+    marker = f":{p}->"
+    for line in out.splitlines():
+        parts = line.split("\t", 1)
+        ports = parts[1] if len(parts) > 1 else ""
+        if marker in ports:
+            return True
+    return False
+
+
 def _linux_locals3_owns_port(port):
     return _linux_locals3_nginx_owns_port(port) or _docker_locals3_owns_port(port)
 
@@ -8892,6 +8925,8 @@ def run_linux_s3_docker_installer(form=None, live_cb=None):
     instance_name = re.sub(r"[^a-z0-9-]", "-", (form.get("LOCALS3_INSTANCE_NAME", ["locals3"])[0] or "locals3").strip().lower()) or "locals3"
 
     requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
+    if not requested_host:
+        requested_host = (form.get("LOCALS3_HOST_IP", [""])[0] or "").strip()
     if not requested_host or requested_host in ("localhost", "127.0.0.1"):
         requested_host = choose_s3_host(requested_host)
 
@@ -8899,6 +8934,21 @@ def run_linux_s3_docker_installer(form=None, live_cb=None):
                        ("MinIO API", minio_api), ("MinIO UI", minio_ui)]:
         if not val.isdigit():
             return 1, f"{label} port must be numeric."
+
+    # Port conflict check: reject ports already used by other services/instances
+    for label, val in [("API HTTPS", api_port), ("Console HTTPS", cons_port),
+                       ("MinIO API", minio_api), ("MinIO UI (Console)", minio_ui)]:
+        if is_local_tcp_port_listening(val):
+            if _docker_instance_owns_port(val, instance_name):
+                # This instance's own containers will be stopped by compose down - OK
+                if live_cb:
+                    live_cb(f"Port {val} ({label}) is owned by this instance ({instance_name}); will be reclaimed.\n")
+            else:
+                return 1, (
+                    f"{label} port {val} is already in use by another service. "
+                    f"Choose a different port for instance '{instance_name}'. "
+                    "Each S3 instance needs unique ports."
+                )
 
     sudo_prefix = []
     if os.name != "nt" and hasattr(os, "geteuid") and os.geteuid() != 0:
