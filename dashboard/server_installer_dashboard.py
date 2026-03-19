@@ -9204,6 +9204,8 @@ def run_dashboard_update(live_cb=None):
             "dashboard/ui/components.js",
             "dashboard/ui/file-manager.js",
             "dashboard/ui/pages/home/home.js",
+            "dashboard/ui/pages/home/platform-services.js",
+            "dashboard/ui/pages/home/ai-ml.js",
             "dashboard/ui/pages/api/api.js",
             "dashboard/ui/pages/sysinfo/sysinfo.js",
             "dashboard/ui/pages/ports/ports.js",

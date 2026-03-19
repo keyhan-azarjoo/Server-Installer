@@ -598,6 +598,8 @@ function App() {
     if (page === "dotnet-iis") return "DotNet > IIS";
     if (page === "dotnet-docker") return "DotNet > Docker";
     if (page === "dotnet-linux") return "DotNet > Linux";
+    if (page === "platform-services") return "Platform Services";
+    if (page === "ai-ml") return "AI & ML Services";
     return "Dashboard";
   })();
 

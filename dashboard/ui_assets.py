@@ -10,6 +10,8 @@ DASHBOARD_UI_SCRIPTS = [
     "/static/ui/components.js",
     "/static/ui/file-manager.js",
     "/static/ui/pages/home/home.js",
+    "/static/ui/pages/home/platform-services.js",
+    "/static/ui/pages/home/ai-ml.js",
     "/static/ui/pages/api/api.js",
     "/static/ui/pages/sysinfo/sysinfo.js",
     "/static/ui/pages/ports/ports.js",
