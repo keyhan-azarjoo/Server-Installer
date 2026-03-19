@@ -8594,7 +8594,7 @@ server {
     listen ${http_port};
     server_name ${domain} localhost;
     location / {
-        proxy_pass http://127.0.0.1:${api_target_port};
+        proxy_pass http://127.0.0.1:${console_target_port};
         proxy_http_version 1.1;
         proxy_set_header Host \$http_host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -8647,7 +8647,7 @@ EOF
         listen ${http_port};
         server_name ${domain} localhost;
         location / {
-            proxy_pass http://127.0.0.1:${api_target_port};
+            proxy_pass http://127.0.0.1:${console_target_port};
             proxy_http_version 1.1;
             proxy_set_header Host \$http_host;
             proxy_set_header X-Real-IP \$remote_addr;
