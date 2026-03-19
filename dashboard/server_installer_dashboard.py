@@ -11628,8 +11628,10 @@ def run_system_power(action, live_cb=None):
     emit(f"[INFO] {label} requested...")
 
     if os.name == "nt":
-        flag = "/r" if action == "restart" else "/s"
-        cmd = ["shutdown", flag, "/t", "5", "/c", f"Dashboard {label}"]
+        # Use PowerShell Restart-Computer/Stop-Computer — more reliable than
+        # shutdown.exe when called from a Python subprocess or Windows service context.
+        ps_cmd = "Restart-Computer -Force" if action == "restart" else "Stop-Computer -Force"
+        cmd = ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_cmd]
     else:
         flag = "-r" if action == "restart" else "-h"
         cmd = ["shutdown", flag, "now"]
