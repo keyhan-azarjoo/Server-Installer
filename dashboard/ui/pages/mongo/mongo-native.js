@@ -164,8 +164,8 @@
         LOCALMONGO_WEB_PORT: inst.webPort,
         LOCALMONGO_ADMIN_USER: inst.adminUser,
         LOCALMONGO_ADMIN_PASSWORD: inst.adminPassword,
-        LOCALMONGO_UI_USER: inst.uiUser,
-        LOCALMONGO_UI_PASSWORD: inst.uiPassword,
+        LOCALMONGO_UI_USER: inst.adminUser,
+        LOCALMONGO_UI_PASSWORD: inst.adminPassword,
       };
       Object.entries(fields).forEach(([name, value]) => {
         const inp = document.createElement("input");
