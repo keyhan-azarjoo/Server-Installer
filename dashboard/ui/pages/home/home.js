@@ -38,17 +38,6 @@
     );
   };
 
-  // ── AI & ML Services page ─────────────────────────────────────────────────
-  ns.pages["ai-ml"] = function renderAiMlPage(p) {
-    const { Box, Typography } = p;
-    return (
-      <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 320 }}>
-        <Typography variant="h5" fontWeight={800} sx={{ mb: 1, color: "#6d28d9" }}>AI & ML Services</Typography>
-        <Typography variant="body1" color="text.secondary">Coming soon.</Typography>
-      </Box>
-    );
-  };
-
   // ── Home page ─────────────────────────────────────────────────────────────
   ns.pages.home = function renderHomePage(p) {
     const { Card, CardContent, Typography, Grid, Button, Box, setPage } = p;

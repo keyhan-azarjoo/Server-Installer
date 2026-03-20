@@ -1,6 +1,6 @@
 const {
   Alert, AppBar, Box, Button, Card, CardContent, Chip, CssBaseline, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Drawer,
-  FormControl, Grid, IconButton, InputAdornment, InputLabel, LinearProgress, MenuItem, Paper, Select, Stack, TextField, Toolbar, Tooltip, Typography
+  FormControl, Grid, IconButton, InputAdornment, InputLabel, LinearProgress, MenuItem, Paper, Select, Snackbar, Stack, TextField, Toolbar, Tooltip, Typography
 } = MaterialUI;
 
 const { ActionCard, NavCard } = (window.ServerInstallerUI && window.ServerInstallerUI.components) || {};
@@ -600,6 +600,11 @@ function App() {
     if (page === "dotnet-linux") return "DotNet > Linux";
     if (page === "platform-services") return "Platform Services";
     if (page === "ai-ml") return "AI & ML Services";
+    if (page === "ai-ollama") return "AI > Ollama";
+    if (page === "ai-tgwui") return "AI > Text Generation WebUI";
+    if (page === "ai-comfyui") return "AI > ComfyUI";
+    if (page === "ai-custom") return "AI > Custom Model";
+    if (page === "logs") return "System Logs";
     return "Dashboard";
   })();
 
@@ -1735,7 +1740,7 @@ function App() {
     // MUI components
     Alert, AppBar, Box, Button, Card, CardContent, Chip, CssBaseline, Dialog, DialogActions,
     DialogContent, DialogTitle, Divider, Drawer, FormControl, Grid, IconButton, InputAdornment, InputLabel,
-    LinearProgress, MenuItem, Paper, Select, Stack, TextField, Toolbar, Tooltip, Typography,
+    LinearProgress, MenuItem, Paper, Select, Snackbar, Stack, TextField, Toolbar, Tooltip, Typography,
     // Shared components
     ActionCard, NavCard,
     // Config
@@ -1843,6 +1848,20 @@ function App() {
   };
 
 
+  const sidebarBtn = (label, shortLabel, targetPage, opts = {}) => {
+    const isActive = page === targetPage || (opts.activePages && opts.activePages.some((p) => page === p || String(page).startsWith(p)));
+    return (
+      <Button
+        fullWidth
+        variant={isActive ? "contained" : "outlined"}
+        sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: isActive ? undefined : "#dbeafe", borderColor: "rgba(219,234,254,.35)", justifyContent: "flex-start", px: collapsed ? 1 : 2 }}
+        onClick={() => { if (opts.onClick) opts.onClick(); else setPage(targetPage); if (isMobile) setMobileOpen(false); }}
+      >
+        {collapsed ? (shortLabel || label.slice(0, 4)) : label}
+      </Button>
+    );
+  };
+
   const sidebar = (
     <Box sx={{ height: "100%", background: "linear-gradient(180deg,#081726,#132d4b)", color: "#deebff", p: 1.5, display: "flex", flexDirection: "column" }}>
       <Stack direction="row" alignItems="center" sx={{ px: 1, pb: 1.5, pt: 1 }}>
@@ -1853,26 +1872,21 @@ function App() {
           </Box>
         )}
       </Stack>
-      {!collapsed && <Chip label={cfg.os_label} size="small" sx={{ mb: 1.5, ml: 1, bgcolor: "rgba(96,165,250,.2)", color: "#dbeafe", border: "1px solid rgba(147,197,253,.45)" }} />}
-      <Button fullWidth variant={page === "home" ? "contained" : "outlined"} sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2 }} onClick={() => { setPage("home"); if (isMobile) setMobileOpen(false); }}>
-        {collapsed ? "Home" : "Dashboard Home"}
-      </Button>
-      <Button
-        fullWidth
-        variant={page === "ssl" ? "contained" : "outlined"}
-        sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: page === "ssl" ? undefined : "#dbeafe", borderColor: "rgba(219,234,254,.35)" }}
-        onClick={() => { setPage("ssl"); if (isMobile) setMobileOpen(false); }}
-      >
-        {collapsed ? "SSL" : "SSL & Certificates"}
-      </Button>
-      <Button
-        fullWidth
-        variant={page === "files" ? "contained" : "outlined"}
-        sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: page === "files" ? undefined : "#dbeafe", borderColor: "rgba(219,234,254,.35)" }}
-        onClick={() => { setPage("files"); setFileManagerData(null); if (isMobile) setMobileOpen(false); }}
-      >
-        {collapsed ? "Files" : "File Manager"}
-      </Button>
+      {!collapsed && <Chip label={cfg.os_label} size="small" sx={{ mb: 0.5, ml: 1, bgcolor: "rgba(96,165,250,.2)", color: "#dbeafe", border: "1px solid rgba(147,197,253,.45)" }} />}
+
+      {sidebarBtn("OS Info", "SI", "sysinfo")}
+      {sidebarBtn("Dashboard", "Home", "home")}
+      {sidebarBtn("File Manager", "Files", "files", { onClick: () => { setPage("files"); setFileManagerData(null); } })}
+
+      {!collapsed && <Typography variant="caption" sx={{ mt: 2, mb: 0.5, ml: 1, opacity: 0.5, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" }}>Services</Typography>}
+      {sidebarBtn("Platform Services", "Plat", "platform-services", { activePages: ["platform-services", "api", "dotnet", "s3", "mongo", "python", "proxy", "website", "ssl"] })}
+      {sidebarBtn("AI & ML Services", "AI", "ai-ml", { activePages: ["ai-ml", "ai-"] })}
+      {sidebarBtn("Docker", "Dock", "docker")}
+
+      {!collapsed && <Typography variant="caption" sx={{ mt: 2, mb: 0.5, ml: 1, opacity: 0.5, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase" }}>Tools</Typography>}
+      {sidebarBtn("Web Terminal", "Term", "terminal", { onClick: () => { setTermOpen(true); setTermMin(false); } })}
+      {sidebarBtn("Logs", "Logs", "logs")}
+
       <Box sx={{ flexGrow: 1 }} />
       {updateAvailable === true && (
         <Button
@@ -1881,7 +1895,7 @@ function App() {
           sx={{ textTransform: "none", fontWeight: 700, borderRadius: 2, mt: 1, color: "#fde68a", borderColor: "rgba(253,230,138,.5)" }}
           onClick={runDashboardUpdate}
         >
-          {collapsed ? "Update" : "Update Dashboard"}
+          {collapsed ? "Upd" : "Update Dashboard"}
         </Button>
       )}
     </Box>
@@ -2021,7 +2035,6 @@ function App() {
       )}
       <Box component="main" sx={{ flexGrow: 1, mt: "64px", p: { xs: 2, md: 3 }, ml: `${mainMargin}px`, transition: "margin .2s ease", display: "flex", flexDirection: "column", minHeight: "calc(100vh - 64px)" }}>
         {cfg.message && <Alert severity="success" sx={{ mb: 2 }}>{cfg.message}</Alert>}
-        {infoMessage && <Alert severity="info" sx={{ mb: 2 }} onClose={() => setInfoMessage("")}>{infoMessage}</Alert>}
         {runError && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setRunError("")}>{runError}</Alert>}
         {systemErr && <Alert severity="error" sx={{ mb: 2 }}>{systemErr}</Alert>}
 
@@ -2083,6 +2096,18 @@ function App() {
           )}
         </Paper>
       )}
+
+      {/* ── Snackbar toast for infoMessage ── */}
+      <Snackbar
+        open={!!infoMessage}
+        autoHideDuration={4000}
+        onClose={() => setInfoMessage("")}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert onClose={() => setInfoMessage("")} severity="info" variant="filled" sx={{ width: "100%", borderRadius: 2, fontWeight: 600 }}>
+          {infoMessage}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 }

@@ -8,6 +8,7 @@ DASHBOARD_UI_SCRIPTS = [
     "/static/ui/utils.js",
     "/static/ui/actions.js",
     "/static/ui/components.js",
+    "/static/ui/shared-service.js",
     "/static/ui/file-manager.js",
     "/static/ui/pages/home/home.js",
     "/static/ui/pages/api/api.js",
@@ -32,6 +33,8 @@ DASHBOARD_UI_SCRIPTS = [
     "/static/ui/pages/website/website.js",
     "/static/ui/pages/ssl/ssl.js",
     "/static/ui/pages/files/files.js",
+    "/static/ui/pages/ai/ai.js",
+    "/static/ui/pages/logs/logs.js",
     "/static/ui/app.js",
 ]
 

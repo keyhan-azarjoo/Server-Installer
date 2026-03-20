@@ -9,6 +9,7 @@ dashboard/ui/core.js
 dashboard/ui/utils.js
 dashboard/ui/actions.js
 dashboard/ui/components.js
+dashboard/ui/shared-service.js
 dashboard/ui/file-manager.js
 dashboard/ui/pages/home/home.js
 dashboard/ui/pages/api/api.js
@@ -33,6 +34,8 @@ dashboard/ui/pages/python/python-iis.js
 dashboard/ui/pages/website/website.js
 dashboard/ui/pages/ssl/ssl.js
 dashboard/ui/pages/files/files.js
+dashboard/ui/pages/ai/ai.js
+dashboard/ui/pages/logs/logs.js
 dashboard/ui/app.js
 Python/windows/setup-python.ps1
 Mongo/windows/setup-mongodb.ps1

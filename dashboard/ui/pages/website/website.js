@@ -2,17 +2,18 @@
   const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
 
+  const { ServiceListCard, ServiceRow } = ns.shared || {};
+
   function WebsiteInner(p) {
     const {
-      Alert, Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
+      Alert, Grid, Card, CardContent, Typography, Stack, Button, Box,
       TextField, MenuItem, Select, FormControl, InputLabel,
-      ActionCard,
       cfg, run, selectableIps, getDefaultSelectableIp, serviceBusy,
-      websiteEditor, websiteEditorSeed, websiteInfo, websiteServices,
+      websiteEditor, websiteInfo, websiteServices,
       iis, docker,
       isScopeLoading, loadWebsiteInfo, loadWebsiteServices,
       onServiceAction, openWebsiteRun,
-      isServiceRunningStatus, formatServiceState, renderServiceStatus,
+      renderServiceStatus,
       renderServiceUrls, renderServicePorts, renderFolderIcon, renderEditServiceIcon,
       scopeErrors,
       defaultWebsiteDirForOs,
@@ -379,63 +380,39 @@
 
         {/* ── Service list ── */}
         <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
-            <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
-              <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                <Typography variant="h6" fontWeight={800}>Websites</Typography>
-                <Box sx={{ flexGrow: 1 }} />
-                <Button variant="outlined" disabled={isScopeLoading("website")} onClick={() => Promise.all([loadWebsiteInfo.current(), loadWebsiteServices.current()])} sx={{ textTransform: "none" }}>
-                  Refresh
-                </Button>
-              </Stack>
-              {scopeErrors.website && <Alert severity="error" sx={{ mt: 1 }}>{scopeErrors.website}</Alert>}
-              <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
-                {websiteServices.length === 0 && <Typography variant="body2">No managed websites found yet.</Typography>}
-                {websiteServices.map((svc) => (
-                  <Paper key={`website-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
-                    <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
-                      <Box sx={{ minWidth: 280 }}>
-                        <Typography variant="body2"><b>{svc.form_name || svc.name}</b></Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {svc.stack_label || svc.target_value || svc.kind || "website"}
-                        </Typography>
-                        {renderServiceUrls(svc)}
-                        {renderServicePorts(svc)}
-                      </Box>
-                      {renderServiceStatus(svc)}
-                      <Box sx={{ flexGrow: 1 }} />
-                      {!!(svc.urls && svc.urls[0]) && (
-                        <Button size="small" variant="contained" disabled={serviceBusy} onClick={() => window.open(svc.urls[0], "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
-                          Open
-                        </Button>
-                      )}
-                      {renderFolderIcon(svc)}
-                      {renderEditServiceIcon(svc)}
-                      <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => openWebsiteRun(svc)} sx={{ textTransform: "none" }}>
-                        Update Files
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
-                        disabled={serviceBusy}
-                        onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
-                        sx={{ textTransform: "none" }}
-                      >
-                        {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
-                      </Button>
-                      <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => onServiceAction("restart", svc)} sx={{ textTransform: "none" }}>
-                        Restart
-                      </Button>
-                      <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>
-                        Delete
-                      </Button>
-                    </Stack>
-                  </Paper>
-                ))}
-              </Box>
-            </CardContent>
-          </Card>
+          <ServiceListCard
+            title="Websites"
+            services={websiteServices}
+            emptyText="No managed websites found yet."
+            loading={isScopeLoading("website")}
+            onRefresh={() => Promise.all([loadWebsiteInfo.current(), loadWebsiteServices.current()])}
+            serviceBusy={serviceBusy}
+          >
+            {scopeErrors.website && <Alert severity="error" sx={{ mb: 1 }}>{scopeErrors.website}</Alert>}
+            {websiteServices.map((svc) => (
+              <ServiceRow
+                key={`website-${svc.kind}-${svc.name}`}
+                svc={svc}
+                serviceBusy={serviceBusy}
+                onServiceAction={onServiceAction}
+                renderServiceUrls={renderServiceUrls}
+                renderServicePorts={renderServicePorts}
+                renderServiceStatus={renderServiceStatus}
+                renderFolderIcon={renderFolderIcon}
+                renderEditServiceIcon={renderEditServiceIcon}
+                extraButtons={<React.Fragment>
+                  {!!(svc.urls && svc.urls[0]) && (
+                    <Button size="small" variant="contained" disabled={serviceBusy} onClick={() => window.open(svc.urls[0], "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
+                      Open
+                    </Button>
+                  )}
+                  <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => openWebsiteRun(svc)} sx={{ textTransform: "none" }}>
+                    Update Files
+                  </Button>
+                </React.Fragment>}
+              />
+            ))}
+          </ServiceListCard>
         </Grid>
       </Grid>
     );
