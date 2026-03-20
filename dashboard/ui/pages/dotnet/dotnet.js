@@ -2,17 +2,15 @@
   const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
 
-  const { ServiceListCard, ServiceRow, PageDescription } = ns.shared || {};
-
   ns.pages.dotnet = function renderDotnetPage(p) {
     const {
-      Alert, Grid, Typography, Button,
+      Alert, Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip,
       NavCard,
       cfg, serviceBusy,
       dotnetServices, dockerServices,
       isScopeLoading, loadDotnetInfo, loadDotnetServices, loadDockerServices,
       hasStoppedServices, batchServiceAction, setPage,
-      onServiceAction,
+      isServiceRunningStatus, onServiceAction,
       renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
     } = p;
 
@@ -22,46 +20,41 @@
     });
     const allServices = [...(dotnetServices || []), ...dotnetDockerServices];
 
-    const serviceRows = (svcs) =>
-      svcs.map((svc) => (
-        <ServiceRow
-          key={`dotnet-all-${svc.kind}-${svc.name}`}
-          svc={svc}
-          serviceBusy={serviceBusy}
-          onServiceAction={onServiceAction}
-          renderServiceUrls={renderServiceUrls}
-          renderServicePorts={renderServicePorts}
-          renderServiceStatus={renderServiceStatus}
-          renderFolderIcon={renderFolderIcon}
-          showRestart={false}
-        />
-      ));
-
-    const batchButton = allServices.length > 0 && (
-      <Button
-        variant="outlined"
-        color={hasStoppedServices(allServices) ? "success" : "error"}
-        disabled={serviceBusy}
-        onClick={() => batchServiceAction(allServices, "DotNet", hasStoppedServices(allServices) ? "start" : "stop")}
-        sx={{ textTransform: "none" }}
-      >
-        {hasStoppedServices(allServices) ? "Start All" : "Stop All"}
-      </Button>
+    const serviceList = (svcs) => (
+      <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 460px)", overflow: "auto" }}>
+        {svcs.length === 0 && <Typography variant="body2" color="text.secondary">No DotNet-related services found.</Typography>}
+        {svcs.map((svc) => (
+          <Paper key={`dotnet-all-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+            <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+              <Box sx={{ minWidth: 250 }}>
+                <Typography variant="body2"><b>{svc.name}</b> <Typography component="span" variant="caption" color="text.secondary">({svc.kind || "service"})</Typography></Typography>
+                {svc.image && <Typography variant="caption" color="text.secondary">Image: {svc.image}</Typography>}
+                {renderServiceUrls(svc)}
+                {renderServicePorts(svc)}
+              </Box>
+              {renderServiceStatus(svc)}
+              <Box sx={{ flexGrow: 1 }} />
+              {renderFolderIcon(svc)}
+              <Button
+                size="small"
+                variant="outlined"
+                color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                disabled={serviceBusy}
+                onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                sx={{ textTransform: "none" }}
+              >
+                {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+              </Button>
+              <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
+            </Stack>
+          </Paper>
+        ))}
+      </Box>
     );
-
-    const onRefresh = () => Promise.all([loadDotnetInfo.current(), loadDotnetServices.current(), loadDockerServices.current()]);
-    const refreshLoading = isScopeLoading("dotnet") || isScopeLoading("docker");
 
     if (cfg.os === "windows") {
       return (
         <Grid container spacing={2}>
-          <Grid item xs={12}>
-            <PageDescription title="DotNet Services">
-              <Typography variant="body2" color="text.secondary">
-                Manage your ASP.NET and .NET Core services. Use the cards below to deploy via IIS or Docker, and monitor all running DotNet services from the list.
-              </Typography>
-            </PageDescription>
-          </Grid>
           <Grid item xs={12} md={6}>
             <NavCard title="IIS" text="Install and deploy on IIS." onClick={() => setPage("dotnet-iis")} />
           </Grid>
@@ -69,17 +62,27 @@
             <NavCard title="Docker" text="Install and deploy on Docker." onClick={() => setPage("dotnet-docker")} />
           </Grid>
           <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
-            <ServiceListCard
-              title="All DotNet Services"
-              services={allServices}
-              emptyText="No DotNet-related services found."
-              loading={refreshLoading}
-              onRefresh={onRefresh}
-              extraActions={batchButton}
-              serviceBusy={serviceBusy}
-            >
-              {serviceRows(allServices)}
-            </ServiceListCard>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+              <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                  <Typography variant="h6" fontWeight={800}>All DotNet Services</Typography>
+                  <Box sx={{ flexGrow: 1 }} />
+                  <Button variant="outlined" disabled={isScopeLoading("dotnet") || isScopeLoading("docker")} onClick={() => Promise.all([loadDotnetInfo.current(), loadDotnetServices.current(), loadDockerServices.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
+                  {allServices.length > 0 && (
+                    <Button
+                      variant="outlined"
+                      color={hasStoppedServices(allServices) ? "success" : "error"}
+                      disabled={serviceBusy}
+                      onClick={() => batchServiceAction(allServices, "DotNet", hasStoppedServices(allServices) ? "start" : "stop")}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {hasStoppedServices(allServices) ? "Start All" : "Stop All"}
+                    </Button>
+                  )}
+                </Stack>
+                {serviceList(allServices)}
+              </CardContent>
+            </Card>
           </Grid>
         </Grid>
       );
@@ -87,13 +90,6 @@
     if (cfg.os === "linux") {
       return (
         <Grid container spacing={2}>
-          <Grid item xs={12}>
-            <PageDescription title="DotNet Services">
-              <Typography variant="body2" color="text.secondary">
-                Manage your ASP.NET and .NET Core services. Use the cards below to deploy natively on Linux or via Docker, and monitor all running DotNet services from the list.
-              </Typography>
-            </PageDescription>
-          </Grid>
           <Grid item xs={12} md={6}>
             <NavCard title="Linux" text="Install and deploy on Linux." onClick={() => setPage("dotnet-linux")} />
           </Grid>
@@ -101,17 +97,27 @@
             <NavCard title="Docker" text="Install and deploy on Docker (Linux)." onClick={() => setPage("dotnet-docker")} />
           </Grid>
           <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
-            <ServiceListCard
-              title="All DotNet Services"
-              services={allServices}
-              emptyText="No DotNet-related services found."
-              loading={refreshLoading}
-              onRefresh={onRefresh}
-              extraActions={batchButton}
-              serviceBusy={serviceBusy}
-            >
-              {serviceRows(allServices)}
-            </ServiceListCard>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+              <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                  <Typography variant="h6" fontWeight={800}>All DotNet Services</Typography>
+                  <Box sx={{ flexGrow: 1 }} />
+                  <Button variant="outlined" disabled={isScopeLoading("dotnet") || isScopeLoading("docker")} onClick={() => Promise.all([loadDotnetInfo.current(), loadDotnetServices.current(), loadDockerServices.current()])} sx={{ textTransform: "none" }}>Refresh</Button>
+                  {allServices.length > 0 && (
+                    <Button
+                      variant="outlined"
+                      color={hasStoppedServices(allServices) ? "success" : "error"}
+                      disabled={serviceBusy}
+                      onClick={() => batchServiceAction(allServices, "DotNet", hasStoppedServices(allServices) ? "start" : "stop")}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {hasStoppedServices(allServices) ? "Start All" : "Stop All"}
+                    </Button>
+                  )}
+                </Stack>
+                {serviceList(allServices)}
+              </CardContent>
+            </Card>
           </Grid>
         </Grid>
       );
