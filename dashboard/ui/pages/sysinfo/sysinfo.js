@@ -48,7 +48,8 @@
     function handlePower(e, action) {
       const label = action === "restart" ? "Restart" : "Shut Down";
       if (!window.confirm(`Are you sure you want to ${label.toLowerCase()} the computer?`)) return;
-      run(e, action === "restart" ? "/run/system_restart" : "/run/system_shutdown", `${label} System`, null);
+      const tempForm = document.createElement("form");
+      run(e, action === "restart" ? "/run/system_restart" : "/run/system_shutdown", `${label} System`, tempForm);
     }
 
     return (
