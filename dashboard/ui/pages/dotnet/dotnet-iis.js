@@ -20,14 +20,11 @@
       setLoading(true);
       setError("");
       try {
-        const r = await fetch("/api/system/services?scope=all", { headers: { "X-Requested-With": "fetch" } });
+        const r = await fetch("/api/system/services?scope=dotnet", { headers: { "X-Requested-With": "fetch" } });
         const j = await r.json();
         if (j.ok && Array.isArray(j.services)) {
           const sites = j.services.filter((s) => String(s.kind || "").toLowerCase() === "iis_site");
           setIisServices(sites);
-          if (sites.length === 0) {
-            setError("The service API returned no IIS sites. If you have IIS sites running, click 'Update Dashboard' in the sidebar to apply the latest server fixes, then refresh this page.");
-          }
         } else {
           setError(j.error || "Failed to load services.");
         }
@@ -103,6 +100,9 @@
               <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
                 {loading && iisServices.length === 0 && (
                   <Typography variant="body2" color="text.secondary">Loading IIS sites...</Typography>
+                )}
+                {!loading && iisServices.length === 0 && !error && (
+                  <Typography variant="body2" color="text.secondary">No IIS sites deployed yet. Use "Deploy IIS" above to add one.</Typography>
                 )}
                 {iisServices.map((svc) => (
                   <Paper key={`iis-${svc.name}`} variant="outlined" sx={{ p: 1.5, mb: 1, borderRadius: 2 }}>
