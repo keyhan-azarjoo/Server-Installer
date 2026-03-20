@@ -4,18 +4,17 @@
 
   ns.pages.s3 = function renderS3Page(p) {
     const {
-      Alert, Grid, Typography, Button, Box,
+      Alert, Grid, Card, CardContent, Typography, Button, Box, Stack, Paper, Chip,
       ActionCard, ActionIcon,
       cfg, run, selectableIps, getDefaultSelectableIp, serviceBusy,
       s3WindowsModeOptions, s3WindowsDockerSupported, s3WindowsDockerReason,
       s3ConsoleUrl, s3ApiUrl, s3LoginText, s3Services,
       isScopeLoading, loadS3Info, loadS3Services,
       hasStoppedServices, batchServiceAction, copyText,
-      onServiceAction,
+      onServiceAction, isServiceRunningStatus,
       renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
       OpenCompassStyleIcon, TryOpenCompassIcon, CopyCompassIcon,
     } = p;
-    const { ServiceListCard, ServiceRow, PageDescription } = ns.shared || {};
 
     const s3ExtraActions = (
       <>
@@ -47,29 +46,90 @@
       </Box>
     ) : null;
 
-    const s3ServiceRows = s3Services.map((svc) => (
-      <ServiceRow
-        key={`s3-${svc.kind}-${svc.name}`}
-        svc={svc}
-        serviceBusy={serviceBusy}
-        onServiceAction={onServiceAction}
-        renderServiceUrls={renderServiceUrls}
-        renderServicePorts={renderServicePorts}
-        renderServiceStatus={renderServiceStatus}
-        renderFolderIcon={renderFolderIcon}
-        showRestart={false}
-      />
-    ));
+    const s3Loading = isScopeLoading("s3");
+
+    const s3ServiceList = (
+      <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+        <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
+          <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+            <Typography variant="h6" fontWeight={800}>S3 Services</Typography>
+            <Box sx={{ flexGrow: 1 }} />
+            {s3ExtraActions}
+            <Button
+              variant="outlined"
+              disabled={!!s3Loading}
+              onClick={() => Promise.all([loadS3Info.current(), loadS3Services.current()])}
+              sx={{ textTransform: "none" }}
+            >
+              Refresh
+            </Button>
+          </Stack>
+          <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
+            {s3Services.length === 0 && (
+              <Typography variant="body2" color="text.secondary">No S3-related services found.</Typography>
+            )}
+            {s3UrlDisplay}
+            {s3Services.map((svc) => {
+              const running = isServiceRunningStatus(svc.status, svc.sub_status);
+              const kindLabel = svc.kind || "service";
+              return (
+                <Paper key={`s3-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                    <Box sx={{ minWidth: 250 }}>
+                      <Stack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap">
+                        <Typography variant="body2"><b>{svc.form_name || svc.name}</b></Typography>
+                        <Chip label={kindLabel} size="small" variant="outlined" sx={{ fontSize: 11, height: 20 }} />
+                      </Stack>
+                      {svc.image && (
+                        <Typography variant="caption" color="text.secondary">Image: {svc.image}</Typography>
+                      )}
+                      {typeof renderServiceUrls === "function" && renderServiceUrls(svc)}
+                      {typeof renderServicePorts === "function" && renderServicePorts(svc)}
+                    </Box>
+                    {typeof renderServiceStatus === "function" && renderServiceStatus(svc)}
+                    <Box sx={{ flexGrow: 1 }} />
+                    {typeof renderFolderIcon === "function" && renderFolderIcon(svc)}
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color={running ? "error" : "success"}
+                      disabled={!!serviceBusy}
+                      onClick={() => onServiceAction(running ? "stop" : "start", svc)}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {running ? "Stop" : "Start"}
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      disabled={!!serviceBusy}
+                      onClick={() => onServiceAction("delete", svc)}
+                      sx={{ textTransform: "none" }}
+                    >
+                      Delete
+                    </Button>
+                  </Stack>
+                </Paper>
+              );
+            })}
+          </Box>
+        </CardContent>
+      </Card>
+    );
 
     if (cfg.os === "windows") {
       return (
         <Grid container spacing={2}>
           <Grid item xs={12}>
-            <PageDescription title="S3-Compatible Object Storage">
-              <Typography variant="body2">
-                MinIO provides Amazon S3-compatible object storage you can run locally. Store files, images, backups, and application data using the standard S3 API. Access your storage through the MinIO Console web UI or connect from any S3-compatible client or SDK.
-              </Typography>
-            </PageDescription>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>S3-Compatible Object Storage</Typography>
+                <Typography variant="body2">
+                  MinIO provides Amazon S3-compatible object storage you can run locally. Store files, images, backups, and application data using the standard S3 API. Access your storage through the MinIO Console web UI or connect from any S3-compatible client or SDK.
+                </Typography>
+              </CardContent>
+            </Card>
           </Grid>
           <Grid item xs={12} md={8}>
             <ActionCard
@@ -108,18 +168,7 @@
             />
           </Grid>
           <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
-            <ServiceListCard
-              title="S3 Services"
-              services={s3Services}
-              emptyText="No S3-related services found."
-              loading={isScopeLoading("s3")}
-              onRefresh={() => Promise.all([loadS3Info.current(), loadS3Services.current()])}
-              serviceBusy={serviceBusy}
-              extraActions={s3ExtraActions}
-            >
-              {s3UrlDisplay}
-              {s3ServiceRows}
-            </ServiceListCard>
+            {s3ServiceList}
           </Grid>
         </Grid>
       );
@@ -128,11 +177,14 @@
       return (
         <Grid container spacing={2}>
           <Grid item xs={12}>
-            <PageDescription title="S3-Compatible Object Storage">
-              <Typography variant="body2">
-                MinIO provides Amazon S3-compatible object storage you can run locally. Store files, images, backups, and application data using the standard S3 API. Access your storage through the MinIO Console web UI or connect from any S3-compatible client or SDK.
-              </Typography>
-            </PageDescription>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+              <CardContent>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>S3-Compatible Object Storage</Typography>
+                <Typography variant="body2">
+                  MinIO provides Amazon S3-compatible object storage you can run locally. Store files, images, backups, and application data using the standard S3 API. Access your storage through the MinIO Console web UI or connect from any S3-compatible client or SDK.
+                </Typography>
+              </CardContent>
+            </Card>
           </Grid>
           <Grid item xs={12} md={8}>
             <ActionCard
@@ -156,18 +208,7 @@
             />
           </Grid>
           <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
-            <ServiceListCard
-              title="S3 Services"
-              services={s3Services}
-              emptyText="No S3-related services found."
-              loading={isScopeLoading("s3")}
-              onRefresh={() => Promise.all([loadS3Info.current(), loadS3Services.current()])}
-              serviceBusy={serviceBusy}
-              extraActions={s3ExtraActions}
-            >
-              {s3UrlDisplay}
-              {s3ServiceRows}
-            </ServiceListCard>
+            {s3ServiceList}
           </Grid>
         </Grid>
       );
