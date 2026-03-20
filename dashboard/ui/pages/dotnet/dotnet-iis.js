@@ -4,8 +4,8 @@
 
   function DotnetIisInner(p) {
     const {
-      Grid, Card, CardContent, Typography, Divider, ActionCard,
-      Stack, Button, Box, Paper,
+      Grid, Card, CardContent, Typography, Divider, ActionCard, Alert,
+      Stack, Button, Box, Paper, Chip,
       cfg, run, serviceBusy,
       isServiceRunningStatus, onServiceAction,
       hasStoppedServices, batchServiceAction,
@@ -14,16 +14,26 @@
 
     const [iisServices, setIisServices] = React.useState([]);
     const [loading, setLoading] = React.useState(false);
+    const [error, setError] = React.useState("");
 
     const loadIisServices = React.useCallback(async () => {
       setLoading(true);
+      setError("");
       try {
         const r = await fetch("/api/system/services?scope=all", { headers: { "X-Requested-With": "fetch" } });
         const j = await r.json();
         if (j.ok && Array.isArray(j.services)) {
-          setIisServices(j.services.filter((s) => String(s.kind || "").toLowerCase() === "iis_site"));
+          const sites = j.services.filter((s) => String(s.kind || "").toLowerCase() === "iis_site");
+          setIisServices(sites);
+          if (sites.length === 0) {
+            setError("The service API returned no IIS sites. If you have IIS sites running, click 'Update Dashboard' in the sidebar to apply the latest server fixes, then refresh this page.");
+          }
+        } else {
+          setError(j.error || "Failed to load services.");
         }
-      } catch (_) {}
+      } catch (ex) {
+        setError("Could not reach the services API: " + String(ex));
+      }
       setLoading(false);
     }, []);
 
@@ -63,10 +73,8 @@
               <Divider sx={{ my: 1 }} />
               <Typography variant="body2" sx={{ mb: 1 }}><b>.NET Channel</b> — runtime version, e.g. <code>8.0</code> or <code>9.0</code>.</Typography>
               <Divider sx={{ my: 1 }} />
-              <Typography variant="body2" sx={{ mb: 1 }}><b>HTTP Port</b> — serve plain HTTP on this port. Leave empty to disable HTTP.</Typography>
-              <Typography variant="body2" sx={{ mb: 1 }}><b>HTTPS Port</b> — serve HTTPS (TLS) on this port. Leave empty to disable HTTPS.</Typography>
-              <Divider sx={{ my: 1 }} />
-              <Typography variant="body2">Redeploying to the same site name updates the app pool and replaces application files without changing IIS bindings.</Typography>
+              <Typography variant="body2" sx={{ mb: 1 }}><b>HTTP Port</b> — leave empty to disable HTTP.</Typography>
+              <Typography variant="body2" sx={{ mb: 1 }}><b>HTTPS Port</b> — leave empty to disable HTTPS.</Typography>
             </CardContent>
           </Card>
         </Grid>
@@ -91,31 +99,31 @@
                   </Button>
                 )}
               </Stack>
+              {error && <Alert severity="warning" sx={{ mt: 1, borderRadius: 2 }}>{error}</Alert>}
               <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
-                {iisServices.length === 0 && !loading && (
-                  <Typography variant="body2" color="text.secondary">No IIS sites found. Deploy an app above to see sites here.</Typography>
-                )}
                 {loading && iisServices.length === 0 && (
                   <Typography variant="body2" color="text.secondary">Loading IIS sites...</Typography>
                 )}
                 {iisServices.map((svc) => (
-                  <Paper key={`iis-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                  <Paper key={`iis-${svc.name}`} variant="outlined" sx={{ p: 1.5, mb: 1, borderRadius: 2 }}>
                     <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                       <Box sx={{ minWidth: 250 }}>
-                        <Typography variant="body2"><b>{svc.name}</b> <Typography component="span" variant="caption" color="text.secondary">({svc.kind || "iis_site"})</Typography></Typography>
+                        <Stack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap">
+                          <Typography variant="body2" fontWeight={700}>{svc.name}</Typography>
+                          <Chip label="IIS" size="small" color="primary" variant="outlined" sx={{ fontSize: 11, height: 20 }} />
+                        </Stack>
                         {svc.display_name && svc.display_name !== svc.name && (
                           <Typography variant="caption" color="text.secondary" sx={{ display: "block", wordBreak: "break-all" }}>{svc.display_name}</Typography>
                         )}
-                        {renderServiceUrls(svc)}
-                        {renderServicePorts(svc)}
+                        {renderServiceUrls && renderServiceUrls(svc)}
+                        {renderServicePorts && renderServicePorts(svc)}
                       </Box>
-                      {renderServiceStatus(svc)}
+                      {renderServiceStatus && renderServiceStatus(svc)}
                       <Box sx={{ flexGrow: 1 }} />
-                      {renderFolderIcon(svc)}
-                      {renderEditServiceIcon(svc)}
+                      {renderFolderIcon && renderFolderIcon(svc)}
+                      {renderEditServiceIcon && renderEditServiceIcon(svc)}
                       <Button
-                        size="small"
-                        variant="outlined"
+                        size="small" variant="outlined"
                         color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
                         disabled={serviceBusy}
                         onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
