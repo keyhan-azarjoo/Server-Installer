@@ -263,6 +263,7 @@ function Find-ProjectPath {
 
     $project = Get-ChildItem -Path $RootPath -Filter *.csproj -Recurse -ErrorAction SilentlyContinue |
         Select-Object -First 1
+    if (-not $project) { return $null }
     return $project.FullName
 }
 
