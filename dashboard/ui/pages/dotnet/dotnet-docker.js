@@ -35,6 +35,11 @@
       </Grid>
     );
 
+    const dotnetDockerServices = (dockerServices || []).filter((s) => {
+      const text = String(s.name || "") + " " + String(s.image || "");
+      return /(dotnet|aspnet|dotnetapp)/i.test(text) && !/python/i.test(text);
+    });
+
     if (cfg.os === "windows") {
       return (
         <Grid container spacing={2}>
@@ -54,14 +59,70 @@
             />
           </Grid>
           {dockerInfoCard}
+          <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
+            <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+              <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
+                <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                  <Typography variant="h6" fontWeight={800}>Running .NET Docker Containers</Typography>
+                  <Box sx={{ flexGrow: 1 }} />
+                  <Button
+                    variant="outlined"
+                    disabled={isScopeLoading("docker")}
+                    onClick={() => Promise.all([loadDockerInfo.current(), loadDockerServices.current()])}
+                    sx={{ textTransform: "none" }}
+                  >
+                    Refresh
+                  </Button>
+                  {dotnetDockerServices.length > 0 && (
+                    <Button
+                      variant="outlined"
+                      color={hasStoppedServices(dotnetDockerServices) ? "success" : "error"}
+                      disabled={serviceBusy || dotnetDockerServices.length === 0}
+                      onClick={() => batchServiceAction(dotnetDockerServices, "Docker", hasStoppedServices(dotnetDockerServices) ? "start" : "stop")}
+                      sx={{ textTransform: "none" }}
+                    >
+                      {hasStoppedServices(dotnetDockerServices) ? "Start All" : "Stop All"}
+                    </Button>
+                  )}
+                </Stack>
+                <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
+                  {dotnetDockerServices.length === 0 && (
+                    <Typography variant="body2" color="text.secondary">No .NET Docker containers found. Deploy an app above to see containers here.</Typography>
+                  )}
+                  {dotnetDockerServices.map((svc) => (
+                    <Paper key={`dd-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                        <Box sx={{ minWidth: 250 }}>
+                          <Typography variant="body2"><b>{svc.name}</b> ({svc.kind || "docker"})</Typography>
+                          {svc.image && <Typography variant="caption" color="text.secondary">Image: {svc.image}</Typography>}
+                          {renderServiceUrls(svc)}
+                          {renderServicePorts(svc)}
+                        </Box>
+                        {renderServiceStatus(svc)}
+                        <Box sx={{ flexGrow: 1 }} />
+                        {renderFolderIcon(svc)}
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color={isServiceRunningStatus(svc.status, svc.sub_status) ? "error" : "success"}
+                          disabled={serviceBusy}
+                          onClick={() => onServiceAction(isServiceRunningStatus(svc.status, svc.sub_status) ? "stop" : "start", svc)}
+                          sx={{ textTransform: "none" }}
+                        >
+                          {isServiceRunningStatus(svc.status, svc.sub_status) ? "Stop" : "Start"}
+                        </Button>
+                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>Delete</Button>
+                      </Stack>
+                    </Paper>
+                  ))}
+                </Box>
+              </CardContent>
+            </Card>
+          </Grid>
         </Grid>
       );
     }
     if (cfg.os === "linux") {
-      const dotnetDockerServices = (dockerServices || []).filter((s) => {
-        const text = String(s.name || "") + " " + String(s.image || "");
-        return /(dotnet|aspnet|dotnetapp)/i.test(text) && !/python/i.test(text);
-      });
       return (
         <Grid container spacing={2}>
           <Grid item xs={12} md={8}>
