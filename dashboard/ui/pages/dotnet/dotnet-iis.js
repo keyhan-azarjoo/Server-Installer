@@ -17,9 +17,11 @@
             description="Deploy application to IIS. Leave HTTP Port or HTTPS Port empty to skip that protocol — at least one must be set."
             action="/run/windows_iis"
             fields={[
+              { name: "SiteName", label: "Site Name", defaultValue: "DotNetApp", required: true, placeholder: "DotNetApp" },
+              { name: "DomainName", label: "Domain Name", placeholder: "e.g. myapp.example.com (optional)" },
               { name: "SourceValue", label: "Source Path or URL", enableUpload: true },
               { name: "DotNetChannel", label: ".NET Channel", defaultValue: "8.0" },
-              { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "80", placeholder: "Leave empty to skip HTTP", checkPort: true },
+              { name: "HTTP_PORT", label: "HTTP Port", defaultValue: "", placeholder: "Leave empty to skip HTTP", checkPort: true },
               { name: "HTTPS_PORT", label: "HTTPS Port", defaultValue: "443", placeholder: "Leave empty to skip HTTPS", checkPort: true, certSelect: "SSL_CERT_NAME" },
             ]}
             onRun={run}
