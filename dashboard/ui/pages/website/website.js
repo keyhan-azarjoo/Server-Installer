@@ -2,12 +2,11 @@
   const ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
 
-  const { ServiceListCard, ServiceRow } = ns.shared || {};
-
   function WebsiteInner(p) {
     const {
       Alert, Grid, Card, CardContent, Typography, Stack, Button, Box,
       TextField, MenuItem, Select, FormControl, InputLabel,
+      Paper, Chip, isServiceRunningStatus, formatServiceState,
       cfg, run, selectableIps, getDefaultSelectableIp, serviceBusy,
       websiteEditor, websiteInfo, websiteServices,
       iis, docker,
@@ -172,6 +171,8 @@
         available: true,
       },
     ];
+
+    const websiteLoading = isScopeLoading("website");
 
     return (
       <Grid container spacing={2}>
@@ -378,41 +379,118 @@
           </Grid>
         ))}
 
-        {/* ── Service list ── */}
+        {/* ── Service list (inline) ── */}
         <Grid item xs={12} sx={{ display: "flex", flexDirection: "column" }}>
-          <ServiceListCard
-            title="Websites"
-            services={websiteServices}
-            emptyText="No managed websites found yet."
-            loading={isScopeLoading("website")}
-            onRefresh={() => Promise.all([loadWebsiteInfo.current(), loadWebsiteServices.current()])}
-            serviceBusy={serviceBusy}
-          >
-            {scopeErrors.website && <Alert severity="error" sx={{ mb: 1 }}>{scopeErrors.website}</Alert>}
-            {websiteServices.map((svc) => (
-              <ServiceRow
-                key={`website-${svc.kind}-${svc.name}`}
-                svc={svc}
-                serviceBusy={serviceBusy}
-                onServiceAction={onServiceAction}
-                renderServiceUrls={renderServiceUrls}
-                renderServicePorts={renderServicePorts}
-                renderServiceStatus={renderServiceStatus}
-                renderFolderIcon={renderFolderIcon}
-                renderEditServiceIcon={renderEditServiceIcon}
-                extraButtons={<React.Fragment>
-                  {!!(svc.urls && svc.urls[0]) && (
-                    <Button size="small" variant="contained" disabled={serviceBusy} onClick={() => window.open(svc.urls[0], "_blank", "noopener,noreferrer")} sx={{ textTransform: "none" }}>
-                      Open
-                    </Button>
-                  )}
-                  <Button size="small" variant="outlined" disabled={serviceBusy} onClick={() => openWebsiteRun(svc)} sx={{ textTransform: "none" }}>
-                    Update Files
-                  </Button>
-                </React.Fragment>}
-              />
-            ))}
-          </ServiceListCard>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", display: "flex", flexDirection: "column", flexGrow: 1 }}>
+            <CardContent sx={{ display: "flex", flexDirection: "column", flexGrow: 1, overflow: "hidden", "&:last-child": { pb: 2 } }}>
+              <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                <Typography variant="h6" fontWeight={800}>Websites</Typography>
+                <Box sx={{ flexGrow: 1 }} />
+                <Button
+                  variant="outlined"
+                  disabled={!!websiteLoading}
+                  onClick={() => Promise.all([loadWebsiteInfo.current(), loadWebsiteServices.current()])}
+                  sx={{ textTransform: "none" }}
+                >
+                  Refresh
+                </Button>
+              </Stack>
+              <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
+                {websiteServices.length === 0 && (
+                  <Typography variant="body2" color="text.secondary">No managed websites found yet.</Typography>
+                )}
+                {scopeErrors.website && <Alert severity="error" sx={{ mb: 1 }}>{scopeErrors.website}</Alert>}
+                {websiteServices.map((svc) => {
+                  const running = isServiceRunningStatus(svc.status, svc.sub_status);
+                  const kindLabel = svc.kind || "service";
+                  return (
+                    <Paper key={`website-${svc.kind}-${svc.name}`} variant="outlined" sx={{ p: 1, mb: 1, borderRadius: 2 }}>
+                      <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
+                        {/* ── Name + Kind ── */}
+                        <Box sx={{ minWidth: 250 }}>
+                          <Stack direction="row" spacing={0.8} alignItems="center" flexWrap="wrap">
+                            <Typography variant="body2"><b>{svc.form_name || svc.name}</b></Typography>
+                            <Chip label={kindLabel} size="small" variant="outlined" sx={{ fontSize: 11, height: 20 }} />
+                          </Stack>
+                          {svc.image && (
+                            <Typography variant="caption" color="text.secondary">Image: {svc.image}</Typography>
+                          )}
+                          {typeof renderServiceUrls === "function" && renderServiceUrls(svc)}
+                          {typeof renderServicePorts === "function" && renderServicePorts(svc)}
+                        </Box>
+
+                        {/* ── Status dot ── */}
+                        {typeof renderServiceStatus === "function" && renderServiceStatus(svc)}
+
+                        <Box sx={{ flexGrow: 1 }} />
+
+                        {/* ── Folder icon ── */}
+                        {typeof renderFolderIcon === "function" && renderFolderIcon(svc)}
+
+                        {/* ── Edit icon ── */}
+                        {typeof renderEditServiceIcon === "function" && renderEditServiceIcon(svc)}
+
+                        {/* ── Open URL (website-specific) ── */}
+                        {!!(svc.urls && svc.urls[0]) && (
+                          <Button
+                            size="small" variant="contained" disabled={serviceBusy}
+                            onClick={() => window.open(svc.urls[0], "_blank", "noopener,noreferrer")}
+                            sx={{ textTransform: "none" }}
+                          >
+                            Open
+                          </Button>
+                        )}
+
+                        {/* ── Update Files (website-specific) ── */}
+                        <Button
+                          size="small" variant="outlined" disabled={serviceBusy}
+                          onClick={() => openWebsiteRun(svc)}
+                          sx={{ textTransform: "none" }}
+                        >
+                          Update Files
+                        </Button>
+
+                        {/* ── Start / Stop ── */}
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color={running ? "error" : "success"}
+                          disabled={!!serviceBusy}
+                          onClick={() => onServiceAction(running ? "stop" : "start", svc)}
+                          sx={{ textTransform: "none" }}
+                        >
+                          {running ? "Stop" : "Start"}
+                        </Button>
+
+                        {/* ── Restart ── */}
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          disabled={!!serviceBusy}
+                          onClick={() => onServiceAction("restart", svc)}
+                          sx={{ textTransform: "none" }}
+                        >
+                          Restart
+                        </Button>
+
+                        {/* ── Delete ── */}
+                        <Button
+                          size="small"
+                          variant="outlined"
+                          color="error"
+                          disabled={!!serviceBusy}
+                          onClick={() => onServiceAction("delete", svc)}
+                          sx={{ textTransform: "none" }}
+                        >
+                          Delete
+                        </Button>
+                      </Stack>
+                    </Paper>
+                  );
+                })}
+              </Box>
+            </CardContent>
+          </Card>
         </Grid>
       </Grid>
     );
