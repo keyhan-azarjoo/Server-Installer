@@ -1890,9 +1890,8 @@ function App() {
       {sidebarBtn("File Manager", "Files", "files", { onClick: () => { setPage("files"); setFileManagerData(null); } })}
 
       {sidebarSection("Services")}
-      {sidebarBtn("Platform Services", "Plat", "platform-services", { activePages: ["platform-services", "api", "dotnet", "s3", "mongo", "python", "proxy", "website", "ssl"] })}
+      {sidebarBtn("Platform Services", "Plat", "platform-services", { activePages: ["platform-services", "api", "dotnet", "s3", "mongo", "python", "proxy", "website", "ssl", "docker"] })}
       {sidebarBtn("AI & ML Services", "AI", "ai-ml", { activePages: ["ai-ml", "ai-"] })}
-      {sidebarBtn("Docker", "Dock", "docker")}
 
       {sidebarSection("Tools")}
       {sidebarBtn("Web Terminal", "Term", "terminal", { onClick: () => { setTermOpen(true); setTermMin(false); } })}

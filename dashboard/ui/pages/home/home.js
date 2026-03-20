@@ -4,35 +4,59 @@
 
   // ── Platform Services page ────────────────────────────────────────────────
   ns.pages["platform-services"] = function renderPlatformServicesPage(p) {
-    const { Grid, NavCard, setPage, startNewWebsiteDeployment, setFileManagerData } = p;
+    const { Grid, Card, CardContent, Typography, Divider, NavCard, setPage, startNewWebsiteDeployment, setFileManagerData } = p;
     return (
       <Grid container spacing={2}>
-        <Grid item xs={12} md={6}>
-          <NavCard title="API" text="Open DotNet and Python API installer/deployment pages." onClick={() => setPage("api")} />
+        {/* ── Page description ── */}
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent>
+              <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5 }}>Platform Services</Typography>
+              <Typography variant="body2" color="text.secondary">
+                Install, deploy, and manage all server services from one place. Choose a service category below to get started.
+              </Typography>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* ── Section 1: Running Services ── */}
+        <Grid item xs={12}>
+          <Typography variant="overline" fontWeight={700} sx={{ ml: 0.5, letterSpacing: 1, color: "#475569" }}>Running Services</Typography>
         </Grid>
         <Grid item xs={12} md={6}>
-          <NavCard title="Docker" text="Install Docker and manage Docker services/containers." onClick={() => setPage("docker")} outlined />
+          <NavCard title="DotNet APIs" text="Deploy ASP.NET / .NET Core APIs via Docker, OS service, or IIS." onClick={() => setPage("dotnet")} />
         </Grid>
         <Grid item xs={12} md={6}>
-          <NavCard title="S3" text="Open S3 installer pages." onClick={() => setPage("s3")} outlined />
+          <NavCard title="Python APIs" text="Deploy Python APIs via Docker, OS service, or IIS." onClick={() => setPage("python-api")} outlined />
         </Grid>
         <Grid item xs={12} md={6}>
-          <NavCard title="MongoDB" text="Install MongoDB with a Compass-style web admin UI." onClick={() => setPage("mongo")} outlined />
+          <NavCard title="S3 Storage" text="Install MinIO S3-compatible object storage via Docker, OS service, or IIS." onClick={() => setPage("s3")} outlined />
         </Grid>
         <Grid item xs={12} md={6}>
-          <NavCard title="Proxy" text="Install and manage the multi-layer proxy stack." onClick={() => setPage("proxy")} outlined />
+          <NavCard title="MongoDB" text="Install MongoDB with a Compass-style web admin UI via Docker or OS service." onClick={() => setPage("mongo")} outlined />
         </Grid>
         <Grid item xs={12} md={6}>
-          <NavCard title="Python" text="Install Python and manage Jupyter notebooks, kernels, and runtime services." onClick={() => setPage("python")} outlined />
+          <NavCard title="Python & Jupyter" text="Install Python runtime and Jupyter notebooks. Manage kernels and runtime services." onClick={() => setPage("python")} outlined />
         </Grid>
         <Grid item xs={12} md={6}>
-          <NavCard title="Websites" text="Deploy and manage exported static websites, Flutter web builds, and Next export output on IIS." onClick={() => startNewWebsiteDeployment()} outlined />
+          <NavCard title="Websites" text="Deploy static sites, Flutter web, Next.js exports via Docker, OS service, or IIS." onClick={() => startNewWebsiteDeployment()} outlined />
         </Grid>
         <Grid item xs={12} md={6}>
-          <NavCard title="Files" text="Browse, upload, edit, rename, download, and delete files across the server filesystem." onClick={() => { setPage("files"); setFileManagerData(null); }} outlined />
+          <NavCard title="Proxy" text="Install and manage the multi-layer proxy/VPN stack." onClick={() => setPage("proxy")} outlined />
         </Grid>
-        <Grid item xs={12} md={6}>
-          <NavCard title="SSL & Certificates" text="Manage TLS certificates: get free Let's Encrypt certs, upload your own CA-signed certs, and assign them to IIS, nginx, or any service." onClick={() => setPage("ssl")} outlined />
+
+        {/* ── Section 2: Tools & Infrastructure ── */}
+        <Grid item xs={12} sx={{ mt: 1 }}>
+          <Typography variant="overline" fontWeight={700} sx={{ ml: 0.5, letterSpacing: 1, color: "#475569" }}>Tools & Infrastructure</Typography>
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <NavCard title="Files" text="Browse, upload, edit, and manage server files." onClick={() => { setPage("files"); setFileManagerData(null); }} outlined />
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <NavCard title="Docker" text="Install Docker and manage containers, images, and logs." onClick={() => setPage("docker")} outlined />
+        </Grid>
+        <Grid item xs={12} md={4}>
+          <NavCard title="SSL & Certificates" text="Manage TLS certificates: Let's Encrypt, custom certs, and service assignment." onClick={() => setPage("ssl")} outlined />
         </Grid>
       </Grid>
     );
