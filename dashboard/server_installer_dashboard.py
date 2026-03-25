@@ -2476,6 +2476,15 @@ def _website_service_items():
                 running = bool(svc.get("running"))
                 autostart = bool(svc.get("autostart"))
         ports = [{"port": int(port_text), "protocol": "tcp"}] if port_text.isdigit() else []
+        https_port_text = str(payload.get("https_port") or "").strip()
+        if https_port_text.isdigit() and int(https_port_text) > 0:
+            ports.append({"port": int(https_port_text), "protocol": "tcp"})
+        https_url = str(payload.get("https_url") or "").strip()
+        all_urls = []
+        if url:
+            all_urls.append(url)
+        if https_url:
+            all_urls.append(https_url)
         items.append({
             "kind": item_kind,
             "name": name,
@@ -2484,7 +2493,7 @@ def _website_service_items():
             "sub_status": sub_status or ("running" if running else "stopped"),
             "autostart": autostart,
             "platform": "windows" if os.name == "nt" else "unknown",
-            "urls": [url] if url else [],
+            "urls": all_urls,
             "ports": ports,
             "manageable": True,
             "deletable": True,
