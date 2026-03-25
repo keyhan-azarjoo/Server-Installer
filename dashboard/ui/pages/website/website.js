@@ -159,7 +159,7 @@
               line: `[${new Date().toLocaleTimeString()}] Upload completed. Server path: ${targetDir}`,
             });
           }
-          setUploadStatus({ ok: true, text: `Uploaded ${j.written ?? fileCount} file(s) to ${targetDir}.` });
+          setUploadStatus({ ok: true, text: "Upload completed successfully." });
         } else {
           throw new Error(j.error || "Upload failed.");
         }
