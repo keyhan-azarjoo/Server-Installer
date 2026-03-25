@@ -313,6 +313,24 @@ function Configure-IisSite {
     }
 }
 
+function Ensure-FirewallPort {
+    param(
+        [Parameter(Mandatory = $true)][int]$Port,
+        [Parameter(Mandatory = $true)][string]$Protocol,
+        [Parameter(Mandatory = $true)][string]$SiteName
+    )
+
+    $ruleName = "IIS $SiteName $Protocol $Port"
+    $existing = Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue
+    if ($existing) {
+        Write-Host "Firewall rule already exists: $ruleName"
+        return
+    }
+
+    Write-Host "Opening Windows Firewall inbound TCP $Port for $Protocol..."
+    New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Action Allow -Protocol TCP -LocalPort $Port | Out-Null
+}
+
 function Invoke-IisDeployment {
     param(
         [Parameter(Mandatory = $true)][string]$ContentPath,
@@ -338,6 +356,9 @@ function Invoke-IisDeployment {
 
     Ensure-WebConfig -PublishPath $publishPath -AssemblyName $assemblyName
     $binding = Configure-IisSite -PublishPath $publishPath -AppPoolName $SiteName -WebsiteName $SiteName -HttpPort $HttpPort -HttpsPortNumber $HttpsPort -DomainName $DomainName -Certificate $certificate
+
+    Ensure-FirewallPort -Port $binding.HttpPort -Protocol "HTTP" -SiteName $SiteName
+    Ensure-FirewallPort -Port $binding.HttpsPort -Protocol "HTTPS" -SiteName $SiteName
 
     return @{
         Host = $resolvedHost
