@@ -2504,6 +2504,7 @@ def _website_service_items():
             "deploy_root": str(payload.get("deploy_root") or ""),
             "host": bind_ip if bind_ip and bind_ip != "*" else str(payload.get("host") or ""),
             "port_value": port_text,
+            "https_port_value": https_port_text if https_port_text.isdigit() and int(https_port_text) > 0 else "",
             "stack_label": str(payload.get("stack_label") or "Static Website"),
             "publish_rel": str(payload.get("publish_rel") or "."),
             "kind_value": str(payload.get("website_kind") or "auto"),
@@ -8002,14 +8003,24 @@ def run_unix_sam3_installer(form=None, live_cb=None):
 
 def run_sam3_download_model(form=None, live_cb=None):
     """Download the SAM3 model file using the installed venv."""
+    form = form or {}
     state = _read_json_file(SAM3_STATE_FILE)
     venv_python = str(state.get("python_executable") or "").strip()
     model_dir = str(state.get("model_path") or "").strip()
     install_dir = str(state.get("install_dir") or "").strip()
     if not venv_python or not Path(venv_python).exists():
         return 1, "SAM3 is not installed yet. Install SAM3 first."
+    replace_model = (form.get("SAM3_REPLACE_MODEL", ["no"])[0] or "no").strip().lower()
     if model_dir and Path(model_dir).exists():
-        return 0, "SAM3 model is already downloaded."
+        if replace_model not in ("yes", "y", "1", "true"):
+            return 0, "SAM3 model is already downloaded. Select 'yes' to replace."
+        if live_cb:
+            live_cb("Replacing existing SAM3 model...\n")
+        try:
+            Path(model_dir).unlink()
+        except Exception as ex:
+            if live_cb:
+                live_cb(f"[WARN] Could not remove old model: {ex}\n")
     if live_cb:
         live_cb("Downloading SAM3 model (sam3.pt ~3.4 GB)... This may take a while.\n")
     # Run from install_dir so model downloads there

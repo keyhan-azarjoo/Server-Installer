@@ -1119,6 +1119,7 @@ function App() {
       name: String(svc.form_name || svc.name || "").trim(),
       host: String(svc.host || "").trim(),
       port: String(svc.port_value || (Array.isArray(svc.ports) && svc.ports[0] ? svc.ports[0].port : "") || "").trim(),
+      https_port: String(svc.https_port_value || "").trim(),
       source: String(svc.project_path || svc.deploy_root || "").trim(),
       kind: String(svc.kind_value || "auto").trim(),
       target: String(svc.target_value || "service").trim(),
