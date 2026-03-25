@@ -8026,7 +8026,7 @@ def run_sam3_download_model(form=None, live_cb=None):
     # User-provided URL or default
     model_url = (form.get("SAM3_MODEL_URL", [""])[0] or "").strip()
     if not model_url:
-        model_url = "https://github.com/ultralytics/assets/releases/download/v8.3.0/sam2.1_l.pt"
+        model_url = "https://huggingface.co/facebook/sam3/resolve/main/sam3.pt?download=true"
 
     # Auth token for gated models (e.g. HuggingFace)
     dl_token = (form.get("SAM3_DL_TOKEN", [""])[0] or "").strip()

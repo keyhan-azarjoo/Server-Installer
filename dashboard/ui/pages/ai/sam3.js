@@ -8,9 +8,9 @@
       ActionCard, NavCard,
       cfg, run, selectableIps, serviceBusy,
       isScopeLoading, scopeErrors,
-      isServiceRunningStatus, formatServiceState, onServiceAction,
+      isServiceRunningStatus, formatServiceState, onServiceAction, IconOnlyAction, FolderIcon,
       renderServiceUrls, renderServicePorts, renderServiceStatus, renderFolderIcon,
-      setPage, setInfoMessage,
+      setPage, setInfoMessage, setFileManagerPath,
       sam3Service, sam3PageServices,
       loadSam3Info, loadSam3Services,
     } = p;
@@ -170,24 +170,40 @@
           <ActionCard
             title="Download SAM3 Model"
             description={modelReady
-              ? "The SAM3 model is already downloaded. Click Start to re-download and replace the existing model."
-              : "Download the SAM3 model file (~3.4 GB) to the server. Required before SAM3 can perform detections. Paste the direct download URL below."
+              ? "The SAM3 model is already downloaded. Click Start to re-download and replace."
+              : "Download the SAM3 model file (~3.4 GB) to the server. Required before SAM3 can perform detections."
             }
             action="/run/sam3_download_model"
             fields={[
-              { name: "SAM3_MODEL_URL", label: "Model Download URL", defaultValue: "https://github.com/ultralytics/assets/releases/download/v8.3.0/sam2.1_l.pt", placeholder: "https://...sam3.pt", required: true },
+              { name: "SAM3_MODEL_URL", label: "Model Download URL", defaultValue: "https://huggingface.co/facebook/sam3/resolve/main/sam3.pt?download=true", placeholder: "https://...sam3.pt", required: true },
               { name: "SAM3_DL_TOKEN", label: "Auth Token (optional)", defaultValue: "", placeholder: "HuggingFace token or Bearer token if login required" },
-              ...(modelReady ? [{
+              {
                 name: "SAM3_REPLACE_MODEL",
-                label: "Model exists. Replace it?",
+                label: "Replace existing model?",
                 type: "select",
-                options: ["no", "yes"],
-                defaultValue: "no",
-              }] : []),
+                options: ["yes", "no"],
+                defaultValue: "yes",
+              },
             ]}
             onRun={run}
             color="#059669"
           />
+          {sam3.model_path && (
+            <Box sx={{ mt: 1, display: "flex", alignItems: "center", gap: 1 }}>
+              <IconOnlyAction
+                title={sam3.model_path}
+                IconComp={FolderIcon}
+                fallback="folder"
+                onClick={() => {
+                  const dir = String(sam3.model_path || "").replace(/[/\\][^/\\]+$/, "");
+                  if (dir && p.setFileManagerPath) { p.setFileManagerPath(dir); p.setPage("files"); }
+                }}
+              />
+              <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-all" }}>
+                {sam3.model_path || ""}
+              </Typography>
+            </Box>
+          )}
         </Grid>
 
         {/* ── SAM3 Services List ───────────────────────────────── */}
