@@ -3078,7 +3078,7 @@ def run_windows_website_iis(form=None, live_cb=None):
             f"New-WebBinding -Name $siteName -Protocol 'https' -Port {int(https_port)} -IPAddress $ip -ErrorAction SilentlyContinue | Out-Null",
             f"$dnsName = {_ps_single_quote(dns_name)}",
             "$cert = New-SelfSignedCertificate -DnsName @($dnsName,'localhost','127.0.0.1') -CertStoreLocation 'cert:\\LocalMachine\\My' -FriendlyName ('ServerInstaller Website ' + $siteName)",
-            "$bindingPath = ($ip -eq '*' ? '0.0.0.0' : $ip) + '!' + " + str(int(https_port)),
+            "$bindingPath = ($(if ($ip -eq '*') { '0.0.0.0' } else { $ip })) + '!' + " + str(int(https_port)),
             "if (Test-Path ('IIS:\\SslBindings\\' + $bindingPath)) { Remove-Item ('IIS:\\SslBindings\\' + $bindingPath) -Force -ErrorAction SilentlyContinue }",
             "New-Item ('IIS:\\SslBindings\\' + $bindingPath) -Thumbprint $cert.Thumbprint -SSLFlags 0 | Out-Null",
         ]
