@@ -63,8 +63,12 @@
 
     const handleDeploy = React.useCallback((e, target) => {
       if (hiddenTargetRef.current) hiddenTargetRef.current.value = target;
+      if (!source.trim()) {
+        const def = defaultWebsiteDirForOs(cfg.os);
+        setSource(def);
+      }
       run(e, "/run/website_deploy", `Deploy Website → ${target}`, formRef.current);
-    }, [run]);
+    }, [run, source, cfg.os]);
 
     // ── Port conflict check ───────────────────────────────────────────────
     const checkPorts = React.useCallback(async () => {
@@ -106,10 +110,10 @@
     const handleFolderUpload = React.useCallback(async () => {
       const files = selectedFiles;
       if (!files.length) return;
-      const targetDir = source.trim();
+      let targetDir = source.trim();
       if (!targetDir) {
-        setUploadStatus({ ok: false, text: "Set a Published Folder path first." });
-        return;
+        targetDir = defaultWebsiteDirForOs(cfg.os);
+        setSource(targetDir);
       }
       setUploadBusy(true);
       setUploadStatus(null);
@@ -133,7 +137,7 @@
       } finally {
         setUploadBusy(false);
       }
-    }, [selectedFiles, source]);
+    }, [selectedFiles, source, cfg.os]);
 
     // ── Open source folder in file manager ────────────────────────────────
     const openSourceInFileManager = React.useCallback(() => {
