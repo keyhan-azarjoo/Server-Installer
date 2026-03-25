@@ -3061,9 +3061,11 @@ def run_windows_website_iis(form=None, live_cb=None):
     if usage.get("busy") and not usage.get("managed_owner"):
         return 1, f"Requested website port {deploy['site_port']} is already in use. Choose another port."
     _cleanup_existing_website_runtime(deploy.get("existing_payload"))
+    https_port = deploy.get("https_port", 0)
     if live_cb:
         live_cb(f"Deploying IIS website '{deploy['site_name']}' from {deploy['publish_root']}\n")
-    https_port = deploy.get("https_port", 0)
+        if https_port:
+            live_cb(f"HTTPS port: {https_port}\n")
     ssl_cert_name = deploy.get("ssl_cert_name", "self_signed")
     bind_ip = deploy['bind_ip'] if deploy['bind_ip'] != '*' else '*'
     dns_name = deploy['host']

@@ -125,7 +125,17 @@
           method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd,
         });
         const j = await r.json();
-        if (j.ok) setSelectedFiles([]);
+        if (j.ok) {
+          setSelectedFiles([]);
+          // Update source path to include the uploaded subfolder name
+          const firstRel = (files[0]?.webkitRelativePath || "").replace(/\\/g, "/");
+          const folderName = firstRel.split("/")[0];
+          if (folderName) {
+            const sep = targetDir.includes("/") ? "/" : "\\";
+            const updated = targetDir.replace(/[\\/]$/, "") + sep + folderName;
+            setSource(updated);
+          }
+        }
         setUploadStatus({
           ok: j.ok,
           text: j.ok
