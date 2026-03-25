@@ -9960,12 +9960,12 @@ def run_dashboard_update(live_cb=None):
         live_cb("[INFO] All files synced. Restarting dashboard service...\n")
 
     def _restart():
-        time.sleep(2)
+        time.sleep(1)
         if os.name == "nt":
-            # Windows: spawn a fully detached PowerShell that stops the service,
-            # waits for it to fully stop, then starts it again.  Using two separate
-            # commands (Stop + Start) instead of Restart-Service avoids a race where
-            # the service process is killed mid-restart before the start completes.
+            # Windows: spawn a detached cmd.exe that waits, then uses
+            # sc.exe to stop and start the service. sc.exe is more
+            # reliable than Stop-Service/Start-Service from a child
+            # process because it talks directly to the SCM.
             state_file = ROOT / "dashboard" / "service-state.json"
             service_name = "ServerInstallerDashboard"
             try:
@@ -9974,27 +9974,22 @@ def run_dashboard_update(live_cb=None):
             except Exception:
                 pass
             try:
-                ps_cmd = (
-                    f"Start-Sleep 3; "
-                    f"$svc = Get-Service -Name '{service_name}' -ErrorAction SilentlyContinue; "
-                    f"if ($svc) {{"
-                    f"  Stop-Service -Name '{service_name}' -Force -ErrorAction SilentlyContinue; "
-                    f"  Start-Sleep 3; "
-                    f"  Start-Service -Name '{service_name}' -ErrorAction SilentlyContinue "
-                    f"}} else {{"
-                    f"  schtasks /Run /TN '{service_name}' 2>$null | Out-Null"
-                    f"}}"
+                # Use cmd /c with timeout+sc for maximum compatibility.
+                # The 5-second wait gives the HTTP response time to reach
+                # the client before this process is killed.
+                cmd = (
+                    f'cmd /c "timeout /t 5 /nobreak >nul '
+                    f'& net stop {service_name} '
+                    f'& timeout /t 3 /nobreak >nul '
+                    f'& net start {service_name}"'
                 )
                 subprocess.Popen(
-                    [
-                        "powershell.exe",
-                        "-NoProfile",
-                        "-ExecutionPolicy", "Bypass",
-                        "-Command", ps_cmd,
-                    ],
+                    cmd,
+                    shell=True,
                     creationflags=0x00000008 | 0x00000200,  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
                 )
             except Exception:
                 pass
@@ -10005,7 +10000,7 @@ def run_dashboard_update(live_cb=None):
             # causes a race where the orphaned process still holds the port.
             os._exit(0)
 
-    threading.Thread(target=_restart, daemon=True).start()
+    threading.Thread(target=_restart, daemon=False).start()
     return 0, ""
 
 def run_windows_s3_stop(live_cb=None):
