@@ -224,11 +224,22 @@ done
 if [ ! -x "${VENV_DIR}/bin/python" ]; then
     echo "[INFO] Creating virtual environment..."
     rm -rf "${VENV_DIR}"
-    "${PYTHON_EXE}" -m venv "${VENV_DIR}"
+    "${PYTHON_EXE}" -m venv "${VENV_DIR}" || {
+        echo "[INFO] venv failed, trying with --without-pip..."
+        "${PYTHON_EXE}" -m venv --without-pip "${VENV_DIR}"
+    }
 fi
 
 VENV_PYTHON="${VENV_DIR}/bin/python"
 VENV_PIP="${VENV_DIR}/bin/pip"
+
+# Bootstrap pip if missing (common on Debian/Ubuntu where ensurepip is not bundled)
+if ! "${VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
+    echo "[INFO] pip not found in venv, bootstrapping with get-pip.py..."
+    curl -fsSL https://bootstrap.pypa.io/get-pip.py -o /tmp/get-pip.py
+    "${VENV_PYTHON}" /tmp/get-pip.py
+    rm -f /tmp/get-pip.py
+fi
 
 echo "[INFO] Upgrading pip..."
 "${VENV_PYTHON}" -m pip install --upgrade pip setuptools wheel

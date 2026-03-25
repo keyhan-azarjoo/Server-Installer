@@ -19,39 +19,71 @@
     const services = sam3PageServices || [];
     const httpUrl = String(sam3.http_url || "").trim();
     const httpsUrl = String(sam3.https_url || "").trim();
-    const httpPort = String(sam3.http_port || "5000").trim();
-    const httpsPort = String(sam3.https_port || "5443").trim();
+    const httpPort = String(sam3.http_port || "").trim();
+    const httpsPort = String(sam3.https_port || "").trim();
     const hostIp = String(sam3.host || "").trim();
     const device = String(sam3.device || "cpu").trim();
     const modelReady = !!sam3.model_downloaded;
     const deployMode = String(sam3.deploy_mode || "os").trim();
     const authEnabled = !!sam3.auth_enabled;
     const authUser = String(sam3.auth_username || "").trim();
-    const useOsAuth = !!sam3.use_os_auth;
     const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
 
-    // Build GPU options from detected GPUs
-    const gpuOptions = [{ label: "Auto-detect", value: "auto" }, { label: "CPU Only", value: "cpu" }];
-    if (sam3.detected_gpus && Array.isArray(sam3.detected_gpus)) {
-      sam3.detected_gpus.forEach((gpu) => {
+    // Build GPU options - only show if GPU is actually detected
+    const hasGpu = sam3.detected_gpu_type && sam3.detected_gpu_type !== "cpu" && sam3.detected_gpu_type !== "";
+    const detectedGpusList = (sam3.detected_gpus && Array.isArray(sam3.detected_gpus))
+      ? sam3.detected_gpus.filter((g) => g.type && g.type !== "cpu")
+      : [];
+    const hasDetectedGpus = detectedGpusList.length > 0 || hasGpu;
+
+    const gpuFields = [];
+    if (hasDetectedGpus) {
+      const gpuOptions = [{ label: "Auto-detect", value: "auto" }];
+      detectedGpusList.forEach((gpu) => {
         if (gpu.type === "cuda") gpuOptions.push({ label: `NVIDIA: ${gpu.name} (${gpu.vram_gb} GB)`, value: "cuda" });
         else if (gpu.type === "rocm") gpuOptions.push({ label: `AMD: ${gpu.name}`, value: "rocm" });
         else if (gpu.type === "mps") gpuOptions.push({ label: `Apple Silicon: ${gpu.name}`, value: "mps" });
         else if (gpu.type === "tpu") gpuOptions.push({ label: "Google TPU", value: "tpu" });
       });
-    } else {
-      gpuOptions.push({ label: "NVIDIA CUDA", value: "cuda" });
-      gpuOptions.push({ label: "AMD ROCm", value: "rocm" });
-      if (cfg.os === "darwin") gpuOptions.push({ label: "Apple Silicon (MPS)", value: "mps" });
+      if (hasGpu && detectedGpusList.length === 0) {
+        if (sam3.detected_gpu_type === "cuda") gpuOptions.push({ label: `NVIDIA: ${sam3.detected_gpu_name || "GPU"}`, value: "cuda" });
+        else if (sam3.detected_gpu_type === "rocm") gpuOptions.push({ label: `AMD: ${sam3.detected_gpu_name || "GPU"}`, value: "rocm" });
+        else if (sam3.detected_gpu_type === "mps") gpuOptions.push({ label: `Apple: ${sam3.detected_gpu_name || "Silicon"}`, value: "mps" });
+        else if (sam3.detected_gpu_type === "tpu") gpuOptions.push({ label: "Google TPU", value: "tpu" });
+      }
+      gpuOptions.push({ label: "CPU Only", value: "cpu" });
+      gpuFields.push({
+        name: "SAM3_GPU_DEVICE",
+        label: "GPU / Accelerator",
+        type: "select",
+        options: gpuOptions.map((o) => o.value),
+        optionLabels: gpuOptions.reduce((acc, o) => { acc[o.value] = o.label; return acc; }, {}),
+        defaultValue: device || "auto",
+      });
     }
 
-    const deployModeOptions = [
-      { label: "OS Service", value: "os" },
-      { label: "Docker", value: "docker" },
+    // Common fields for all install modes
+    const commonFields = [
+      {
+        name: "SAM3_HOST_IP",
+        label: "Host IP",
+        type: "select",
+        options: selectableIps,
+        defaultValue: hostIp,
+        required: true,
+        disabled: selectableIps.length === 0,
+        placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
+      },
+      { name: "SAM3_HTTP_PORT", label: "HTTP Port (optional)", defaultValue: httpPort || "5000", checkPort: true, placeholder: "Leave empty to skip HTTP" },
+      { name: "SAM3_HTTPS_PORT", label: "HTTPS Port (optional)", defaultValue: httpsPort || "5443", checkPort: true, certSelect: "SSL_CERT_NAME", placeholder: "Leave empty to skip HTTPS" },
+      { name: "SAM3_DOMAIN", label: "Domain (optional)", defaultValue: sam3.domain || "", placeholder: "e.g. sam3.example.com" },
+      ...gpuFields,
+      { name: "SAM3_USERNAME", label: "Username", defaultValue: authUser || "", placeholder: "Leave empty for no auth" },
+      { name: "SAM3_PASSWORD", label: "Password", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
     ];
-    if (cfg.os === "windows") {
-      deployModeOptions.push({ label: "IIS Reverse Proxy", value: "iis" });
-    }
+
+    // Best URL for "Open Dashboard" button
+    const bestUrl = httpsUrl || httpUrl;
 
     return (
       <Grid container spacing={2}>
@@ -70,69 +102,58 @@
               <Alert severity="info" sx={{ mt: 1, borderRadius: 2 }}>
                 SAM3 requires ~4 GB disk space for the model file and benefits greatly from a dedicated GPU.
                 CPU-only mode is supported but will be significantly slower. The model file (sam3.pt) can be
-                downloaded after installation from this page.
+                downloaded after installation using the Download button below.
               </Alert>
             </CardContent>
           </Card>
         </Grid>
 
-        {/* ── Install SAM3 ─────────────────────────────────────── */}
-        <Grid item xs={12} md={8}>
+        {/* ── Install SAM3 (OS Service) ────────────────────────── */}
+        <Grid item xs={12} md={cfg.os === "windows" ? 4 : 6}>
           <ActionCard
-            title={`Install SAM3 (${installOsLabel})`}
-            description="Install SAM3 AI detection service with GPU support, authentication, and HTTPS. Select your preferred deployment mode and GPU device."
+            title={`Install SAM3 - OS (${installOsLabel})`}
+            description="Install SAM3 as a managed OS service with systemd (Linux) or scheduled task (Windows). Includes Nginx/IIS HTTPS reverse proxy."
             action={cfg.os === "windows" ? "/run/sam3_windows" : "/run/sam3_linux"}
             fields={[
-              {
-                name: "SAM3_HOST_IP",
-                label: "Host IP",
-                type: "select",
-                options: selectableIps,
-                defaultValue: hostIp,
-                required: true,
-                disabled: selectableIps.length === 0,
-                placeholder: selectableIps.length > 0 ? "Select IP" : "Loading IP addresses...",
-              },
-              { name: "SAM3_HTTP_PORT", label: "HTTP Port", defaultValue: httpPort || "5000", required: true, checkPort: true },
-              { name: "SAM3_HTTPS_PORT", label: "HTTPS Port", defaultValue: httpsPort || "5443", required: true, checkPort: true, certSelect: "SSL_CERT_NAME" },
-              { name: "SAM3_DOMAIN", label: "Domain (optional)", defaultValue: sam3.domain || "", placeholder: "e.g. sam3.example.com" },
-              {
-                name: "SAM3_GPU_DEVICE",
-                label: "GPU / Accelerator",
-                type: "select",
-                options: gpuOptions.map((o) => typeof o === "string" ? o : o.value),
-                optionLabels: gpuOptions.reduce((acc, o) => { if (typeof o !== "string") acc[o.value] = o.label; return acc; }, {}),
-                defaultValue: device || "auto",
-              },
-              {
-                name: "SAM3_DEPLOY_MODE",
-                label: "Deploy Mode",
-                type: "select",
-                options: deployModeOptions.map((o) => o.value),
-                optionLabels: deployModeOptions.reduce((acc, o) => { acc[o.value] = o.label; return acc; }, {}),
-                defaultValue: deployMode || "os",
-              },
-              { name: "SAM3_USERNAME", label: "Username", defaultValue: authUser || "", placeholder: "Leave empty for no auth" },
-              { name: "SAM3_PASSWORD", label: "Password", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
-              {
-                name: "SAM3_USE_OS_AUTH",
-                label: "Use OS Login",
-                type: "select",
-                options: ["no", "yes"],
-                defaultValue: useOsAuth ? "yes" : "no",
-              },
-              {
-                name: "SAM3_DOWNLOAD_MODEL",
-                label: "Download Model Now (~3.4 GB)",
-                type: "select",
-                options: ["no", "yes"],
-                defaultValue: "no",
-              },
+              ...commonFields,
+              { name: "SAM3_DEPLOY_MODE", type: "hidden", defaultValue: "os" },
             ]}
             onRun={run}
             color="#7c3aed"
           />
         </Grid>
+
+        {/* ── Install SAM3 (Docker) ────────────────────────────── */}
+        <Grid item xs={12} md={cfg.os === "windows" ? 4 : 6}>
+          <ActionCard
+            title="Install SAM3 - Docker"
+            description="Deploy SAM3 as a Docker container with GPU passthrough. Requires Docker and nvidia-container-toolkit for GPU support."
+            action="/run/sam3_docker"
+            fields={[
+              ...commonFields,
+              { name: "SAM3_DEPLOY_MODE", type: "hidden", defaultValue: "docker" },
+            ]}
+            onRun={run}
+            color="#0891b2"
+          />
+        </Grid>
+
+        {/* ── Install SAM3 (IIS) - Windows Only ────────────────── */}
+        {cfg.os === "windows" && (
+          <Grid item xs={12} md={4}>
+            <ActionCard
+              title="Install SAM3 - IIS"
+              description="Install SAM3 with IIS reverse proxy. The service runs as an OS process with IIS forwarding HTTPS traffic."
+              action="/run/sam3_windows"
+              fields={[
+                ...commonFields,
+                { name: "SAM3_DEPLOY_MODE", type: "hidden", defaultValue: "iis" },
+              ]}
+              onRun={run}
+              color="#d97706"
+            />
+          </Grid>
+        )}
 
         {/* ── Status Card ──────────────────────────────────────── */}
         <Grid item xs={12} md={4}>
@@ -142,10 +163,10 @@
               <Typography variant="body2">Device: <b>{device}</b></Typography>
               <Typography variant="body2">Model: <Chip size="small" label={modelReady ? "Ready" : "Not Downloaded"} color={modelReady ? "success" : "warning"} sx={{ ml: 0.5 }} /></Typography>
               <Typography variant="body2">Deploy Mode: <b>{deployMode}</b></Typography>
-              <Typography variant="body2">Auth: {authEnabled ? (useOsAuth ? "OS Login" : `User: ${authUser}`) : "Disabled"}</Typography>
+              <Typography variant="body2">Auth: {authEnabled ? `User: ${authUser}` : "Disabled"}</Typography>
               <Typography variant="body2">Host: {hostIp || "-"}</Typography>
-              <Typography variant="body2">HTTP Port: {httpPort}</Typography>
-              <Typography variant="body2">HTTPS Port: {httpsPort}</Typography>
+              {httpPort && <Typography variant="body2">HTTP Port: {httpPort}</Typography>}
+              {httpsPort && <Typography variant="body2">HTTPS Port: {httpsPort}</Typography>}
               {sam3.detected_gpu_name && <Typography variant="body2">GPU: {sam3.detected_gpu_name}</Typography>}
               {!!httpUrl && <Typography variant="body2" sx={{ mt: 1, wordBreak: "break-all" }}>HTTP: <a href={httpUrl} target="_blank" rel="noopener">{httpUrl}</a></Typography>}
               {!!httpsUrl && <Typography variant="body2" sx={{ wordBreak: "break-all" }}>HTTPS: <a href={httpsUrl} target="_blank" rel="noopener">{httpsUrl}</a></Typography>}
@@ -154,46 +175,23 @@
         </Grid>
 
         {/* ── Download Model Card ──────────────────────────────── */}
-        <Grid item xs={12} md={6}>
+        <Grid item xs={12} md={4}>
           <ActionCard
             title="Download SAM3 Model"
-            description="Download the SAM3 model file (sam3.pt, ~3.4 GB) to the server. This is required before SAM3 can perform detections. The download uses the Ultralytics library."
+            description={modelReady
+              ? "The SAM3 model is already downloaded. Click Start to re-download and replace the existing model."
+              : "Download the SAM3 model file (sam3.pt, ~3.4 GB) to the server. Required before SAM3 can perform detections."
+            }
             action="/run/sam3_download_model"
-            fields={[]}
+            fields={modelReady ? [{
+              name: "SAM3_REPLACE_MODEL",
+              label: "Model exists. Replace it?",
+              type: "select",
+              options: ["no", "yes"],
+              defaultValue: "no",
+            }] : []}
             onRun={run}
             color="#059669"
-          />
-        </Grid>
-
-        {/* ── Docker Deploy Card ───────────────────────────────── */}
-        <Grid item xs={12} md={6}>
-          <ActionCard
-            title="Deploy SAM3 (Docker)"
-            description="Deploy SAM3 as a Docker container with GPU passthrough. Requires Docker and nvidia-container-toolkit for GPU support."
-            action="/run/sam3_docker"
-            fields={[
-              {
-                name: "SAM3_HOST_IP",
-                label: "Host IP",
-                type: "select",
-                options: selectableIps,
-                defaultValue: hostIp,
-                required: true,
-              },
-              { name: "SAM3_HTTP_PORT", label: "HTTP Port", defaultValue: httpPort || "5000", required: true, checkPort: true },
-              { name: "SAM3_HTTPS_PORT", label: "HTTPS Port", defaultValue: httpsPort || "5443", required: true, checkPort: true },
-              {
-                name: "SAM3_GPU_DEVICE",
-                label: "GPU Device",
-                type: "select",
-                options: ["auto", "cpu", "cuda"],
-                defaultValue: device || "auto",
-              },
-              { name: "SAM3_USERNAME", label: "Username", defaultValue: authUser || "", placeholder: "Leave empty for no auth" },
-              { name: "SAM3_PASSWORD", label: "Password", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
-            ]}
-            onRun={run}
-            color="#0891b2"
           />
         </Grid>
 
@@ -204,8 +202,8 @@
               <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "stretch", md: "center" }}>
                 <Typography variant="h6" fontWeight={800}>SAM3 Services</Typography>
                 <Box sx={{ flexGrow: 1 }} />
-                {!!httpUrl && (
-                  <Button variant="contained" disabled={serviceBusy || !modelReady} onClick={() => window.open(httpUrl, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" } }}>
+                {!!bestUrl && (
+                  <Button variant="contained" disabled={serviceBusy || !modelReady} onClick={() => window.open(bestUrl, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" } }}>
                     Open SAM3 Dashboard
                   </Button>
                 )}
@@ -222,7 +220,7 @@
               <Box sx={{ mt: 1.2, flexGrow: 1, minHeight: "calc(100vh - 520px)", overflow: "auto" }}>
                 {services.length === 0 && (
                   <Typography variant="body2" color="text.secondary">
-                    No SAM3 services deployed yet. Use the Install card above to deploy SAM3.
+                    No SAM3 services deployed yet. Use an Install card above to deploy SAM3.
                   </Typography>
                 )}
                 {services.map((svc) => (
