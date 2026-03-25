@@ -2120,7 +2120,9 @@ def _detect_static_website_root(source_root: Path, website_kind="auto"):
         if (candidate / "index.html").exists():
             return candidate, str(candidate.relative_to(root))
 
-    raise RuntimeError("No publishable website folder found. Upload a built site that contains index.html, such as dist, out, build/web, or a plain static folder.")
+    # No index.html found anywhere — use the source root as-is so the
+    # web server can serve whatever files were uploaded.
+    return root, "."
 
 
 def _read_text_if_exists(path_value):
@@ -2189,7 +2191,17 @@ def _detect_website_stack(source_root: Path):
         return {"kind": "next-export", "runtime": "static", "stack_label": "Next Export / Static Website"}
     if dist_dir or flutter_build or (root / "index.html").exists():
         return {"kind": "static", "runtime": "static", "stack_label": "Static Website"}
-    raise RuntimeError("Could not detect website type from uploaded files. Supported types currently include static/exported sites, Next.js apps, Flutter web, and PHP.")
+    # Check for index.html in common subdirectories
+    for sub in ("public", "www", "wwwroot", "html", "htdocs", "web", "static"):
+        if (root / sub / "index.html").exists():
+            return {"kind": "static", "runtime": "static", "stack_label": "Static Website"}
+    # Check for any .html file at root level
+    if any(f.suffix.lower() == ".html" for f in root.iterdir() if f.is_file()):
+        return {"kind": "static", "runtime": "static", "stack_label": "Static Website"}
+    # Default to static for any directory with files — let the web server serve whatever is there
+    if any(root.iterdir()):
+        return {"kind": "static", "runtime": "static", "stack_label": "Static Website"}
+    raise RuntimeError("Source folder is empty. Upload or point to a folder with your website files.")
 
 
 def _copy_website_source(source_root: Path, deploy_root: Path):
