@@ -2281,6 +2281,9 @@ def _prepare_website_deployment(form=None, live_cb=None):
     if not port_text.isdigit() or not (1 <= int(port_text) <= 65535):
         raise RuntimeError("Website port must be a number between 1 and 65535.")
     site_port = int(port_text)
+    https_port_text = (form.get("WEBSITE_HTTPS_PORT", [""])[0] or "").strip()
+    https_port = int(https_port_text) if https_port_text.isdigit() and 1 <= int(https_port_text) <= 65535 else 0
+    ssl_cert_name = (form.get("WEBSITE_SSL_CERT", ["self_signed"])[0] or "self_signed").strip()
     deploy_root = WEBSITE_STATE_DIR / site_key
     if requested_kind == "auto":
         detected = _detect_website_stack(source_root)
@@ -2333,6 +2336,8 @@ def _prepare_website_deployment(form=None, live_cb=None):
         "bind_ip": bind_ip,
         "host": host,
         "site_port": site_port,
+        "https_port": https_port,
+        "ssl_cert_name": ssl_cert_name,
         "source_root": str(source_root),
         "publish_root": str(content_root),
         "publish_rel": publish_rel,
@@ -3058,12 +3063,29 @@ def run_windows_website_iis(form=None, live_cb=None):
     _cleanup_existing_website_runtime(deploy.get("existing_payload"))
     if live_cb:
         live_cb(f"Deploying IIS website '{deploy['site_name']}' from {deploy['publish_root']}\n")
+    https_port = deploy.get("https_port", 0)
+    ssl_cert_name = deploy.get("ssl_cert_name", "self_signed")
+    bind_ip = deploy['bind_ip'] if deploy['bind_ip'] != '*' else '*'
+    dns_name = deploy['host']
+
+    # Build HTTPS binding commands if an HTTPS port was specified
+    https_ps_lines = []
+    if https_port:
+        https_ps_lines = [
+            f"New-WebBinding -Name $siteName -Protocol 'https' -Port {int(https_port)} -IPAddress $ip -ErrorAction SilentlyContinue | Out-Null",
+            f"$dnsName = {_ps_single_quote(dns_name)}",
+            "$cert = New-SelfSignedCertificate -DnsName @($dnsName,'localhost','127.0.0.1') -CertStoreLocation 'cert:\\LocalMachine\\My' -FriendlyName ('ServerInstaller Website ' + $siteName)",
+            "$bindingPath = ($ip -eq '*' ? '0.0.0.0' : $ip) + '!' + " + str(int(https_port)),
+            "if (Test-Path ('IIS:\\SslBindings\\' + $bindingPath)) { Remove-Item ('IIS:\\SslBindings\\' + $bindingPath) -Force -ErrorAction SilentlyContinue }",
+            "New-Item ('IIS:\\SslBindings\\' + $bindingPath) -Thumbprint $cert.Thumbprint -SSLFlags 0 | Out-Null",
+        ]
+
     ps = "\n".join([
         "Import-Module WebAdministration",
         f"$siteName = {_ps_single_quote(deploy['site_name'])}",
         f"$appPool = {_ps_single_quote(deploy['site_name'])}",
         f"$physicalPath = {_ps_single_quote(deploy['deploy_root'])}",
-        f"$ip = {_ps_single_quote(deploy['bind_ip'] if deploy['bind_ip'] != '*' else '*')}",
+        f"$ip = {_ps_single_quote(bind_ip)}",
         f"$port = {int(deploy['site_port'])}",
         "if (Get-Website -Name $siteName -ErrorAction SilentlyContinue) { Stop-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null; Remove-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null }",
         "if (Test-Path ('IIS:\\AppPools\\' + $appPool)) { Stop-WebAppPool -Name $appPool -ErrorAction SilentlyContinue | Out-Null; Remove-WebAppPool -Name $appPool -ErrorAction SilentlyContinue | Out-Null }",
@@ -3071,13 +3093,18 @@ def run_windows_website_iis(form=None, live_cb=None):
         "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name managedRuntimeVersion -Value ''",
         "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name processModel.identityType -Value 4",
         "New-Website -Name $siteName -PhysicalPath $physicalPath -Port $port -IPAddress $ip -ApplicationPool $appPool | Out-Null",
+        *https_ps_lines,
         "Start-Website -Name $siteName | Out-Null",
     ])
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=180)
     if rc != 0:
         return 1, out or f"Failed to create IIS website '{deploy['site_name']}'."
     manage_firewall_port("open", deploy["site_port"], "tcp", host=deploy.get("host"))
-    url = f"http://{deploy['host']}" if int(deploy["site_port"]) == 80 else f"http://{deploy['host']}:{deploy['site_port']}"
+    if https_port:
+        manage_firewall_port("open", https_port, "tcp", host=deploy.get("host"))
+    http_url = f"http://{deploy['host']}" if int(deploy["site_port"]) == 80 else f"http://{deploy['host']}:{deploy['site_port']}"
+    https_url = f"https://{deploy['host']}:{https_port}" if https_port else ""
+    url = http_url
     _write_website_state_entry({
         "name": deploy["site_name"],
         "form_name": deploy["site_name"],
@@ -3086,15 +3113,21 @@ def run_windows_website_iis(form=None, live_cb=None):
         "website_kind": deploy["website_kind"],
         "stack_label": deploy["stack_label"],
         "url": url,
+        "https_url": https_url,
         "bind_ip": deploy["bind_ip"],
         "host": deploy["host"],
         "port": deploy["site_port"],
+        "https_port": https_port,
         "deploy_root": deploy["deploy_root"],
         "source_root": deploy["source_root"],
         "publish_root": deploy["publish_root"],
         "publish_rel": deploy["publish_rel"],
     })
-    return 0, f"Website IIS deployment completed.\nSite: {deploy['site_name']}\nURL: {url}\nContent: {deploy['publish_root']}\n"
+    result_lines = [f"Website IIS deployment completed.", f"Site: {deploy['site_name']}", f"HTTP: {http_url}"]
+    if https_url:
+        result_lines.append(f"HTTPS: {https_url}")
+    result_lines.append(f"Content: {deploy['publish_root']}")
+    return 0, "\n".join(result_lines) + "\n"
 
 
 def run_website_deploy(form=None, live_cb=None):
@@ -4991,8 +5024,8 @@ def _is_internal_ip(ip):
 def manage_firewall_port(action, port, protocol, host=None):
     action = (action or "").strip().lower()
     protocol = (protocol or "").strip().lower()
-    if action == "open" and host and _is_internal_ip(host):
-        return True, f"Skipped firewall: port {port} bound to internal host {host}"
+    if action == "open" and host and host in ("localhost", "127.0.0.1", "::1"):
+        return True, f"Skipped firewall: port {port} bound to loopback host {host}"
     if action not in ("open", "close"):
         return False, "Action must be open or close."
     if protocol not in ("tcp", "udp"):
