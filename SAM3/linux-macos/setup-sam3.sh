@@ -106,15 +106,15 @@ echo "[INFO] SAM3 will use device: ${SELECTED_DEVICE}"
 
 ensure_python() {
     local major_minor="$1"
-    if has_cmd "python${major_minor}"; then
-        echo "python${major_minor}"
-        return 0
-    fi
 
     local os_type
     os_type="$(uname -s)"
 
     if [ "$os_type" = "Darwin" ]; then
+        if has_cmd "python${major_minor}"; then
+            echo "python${major_minor}"
+            return 0
+        fi
         if ! has_cmd brew; then
             echo "Homebrew is required on macOS." >&2
             return 1
@@ -125,7 +125,7 @@ ensure_python() {
         return 1
     fi
 
-    # Linux
+    # Linux - always ensure venv and other deps are installed even if python exists
     if has_cmd apt-get; then
         export DEBIAN_FRONTEND=noninteractive
         apt-get update >&2

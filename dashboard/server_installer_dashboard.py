@@ -8003,18 +8003,21 @@ def run_sam3_download_model(form=None, live_cb=None):
         return 0, "SAM3 model is already downloaded."
     if live_cb:
         live_cb("Downloading SAM3 model (sam3.pt ~3.4 GB)... This may take a while.\n")
+    # Run from install_dir so model downloads there
+    dl_env = os.environ.copy()
+    if install_dir:
+        dl_env["PWD"] = install_dir
     code, output = run_process(
-        [venv_python, "-c", "from ultralytics import SAM; model = SAM('sam3.pt')"],
-        cwd=install_dir or None,
+        [venv_python, "-c",
+         f"import os; os.chdir({install_dir!r}); from ultralytics import SAM; model = SAM('sam3.pt')"],
+        env=dl_env,
         live_cb=live_cb,
-        timeout=1800,
     )
     if code == 0:
         # Move model to proper location
         default_model = Path(install_dir) / "sam3.pt" if install_dir else None
         target_model = Path(model_dir) if model_dir else None
         if default_model and default_model.exists() and target_model and not target_model.exists():
-            import shutil
             target_model.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(default_model), str(target_model))
         state["model_downloaded"] = True
@@ -8074,7 +8077,6 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
     dockerfile_path.write_text(dockerfile_content, encoding="utf-8")
 
     # Copy app files to docker build context
-    import shutil
     for item in Path(common_dir).rglob("*"):
         if item.is_file() and "__pycache__" not in str(item) and "venv" not in str(item):
             rel = item.relative_to(common_dir)
@@ -8086,8 +8088,8 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
     image_name = "serverinstaller/sam3:latest"
 
     # Stop and remove existing container
-    run_process(["docker", "stop", container_name], live_cb=live_cb, timeout=30)
-    run_process(["docker", "rm", container_name], live_cb=live_cb, timeout=15)
+    run_process(["docker", "stop", container_name], live_cb=live_cb)
+    run_process(["docker", "rm", container_name], live_cb=live_cb)
 
     # Build image
     if live_cb:
@@ -8095,7 +8097,6 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
     code, output = run_process(
         ["docker", "build", "-t", image_name, str(sam3_data)],
         live_cb=live_cb,
-        timeout=600,
     )
     if code != 0:
         return code, output
@@ -8110,7 +8111,7 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
 
     if live_cb:
         live_cb("Starting SAM3 Docker container...\n")
-    code2, output2 = run_process(docker_cmd, live_cb=live_cb, timeout=60)
+    code2, output2 = run_process(docker_cmd, live_cb=live_cb)
 
     combined = f"{output.rstrip()}\n{output2}".strip()
     if code2 == 0:
@@ -8139,15 +8140,15 @@ def run_sam3_stop(live_cb=None):
     service_name = str(state.get("service_name") or "").strip()
 
     if deploy_mode == "docker":
-        code, output = run_process(["docker", "stop", service_name or "serverinstaller-sam3"], live_cb=live_cb, timeout=30)
+        code, output = run_process(["docker", "stop", service_name or "serverinstaller-sam3"], live_cb=live_cb)
     elif os.name == "nt":
         nssm = shutil.which("nssm")
         if nssm:
-            code, output = run_process([nssm, "stop", service_name or "ServerInstaller-SAM3"], live_cb=live_cb, timeout=30)
+            code, output = run_process([nssm, "stop", service_name or "ServerInstaller-SAM3"], live_cb=live_cb)
         else:
-            code, output = run_process(["schtasks", "/End", "/TN", service_name or "ServerInstaller-SAM3"], live_cb=live_cb, timeout=30)
+            code, output = run_process(["schtasks", "/End", "/TN", service_name or "ServerInstaller-SAM3"], live_cb=live_cb)
     else:
-        code, output = run_process(["systemctl", "stop", f"{service_name or SAM3_SYSTEMD_SERVICE}.service"], live_cb=live_cb, timeout=30)
+        code, output = run_process(["systemctl", "stop", f"{service_name or SAM3_SYSTEMD_SERVICE}.service"], live_cb=live_cb)
 
     if code == 0:
         state["running"] = False
@@ -8162,15 +8163,15 @@ def run_sam3_start(live_cb=None):
     service_name = str(state.get("service_name") or "").strip()
 
     if deploy_mode == "docker":
-        code, output = run_process(["docker", "start", service_name or "serverinstaller-sam3"], live_cb=live_cb, timeout=30)
+        code, output = run_process(["docker", "start", service_name or "serverinstaller-sam3"], live_cb=live_cb)
     elif os.name == "nt":
         nssm = shutil.which("nssm")
         if nssm:
-            code, output = run_process([nssm, "start", service_name or "ServerInstaller-SAM3"], live_cb=live_cb, timeout=30)
+            code, output = run_process([nssm, "start", service_name or "ServerInstaller-SAM3"], live_cb=live_cb)
         else:
-            code, output = run_process(["schtasks", "/Run", "/TN", service_name or "ServerInstaller-SAM3"], live_cb=live_cb, timeout=30)
+            code, output = run_process(["schtasks", "/Run", "/TN", service_name or "ServerInstaller-SAM3"], live_cb=live_cb)
     else:
-        code, output = run_process(["systemctl", "start", f"{service_name or SAM3_SYSTEMD_SERVICE}.service"], live_cb=live_cb, timeout=30)
+        code, output = run_process(["systemctl", "start", f"{service_name or SAM3_SYSTEMD_SERVICE}.service"], live_cb=live_cb)
 
     if code == 0:
         state["running"] = True
