@@ -818,7 +818,7 @@ function App() {
 
   const onServiceAction = async (action, svc) => {
     if (!svc || !svc.name) return;
-    if (action === "stop" || action === "delete") {
+    if ((action === "stop" || action === "delete") && !svc._skipConfirm) {
       const prompt = action === "delete" && String(svc.kind || "").toLowerCase() === "python_version"
         ? `Do you want to hide detected Python '${svc.detail || svc.sub_status || svc.name}' from the dashboard?`
         : `Do you want to ${action === "delete" ? "delete" : "stop"} '${svc.name}'?`;

@@ -266,7 +266,16 @@
                         </>
                       )}
                       {svc.deletable && (
-                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => onServiceAction("delete", svc)} sx={{ textTransform: "none" }}>
+                        <Button size="small" variant="outlined" color="error" disabled={serviceBusy} onClick={() => {
+                          const ok = window.confirm(`Do you want to delete SAM3 service '${svc.name}'?`);
+                          if (!ok) return;
+                          let detail = "";
+                          if (modelReady) {
+                            const delModel = window.confirm("Do you also want to delete the sam3.pt model file (~3.4 GB)?");
+                            if (delModel) detail = "delete_model";
+                          }
+                          onServiceAction("delete", { ...svc, detail, _skipConfirm: true });
+                        }} sx={{ textTransform: "none" }}>
                           Delete
                         </Button>
                       )}

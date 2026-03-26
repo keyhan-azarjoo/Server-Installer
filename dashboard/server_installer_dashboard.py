@@ -6210,8 +6210,12 @@ def get_sam3_info():
     model_dir = str(Path(model_path).parent) if model_path else default_model_dir
     # Check actual file on disk
     model_exists = Path(model_path).exists() and Path(model_path).stat().st_size > 1000000
+    # "installed" means the service was actually set up, not just the model downloaded
+    _has_service = bool(state.get("service_name"))
+    if _has_service and os.name != "nt":
+        _has_service = Path(f"/etc/systemd/system/{SAM3_SYSTEMD_SERVICE}.service").exists()
     info = {
-        "installed": bool(state.get("install_dir")),
+        "installed": _has_service,
         "service_name": str(state.get("service_name") or "").strip(),
         "install_dir": install_dir,
         "venv_dir": str(state.get("venv_dir") or "").strip(),
@@ -6765,7 +6769,8 @@ def manage_service(action, name, kind, detail=""):
             code, output = run_sam3_start()
             return code == 0, output
         if action == "delete":
-            code, output = run_sam3_delete()
+            del_model = "delete_model" in str(detail or "").lower()
+            code, output = run_sam3_delete(delete_model=del_model)
             return code == 0, output
         return False, "Unsupported SAM3 action."
 
@@ -8282,7 +8287,7 @@ def run_sam3_start(live_cb=None):
     return code, output
 
 
-def run_sam3_delete(live_cb=None):
+def run_sam3_delete(live_cb=None, delete_model=False):
     """Stop and completely remove SAM3 service, venv, and config."""
     state = _read_json_file(SAM3_STATE_FILE)
     deploy_mode = str(state.get("deploy_mode") or "os").strip()
@@ -8328,12 +8333,34 @@ def run_sam3_delete(live_cb=None):
             run_process(["systemctl", "reload", "nginx"], live_cb=live_cb)
         outputs.append("Nginx config removed.")
 
-    # Remove install directory (venv, app files) but keep models
+    # Remove install directory (venv, app files) but preserve models dir unless delete_model
+    model_path = str(state.get("model_path") or "").strip()
+    model_dir = str(Path(model_path).parent) if model_path else ""
     if install_dir and Path(install_dir).exists():
+        if delete_model:
+            if live_cb:
+                live_cb(f"Removing install directory (including model): {install_dir}\n")
+            shutil.rmtree(install_dir, ignore_errors=True)
+            outputs.append(f"Install directory removed: {install_dir}")
+        else:
+            # Remove everything except the models directory
+            if live_cb:
+                live_cb(f"Removing install directory (keeping model): {install_dir}\n")
+            for item in Path(install_dir).iterdir():
+                if item.name == "models":
+                    continue
+                if item.is_dir():
+                    shutil.rmtree(str(item), ignore_errors=True)
+                else:
+                    item.unlink(missing_ok=True)
+            outputs.append(f"Install directory cleaned (model preserved): {install_dir}")
+
+    # Remove model file if requested
+    if delete_model and model_path and Path(model_path).exists():
         if live_cb:
-            live_cb(f"Removing install directory: {install_dir}\n")
-        shutil.rmtree(install_dir, ignore_errors=True)
-        outputs.append(f"Install directory removed: {install_dir}")
+            live_cb(f"Removing model file: {model_path}\n")
+        Path(model_path).unlink(missing_ok=True)
+        outputs.append("Model file removed.")
 
     # Remove state file
     if SAM3_STATE_FILE.exists():
