@@ -3132,14 +3132,12 @@ def run_windows_website_iis(form=None, live_cb=None):
             "New-Item ('IIS:\\SslBindings\\' + $bindingPath) -Thumbprint $cert.Thumbprint -SSLFlags 0 | Out-Null",
         ]
 
-    # Domain host header for IIS binding
-    host_header_arg = f" -HostHeader {_ps_single_quote(domain)}" if domain else ""
-
     # When only HTTPS is set (no HTTP port), create the site on the HTTPS port with SSL;
     # when only HTTP is set, create normally; when both, create on HTTP and add HTTPS binding.
     initial_port = http_port if http_port else https_port
     initial_protocol_args = "-Ssl" if (not http_port and https_port) else ""
 
+    # Create site WITHOUT host header first (so IP access always works)
     ps_lines = [
         "Import-Module WebAdministration",
         f"$siteName = {_ps_single_quote(deploy['site_name'])}",
@@ -3152,13 +3150,14 @@ def run_windows_website_iis(form=None, live_cb=None):
         "New-WebAppPool -Name $appPool | Out-Null",
         "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name managedRuntimeVersion -Value ''",
         "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name processModel.identityType -Value 4",
-        f"New-Website -Name $siteName -PhysicalPath $physicalPath -Port $port -IPAddress $ip {initial_protocol_args}{host_header_arg} -ApplicationPool $appPool | Out-Null".replace("  ", " "),
+        f"New-Website -Name $siteName -PhysicalPath $physicalPath -Port $port -IPAddress $ip {initial_protocol_args} -ApplicationPool $appPool | Out-Null".replace("  ", " "),
         *(https_ps_lines if http_port else []),
     ]
-    # Add domain binding on a second port or without host header on IP-only
+    # Add domain binding so the site also responds to the domain name
     if domain and http_port:
-        # Also add a binding without host header so IP access still works
-        ps_lines.append(f"New-WebBinding -Name $siteName -Protocol 'http' -Port {int(http_port)} -IPAddress $ip -ErrorAction SilentlyContinue | Out-Null")
+        ps_lines.append(f"New-WebBinding -Name $siteName -Protocol 'http' -Port {int(http_port)} -IPAddress $ip -HostHeader {_ps_single_quote(domain)} -ErrorAction SilentlyContinue | Out-Null")
+    if domain and https_port:
+        ps_lines.append(f"New-WebBinding -Name $siteName -Protocol 'https' -Port {int(https_port)} -IPAddress $ip -HostHeader {_ps_single_quote(domain)} -ErrorAction SilentlyContinue | Out-Null")
     ps_lines.append("Start-Website -Name $siteName | Out-Null")
 
     # Add domain to hosts file so it resolves on this server
