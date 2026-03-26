@@ -2816,11 +2816,29 @@ def run_windows_website_service(form=None, live_cb=None):
     run_capture(["sc.exe", "stop", deploy["runtime_name"]], timeout=30)
     run_capture([venv_python, str(service_script), "remove"], timeout=60)
     rc, out = run_capture([venv_python, str(service_script), "--startup", "auto", "install"], timeout=180)
-    if rc != 0:
-        return 1, out or f"Failed to install Windows website service '{deploy['runtime_name']}'."
-    rc, out = run_capture([venv_python, str(service_script), "start"], timeout=120)
-    if rc != 0:
-        return 1, out or f"Failed to start Windows website service '{deploy['runtime_name']}'."
+    service_started = False
+    if rc == 0:
+        rc2, out2 = run_capture([venv_python, str(service_script), "start"], timeout=120)
+        if rc2 == 0:
+            # Verify service is actually running
+            import time
+            time.sleep(2)
+            state_text, _ = _windows_service_state(deploy["runtime_name"])
+            service_started = state_text.lower() == "running"
+    if not service_started:
+        # Fallback: run as a background process (pywin32 service framework often fails)
+        if live_cb:
+            live_cb("Windows service registration failed or didn't start. Launching as background process...\n")
+        import subprocess
+        subprocess.Popen(
+            [venv_python, str(service_script), "--foreground"] if runtime != "static" else [venv_python, "-m", "http.server", str(deploy["site_port"]), "--bind", "0.0.0.0" if deploy["bind_ip"] in ("", "*") else deploy["bind_ip"], "--directory", str(deploy["deploy_root"])],
+            cwd=str(deploy["deploy_root"]),
+            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        if live_cb:
+            live_cb("Website started as background process.\n")
     manage_firewall_port("open", deploy["site_port"], "tcp", host=deploy.get("host"))
     url = f"http://{deploy['host']}" if int(deploy["site_port"]) == 80 else f"http://{deploy['host']}:{deploy['site_port']}"
     _write_website_state_entry({
