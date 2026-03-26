@@ -86,8 +86,10 @@
       { name: "SAM3_PASSWORD", label: "Password", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
     ];
 
-    // Best URL for "Open Dashboard" button
-    const bestUrl = httpsUrl || httpUrl;
+    // Best URL for "Open Dashboard" button — build from host+port if not set
+    const computedHttpUrl = httpUrl || (httpPort ? `http://${hostIp || "127.0.0.1"}:${httpPort}` : "");
+    const computedHttpsUrl = httpsUrl || (httpsPort ? `https://${hostIp || "127.0.0.1"}:${httpsPort}` : "");
+    const bestUrl = computedHttpsUrl || computedHttpUrl;
 
     return (
       <Grid container spacing={2}>
@@ -171,8 +173,13 @@
                   </Typography>
                 </Box>
               )}
-              {!!httpUrl && <Typography variant="body2" sx={{ mt: 0.5, wordBreak: "break-all" }}>HTTP: <a href={httpUrl} target="_blank" rel="noopener">{httpUrl}</a></Typography>}
-              {!!httpsUrl && <Typography variant="body2" sx={{ wordBreak: "break-all" }}>HTTPS: <a href={httpsUrl} target="_blank" rel="noopener">{httpsUrl}</a></Typography>}
+              {!!computedHttpUrl && <Typography variant="body2" sx={{ mt: 0.5, wordBreak: "break-all" }}>HTTP: <a href={computedHttpUrl} target="_blank" rel="noopener">{computedHttpUrl}</a></Typography>}
+              {!!computedHttpsUrl && <Typography variant="body2" sx={{ wordBreak: "break-all" }}>HTTPS: <a href={computedHttpsUrl} target="_blank" rel="noopener">{computedHttpsUrl}</a></Typography>}
+              {!!bestUrl && (
+                <Button variant="contained" size="small" sx={{ mt: 1.5, textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" } }} onClick={() => window.open(bestUrl, "_blank", "noopener,noreferrer")}>
+                  Open SAM3 Dashboard
+                </Button>
+              )}
             </CardContent>
           </Card>
         </Grid>
@@ -218,7 +225,7 @@
                 <Typography variant="h6" fontWeight={800}>SAM3 Services</Typography>
                 <Box sx={{ flexGrow: 1 }} />
                 {!!bestUrl && (
-                  <Button variant="contained" disabled={serviceBusy || !modelReady} onClick={() => window.open(bestUrl, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" } }}>
+                  <Button variant="contained" disabled={serviceBusy} onClick={() => window.open(bestUrl, "_blank", "noopener,noreferrer")} sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" } }}>
                     Open SAM3 Dashboard
                   </Button>
                 )}
