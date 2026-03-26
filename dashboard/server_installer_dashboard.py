@@ -8079,14 +8079,24 @@ def run_sam3_download_model(form=None, live_cb=None):
         run_sam3_stop(live_cb=live_cb)
         stopped_service = True
         import time
-        time.sleep(1)
+        time.sleep(2)
         if live_cb:
             live_cb("Removing old model...\n")
-        try:
-            target_model.unlink()
-        except Exception as ex:
-            if live_cb:
-                live_cb(f"[WARN] Could not remove old model: {ex}\n")
+        # Retry delete a few times in case the process takes a moment to release the file
+        for attempt in range(5):
+            try:
+                target_model.unlink()
+                break
+            except Exception as ex:
+                if attempt < 4:
+                    time.sleep(2)
+                else:
+                    if live_cb:
+                        live_cb(f"[WARN] Could not remove old model after retries: {ex}\n")
+                        live_cb("Downloading to a temporary file instead...\n")
+                    # Download to temp file and replace on next startup
+                    model_dir = str(target_model) + ".new"
+                    target_model = Path(model_dir)
 
     # Ensure models directory exists
     target_model.parent.mkdir(parents=True, exist_ok=True)
@@ -8276,22 +8286,63 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
     return code2, combined
 
 
+def _kill_sam3_processes(live_cb=None):
+    """Kill any running SAM3 Python processes (fallback when service stop fails)."""
+    killed = False
+    try:
+        import subprocess
+        if os.name == "nt":
+            # Find python processes with start-sam3.py or sam3 in command line
+            result = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command",
+                 "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*start-sam3*' -or $_.CommandLine -like '*sam3*app*' } | Select-Object ProcessId, CommandLine | Format-List"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.stdout.strip():
+                if live_cb:
+                    live_cb(f"Found SAM3 processes, killing...\n")
+                subprocess.run(
+                    ["powershell.exe", "-NoProfile", "-Command",
+                     "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*start-sam3*' -or $_.CommandLine -like '*sam3*app*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
+                    capture_output=True, timeout=10
+                )
+                killed = True
+        else:
+            # Linux/macOS: pkill
+            subprocess.run(["pkill", "-f", "start-sam3"], capture_output=True, timeout=5)
+            killed = True
+    except Exception:
+        pass
+    return killed
+
+
 def run_sam3_stop(live_cb=None):
     """Stop the SAM3 service."""
     state = _read_json_file(SAM3_STATE_FILE)
     deploy_mode = str(state.get("deploy_mode") or "os").strip()
     service_name = str(state.get("service_name") or "").strip()
+    code = 1
+    output = ""
 
     if deploy_mode == "docker":
         code, output = run_process(["docker", "stop", service_name or "serverinstaller-sam3"], live_cb=live_cb)
     elif os.name == "nt":
+        # Try NSSM first, then scheduled task, then kill processes directly
         nssm = shutil.which("nssm")
         if nssm:
             code, output = run_process([nssm, "stop", service_name or "ServerInstaller-SAM3"], live_cb=live_cb)
-        else:
-            code, output = run_process(["schtasks", "/End", "/TN", service_name or "ServerInstaller-SAM3"], live_cb=live_cb)
+        if code != 0 and service_name:
+            code, output = run_process(["schtasks", "/End", "/TN", service_name], live_cb=live_cb)
+        if code != 0:
+            # Fallback: kill SAM3 python processes directly
+            if _kill_sam3_processes(live_cb=live_cb):
+                code = 0
+                output = "SAM3 processes killed."
     else:
         code, output = run_process(["systemctl", "stop", f"{service_name or SAM3_SYSTEMD_SERVICE}.service"], live_cb=live_cb)
+        if code != 0:
+            _kill_sam3_processes(live_cb=live_cb)
+            code = 0
 
     if code == 0:
         state["running"] = False
