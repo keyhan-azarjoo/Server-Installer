@@ -8456,15 +8456,40 @@ def run_sam3_start(live_cb=None):
     state = _read_json_file(SAM3_STATE_FILE)
     deploy_mode = str(state.get("deploy_mode") or "os").strip()
     service_name = str(state.get("service_name") or "").strip()
+    code = 1
+    output = ""
 
     if deploy_mode == "docker":
         code, output = run_process(["docker", "start", service_name or "serverinstaller-sam3"], live_cb=live_cb)
     elif os.name == "nt":
+        # Try NSSM, then scheduled task
         nssm = shutil.which("nssm")
         if nssm:
             code, output = run_process([nssm, "start", service_name or "ServerInstaller-SAM3"], live_cb=live_cb)
-        else:
-            code, output = run_process(["schtasks", "/Run", "/TN", service_name or "ServerInstaller-SAM3"], live_cb=live_cb)
+        if code != 0 and service_name:
+            code, output = run_process(["schtasks", "/Run", "/TN", service_name], live_cb=live_cb)
+        if code != 0:
+            # Fallback: launch the SAM3 process directly in background
+            install_dir = str(state.get("install_dir") or str(SAM3_STATE_DIR / "app")).strip()
+            startup_script = Path(install_dir) / "start-sam3.py"
+            venv_python = str(state.get("python_executable") or "").strip()
+            if not venv_python:
+                venv_python = str(Path(install_dir) / "venv" / "Scripts" / "python.exe")
+            if Path(venv_python).exists() and startup_script.exists():
+                import subprocess
+                subprocess.Popen(
+                    [venv_python, str(startup_script)],
+                    cwd=install_dir,
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                code = 0
+                output = "SAM3 started as background process."
+                if live_cb:
+                    live_cb("SAM3 started as background process.\n")
+            else:
+                output = f"Could not find SAM3 files to start. Reinstall SAM3."
     else:
         code, output = run_process(["systemctl", "start", f"{service_name or SAM3_SYSTEMD_SERVICE}.service"], live_cb=live_cb)
 

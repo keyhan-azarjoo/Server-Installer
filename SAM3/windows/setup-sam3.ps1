@@ -218,7 +218,8 @@ if (-not (Test-Path $certFile) -or -not (Test-Path $keyFile)) {
     Write-Host "[INFO] Generating self-signed SSL certificate..."
     $opensslExe = Get-Command openssl.exe -ErrorAction SilentlyContinue
     if ($opensslExe) {
-        $subj = "/CN=$($domain ?? $hostIp ?? 'localhost')/O=ServerInstaller/C=US"
+        $certCN = if ($domain) { $domain } elseif ($hostIp) { $hostIp } else { 'localhost' }
+        $subj = "/CN=$certCN/O=ServerInstaller/C=US"
         & $opensslExe.Source req -x509 -nodes -newkey rsa:2048 -keyout $keyFile -out $certFile -days 3650 -subj $subj 2>$null
     } else {
         Write-Host "[WARN] OpenSSL not found. HTTPS will use system-generated certificates." -ForegroundColor Yellow
