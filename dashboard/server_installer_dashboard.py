@@ -8105,24 +8105,32 @@ def run_sam3_download_model(form=None, live_cb=None):
         run_sam3_stop(live_cb=live_cb)
         stopped_service = True
         import time
-        time.sleep(2)
+        time.sleep(3)
         if live_cb:
             live_cb("Removing old model...\n")
-        # Retry delete a few times in case the process takes a moment to release the file
-        for attempt in range(5):
+        # Retry delete — Windows file locks take time to release after process kill
+        deleted = False
+        for attempt in range(8):
             try:
                 target_model.unlink()
+                deleted = True
+                if live_cb:
+                    live_cb("Old model removed.\n")
                 break
             except Exception as ex:
-                if attempt < 4:
-                    time.sleep(2)
+                if attempt < 7:
+                    if live_cb and attempt == 0:
+                        live_cb(f"File still locked, waiting... (attempt {attempt+1}/8)\n")
+                    time.sleep(3)
                 else:
                     if live_cb:
-                        live_cb(f"[WARN] Could not remove old model after retries: {ex}\n")
-                        live_cb("Downloading to a temporary file instead...\n")
-                    # Download to temp file and replace on next startup
-                    model_dir = str(target_model) + ".new"
-                    target_model = Path(model_dir)
+                        live_cb(f"[WARN] Could not remove old model after {attempt+1} attempts: {ex}\n")
+        if not deleted:
+            # Download to a temp path, then swap later
+            new_path = str(target_model) + ".new"
+            if live_cb:
+                live_cb(f"Downloading to temporary file: {new_path}\n")
+            target_model = Path(new_path)
 
     # Ensure models directory exists
     target_model.parent.mkdir(parents=True, exist_ok=True)
@@ -8318,27 +8326,59 @@ def _kill_sam3_processes(live_cb=None):
     try:
         import subprocess
         if os.name == "nt":
-            # Find python processes with start-sam3.py or sam3 in command line
+            # Kill ALL python processes that have sam3 paths in their working dir or command line
+            # Use multiple strategies to catch the process
+            ps_script = """
+$sam3Patterns = @('*sam3*', '*SAM3*', '*start-sam3*')
+$killed = @()
+foreach ($proc in Get-Process -Name python*, pythonw* -ErrorAction SilentlyContinue) {
+    try {
+        $cmdLine = (Get-CimInstance Win32_Process -Filter "ProcessId = $($proc.Id)" -ErrorAction SilentlyContinue).CommandLine
+        $match = $false
+        foreach ($p in $sam3Patterns) {
+            if ($cmdLine -like $p) { $match = $true; break }
+            if ($proc.Path -like $p) { $match = $true; break }
+        }
+        if ($match) {
+            Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+            $killed += $proc.Id
+        }
+    } catch {}
+}
+if ($killed.Count -eq 0) {
+    # Broader fallback: kill python processes listening on SAM3 ports
+    $sam3State = $null
+    $stateFile = Join-Path $env:ProgramData 'Server-Installer\\sam3\\sam3-state.json'
+    if (Test-Path $stateFile) {
+        $sam3State = Get-Content $stateFile -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
+    }
+    $ports = @()
+    if ($sam3State.http_port) { $ports += $sam3State.http_port }
+    if ($sam3State.https_port) { $ports += $sam3State.https_port }
+    foreach ($port in $ports) {
+        $conns = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue
+        foreach ($c in $conns) {
+            Stop-Process -Id $c.OwningProcess -Force -ErrorAction SilentlyContinue
+            $killed += $c.OwningProcess
+        }
+    }
+}
+Write-Output "Killed $($killed.Count) process(es)"
+"""
             result = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-Command",
-                 "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*start-sam3*' -or $_.CommandLine -like '*sam3*app*' } | Select-Object ProcessId, CommandLine | Format-List"],
-                capture_output=True, text=True, timeout=10
+                ["powershell.exe", "-NoProfile", "-Command", ps_script],
+                capture_output=True, text=True, timeout=15
             )
-            if result.stdout.strip():
-                if live_cb:
-                    live_cb(f"Found SAM3 processes, killing...\n")
-                subprocess.run(
-                    ["powershell.exe", "-NoProfile", "-Command",
-                     "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*start-sam3*' -or $_.CommandLine -like '*sam3*app*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"],
-                    capture_output=True, timeout=10
-                )
-                killed = True
+            if live_cb and result.stdout.strip():
+                live_cb(f"{result.stdout.strip()}\n")
+            killed = "Killed 0" not in (result.stdout or "")
         else:
             # Linux/macOS: pkill
             subprocess.run(["pkill", "-f", "start-sam3"], capture_output=True, timeout=5)
             killed = True
-    except Exception:
-        pass
+    except Exception as ex:
+        if live_cb:
+            live_cb(f"[WARN] Kill failed: {ex}\n")
     return killed
 
 
