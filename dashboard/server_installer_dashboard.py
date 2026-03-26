@@ -27,7 +27,7 @@ import getpass
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 from file_manager import (
     file_manager_copy_path,
@@ -11231,6 +11231,224 @@ class Handler(BaseHTTPRequestHandler):
         password = self.headers.get("X-Mongo-Password", "")
         return username, password
 
+    def _handle_api_gateway_get(self):
+        """Handle GET requests for the API gateway (S3, Mongo, Proxy, SAM3, Ollama)."""
+        from api_gateway import (
+            s3_list_buckets, s3_list_objects, s3_info, s3_health, s3_presign,
+            mongo_list_databases, mongo_health,
+            proxy_list_users, proxy_info, proxy_status, proxy_user_config, proxy_health,
+            sam3_model_info, sam3_health,
+            ollama_list_models, ollama_running_models, ollama_health,
+        )
+        path = self.path.split("?", 1)[0]
+        query = {}
+        if "?" in self.path:
+            query = parse_qs(self.path.split("?", 1)[1], keep_blank_values=True)
+
+        # S3 routes
+        if path == "/api/s3/buckets":
+            return s3_list_buckets()
+        if path == "/api/s3/objects":
+            bucket = (query.get("bucket", [""])[0] or "").strip()
+            prefix = (query.get("prefix", [""])[0] or "").strip()
+            return s3_list_objects(bucket, prefix)
+        if path == "/api/s3/info":
+            return s3_info()
+        if path == "/api/s3/health":
+            return s3_health()
+
+        # MongoDB routes
+        if path == "/api/mongo/databases":
+            username, password = self.get_mongo_native_credentials()
+            return mongo_list_databases(username=username, password=password)
+        if path == "/api/mongo/health":
+            username, password = self.get_mongo_native_credentials()
+            return mongo_health(username=username, password=password)
+
+        # Proxy routes
+        if path == "/api/proxy/users":
+            return proxy_list_users()
+        if path == "/api/proxy/info":
+            return proxy_info()
+        if path == "/api/proxy/status":
+            return proxy_status()
+        if path.startswith("/api/proxy/users/") and path.endswith("/config"):
+            username = path[len("/api/proxy/users/"):-len("/config")]
+            return proxy_user_config(unquote(username))
+        if path == "/api/proxy/health":
+            return proxy_health()
+
+        # SAM3 routes
+        if path == "/api/sam3/model-info":
+            return sam3_model_info()
+        if path == "/api/sam3/health":
+            return sam3_health()
+
+        # Ollama routes
+        if path == "/api/ollama/tags" or path == "/api/ollama/models":
+            return ollama_list_models()
+        if path == "/api/ollama/ps":
+            return ollama_running_models()
+        if path == "/api/ollama/health":
+            return ollama_health()
+
+        return None  # Not handled
+
+    def _handle_api_gateway_post(self):
+        """Handle POST/PUT/DELETE requests for the API gateway."""
+        from api_gateway import (
+            s3_create_bucket, s3_delete_bucket, s3_delete_object, s3_presign,
+            mongo_create_database, mongo_drop_database, mongo_create_collection,
+            mongo_drop_collection, mongo_insert_documents, mongo_update_documents,
+            mongo_delete_documents,
+            proxy_add_user, proxy_delete_user, proxy_update_password,
+            proxy_restart_service, proxy_switch_layer,
+            sam3_detect,
+            ollama_chat, ollama_generate, ollama_embeddings, ollama_pull_model,
+            ollama_delete_model, ollama_show_model, ollama_copy_model, ollama_create_model,
+        )
+        path = self.path.split("?", 1)[0]
+        ctype = (self.headers.get("Content-Type", "") or "").lower()
+        length = int(self.headers.get("Content-Length", "0") or "0")
+        raw_body = self.rfile.read(length) if length > 0 else b""
+
+        def _json_body():
+            """Parse JSON body or fall back to form data."""
+            if "json" in ctype and raw_body:
+                try:
+                    return json.loads(raw_body.decode("utf-8", errors="replace"))
+                except Exception:
+                    pass
+            # Fall back to URL-encoded form parsing
+            if raw_body and "form" in ctype:
+                try:
+                    return {k: v[0] if len(v) == 1 else v for k, v in parse_qs(raw_body.decode("utf-8", errors="replace"), keep_blank_values=True).items()}
+                except Exception:
+                    pass
+            return {}
+
+        # S3 routes
+        if path == "/api/s3/buckets":
+            body = _json_body()
+            return s3_create_bucket(body.get("name", ""))
+        if path.startswith("/api/s3/buckets/"):
+            name = path[len("/api/s3/buckets/"):]
+            return s3_delete_bucket(name)
+        if path.startswith("/api/s3/objects/"):
+            # DELETE /api/s3/objects/{bucket}/{key}
+            rest = path[len("/api/s3/objects/"):]
+            parts = rest.split("/", 1)
+            if len(parts) == 2:
+                return s3_delete_object(parts[0], parts[1])
+            return {"ok": False, "error": "Invalid path. Use /api/s3/objects/{bucket}/{key}"}
+        if path == "/api/s3/presign":
+            body = _json_body()
+            return s3_presign(body.get("bucket", ""), body.get("key", ""), body.get("expires", 3600))
+
+        # MongoDB routes
+        if path == "/api/mongo/databases":
+            body = _json_body()
+            return mongo_create_database(body.get("name", ""))
+        if path.startswith("/api/mongo/databases/"):
+            name = path[len("/api/mongo/databases/"):]
+            username, password = self.get_mongo_native_credentials()
+            return mongo_drop_database(name, username=username, password=password)
+        if path == "/api/mongo/collections":
+            body = _json_body()
+            username, password = self.get_mongo_native_credentials()
+            return mongo_create_collection(body.get("db", ""), body.get("name", ""), username=username, password=password)
+        if path.startswith("/api/mongo/collections/"):
+            rest = path[len("/api/mongo/collections/"):]
+            parts = rest.split("/", 1)
+            if len(parts) == 2:
+                username, password = self.get_mongo_native_credentials()
+                return mongo_drop_collection(parts[0], parts[1], username=username, password=password)
+            return {"ok": False, "error": "Use /api/mongo/collections/{db}/{name}"}
+        if path == "/api/mongo/documents":
+            body = _json_body()
+            username, password = self.get_mongo_native_credentials()
+            db_name = body.get("db", "")
+            col_name = body.get("collection", "")
+            # Determine operation based on body content
+            if "documents" in body:
+                return mongo_insert_documents(db_name, col_name, body["documents"], username=username, password=password)
+            if "update" in body:
+                return mongo_update_documents(db_name, col_name, body.get("filter", {}), body["update"], username=username, password=password)
+            if "filter" in body and "documents" not in body and "update" not in body:
+                return mongo_delete_documents(db_name, col_name, body["filter"], username=username, password=password)
+            return {"ok": False, "error": "Provide 'documents' to insert, 'update' to update, or 'filter' to delete."}
+
+        # Proxy routes
+        if path == "/api/proxy/users":
+            body = _json_body()
+            return proxy_add_user(body.get("username", ""), body.get("password"))
+        if path.startswith("/api/proxy/users/") and path.endswith("/password"):
+            username = path[len("/api/proxy/users/"):-len("/password")]
+            body = _json_body()
+            return proxy_update_password(unquote(username), body.get("password", ""))
+        if path.startswith("/api/proxy/users/"):
+            username = path[len("/api/proxy/users/"):]
+            return proxy_delete_user(unquote(username))
+        if path == "/api/proxy/service/restart":
+            return proxy_restart_service()
+        if path == "/api/proxy/layer/switch":
+            body = _json_body()
+            return proxy_switch_layer(body.get("layer", ""))
+
+        # SAM3 routes
+        if path == "/api/sam3/detect":
+            try:
+                parts = self._parse_multipart()
+                image_data = b""
+                prompt = ""
+                threshold = 0.3
+                content_type = "image/jpeg"
+                for part in parts:
+                    if part.get("name") == "image":
+                        image_data = part.get("content", b"")
+                        if part.get("filename", "").lower().endswith(".png"):
+                            content_type = "image/png"
+                    elif part.get("name") == "prompt":
+                        prompt = part.get("content", b"").decode("utf-8", errors="replace")
+                    elif part.get("name") == "threshold":
+                        try:
+                            threshold = float(part.get("content", b"0.3").decode())
+                        except Exception:
+                            pass
+                if not image_data:
+                    return {"ok": False, "error": "Image file is required."}
+                return sam3_detect(image_data, prompt, threshold, content_type)
+            except Exception as ex:
+                return {"ok": False, "error": str(ex)}
+
+        # Ollama routes
+        if path == "/api/ollama/chat":
+            body = _json_body()
+            return ollama_chat(body.get("model", ""), body.get("messages", []))
+        if path == "/api/ollama/generate":
+            body = _json_body()
+            return ollama_generate(body.get("model", ""), body.get("prompt", ""))
+        if path == "/api/ollama/embeddings":
+            body = _json_body()
+            return ollama_embeddings(body.get("model", ""), body.get("prompt", ""))
+        if path == "/api/ollama/pull":
+            body = _json_body()
+            return ollama_pull_model(body.get("name", ""))
+        if path == "/api/ollama/delete":
+            body = _json_body()
+            return ollama_delete_model(body.get("name", ""))
+        if path == "/api/ollama/show":
+            body = _json_body()
+            return ollama_show_model(body.get("name", ""))
+        if path == "/api/ollama/copy":
+            body = _json_body()
+            return ollama_copy_model(body.get("source", ""), body.get("destination", ""))
+        if path == "/api/ollama/create":
+            body = _json_body()
+            return ollama_create_model(body.get("name", ""), body.get("modelfile", ""))
+
+        return None  # Not handled
+
     def _parse_multipart(self):
         ctype = self.headers.get("Content-Type", "") or ""
         m = re.search(r'boundary="?([^";]+)"?', ctype, flags=re.IGNORECASE)
@@ -11924,6 +12142,22 @@ class Handler(BaseHTTPRequestHandler):
                 payload = {"ok": ok, "result": payload}
             self.write_json(payload, status)
             return
+        # ── API Gateway GET routes ────────────────────────────────────────────
+        if self.path.startswith("/api/s3/") or self.path.startswith("/api/mongo/") or self.path.startswith("/api/proxy/") or self.path.startswith("/api/sam3/") or self.path.startswith("/api/ollama/"):
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                result = self._handle_api_gateway_get()
+                if result is not None:
+                    status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+                    self.write_json(result, status)
+                    return
+            except Exception as ex:
+                print(f"API gateway GET error: {ex}")
+                traceback.print_exc()
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
         if self.path == "/":
             if self.is_local_client() or self.is_auth():
                 self.write_html(page_dashboard())
@@ -12210,6 +12444,19 @@ class Handler(BaseHTTPRequestHandler):
                     payload = {"error": str(payload)}
                 self.write_json({"ok": False, **payload}, status)
             return
+        # ── API Gateway POST routes ───────────────────────────────────────────
+        if self.path.startswith("/api/s3/") or self.path.startswith("/api/mongo/") or self.path.startswith("/api/proxy/") or self.path.startswith("/api/sam3/") or self.path.startswith("/api/ollama/"):
+            try:
+                result = self._handle_api_gateway_post()
+                if result is not None:
+                    status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+                    self.write_json(result, status)
+                    return
+            except Exception as ex:
+                print(f"API gateway POST error: {ex}")
+                traceback.print_exc()
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+                return
 
         try:
             form = self.parse_request_form()
