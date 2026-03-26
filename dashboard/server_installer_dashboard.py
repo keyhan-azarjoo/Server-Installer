@@ -3142,7 +3142,7 @@ def run_windows_website_iis(form=None, live_cb=None):
     initial_port = http_port if http_port else https_port
     initial_protocol_args = "-Ssl" if (not http_port and https_port) else ""
 
-    # Create site WITHOUT host header first (so IP access always works)
+    # Create site WITHOUT host header (so IP access works), then add domain binding
     ps_lines = [
         "Import-Module WebAdministration",
         f"$siteName = {_ps_single_quote(deploy['site_name'])}",
@@ -3150,28 +3150,33 @@ def run_windows_website_iis(form=None, live_cb=None):
         f"$physicalPath = {_ps_single_quote(deploy['deploy_root'])}",
         f"$ip = {_ps_single_quote(bind_ip)}",
         f"$port = {int(initial_port)}",
+        # Remove existing site completely
         "if (Get-Website -Name $siteName -ErrorAction SilentlyContinue) { Stop-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null; Remove-Website -Name $siteName -ErrorAction SilentlyContinue | Out-Null }",
         "if (Test-Path ('IIS:\\AppPools\\' + $appPool)) { Stop-WebAppPool -Name $appPool -ErrorAction SilentlyContinue | Out-Null; Remove-WebAppPool -Name $appPool -ErrorAction SilentlyContinue | Out-Null }",
+        # Create fresh app pool and site - NO host header on initial binding
         "New-WebAppPool -Name $appPool | Out-Null",
         "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name managedRuntimeVersion -Value ''",
         "Set-ItemProperty ('IIS:\\AppPools\\' + $appPool) -Name processModel.identityType -Value 4",
         f"New-Website -Name $siteName -PhysicalPath $physicalPath -Port $port -IPAddress $ip {initial_protocol_args} -ApplicationPool $appPool | Out-Null".replace("  ", " "),
         *(https_ps_lines if http_port else []),
     ]
-    # Add domain binding so the site also responds to the domain name
-    if domain and http_port:
-        ps_lines.append(f"New-WebBinding -Name $siteName -Protocol 'http' -Port {int(http_port)} -IPAddress $ip -HostHeader {_ps_single_quote(domain)} -ErrorAction SilentlyContinue | Out-Null")
-    if domain and https_port:
-        ps_lines.append(f"New-WebBinding -Name $siteName -Protocol 'https' -Port {int(https_port)} -IPAddress $ip -HostHeader {_ps_single_quote(domain)} -ErrorAction SilentlyContinue | Out-Null")
+    # Add domain binding so the site ALSO responds to the domain name
+    if domain:
+        if http_port:
+            ps_lines.append(f"New-WebBinding -Name $siteName -Protocol 'http' -Port {int(http_port)} -IPAddress $ip -HostHeader {_ps_single_quote(domain)} -ErrorAction SilentlyContinue | Out-Null")
+        if https_port:
+            ps_lines.append(f"New-WebBinding -Name $siteName -Protocol 'https' -Port {int(https_port)} -IPAddress $ip -HostHeader {_ps_single_quote(domain)} -ErrorAction SilentlyContinue | Out-Null")
     ps_lines.append("Start-Website -Name $siteName | Out-Null")
 
     # Add domain to hosts file so it resolves on this server
     if domain:
         ip_for_hosts = bind_ip if bind_ip not in ("", "*", "0.0.0.0") else choose_service_host()
-        ps_lines.append(f"$hostsFile = Join-Path $env:SystemRoot 'System32\\drivers\\etc\\hosts'")
-        ps_lines.append(f"$domainEntry = '{ip_for_hosts}  {domain}'")
-        ps_lines.append(f"$hostsContent = Get-Content $hostsFile -Raw -ErrorAction SilentlyContinue")
-        ps_lines.append(f"if ($hostsContent -notmatch [regex]::Escape('{domain}')) {{ Add-Content -Path $hostsFile -Value \"`n$domainEntry\" -ErrorAction SilentlyContinue }}")
+        hosts_entry = f"{ip_for_hosts}  {domain}"
+        ps_lines.append("$hostsFile = Join-Path $env:SystemRoot 'System32\\drivers\\etc\\hosts'")
+        ps_lines.append(f"$domainEntry = '{hosts_entry}'")
+        ps_lines.append("$hostsContent = Get-Content $hostsFile -Raw -ErrorAction SilentlyContinue")
+        ps_lines.append(f"if ($hostsContent -and $hostsContent -notmatch [regex]::Escape('{domain}')) {{ Add-Content -Path $hostsFile -Value $domainEntry -ErrorAction SilentlyContinue }}")
+        ps_lines.append(f"if (-not $hostsContent) {{ Add-Content -Path $hostsFile -Value $domainEntry -ErrorAction SilentlyContinue }}")
 
     ps = "\n".join(ps_lines)
     rc, out = run_capture(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps], timeout=180)
