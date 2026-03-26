@@ -2258,18 +2258,31 @@ def _copy_website_source(source_root: Path, deploy_root: Path):
 def _choose_website_target(requested_target, detected_runtime):
     target = str(requested_target or "auto").strip().lower()
     runtime = str(detected_runtime or "static").strip().lower()
+    valid_targets = ("service", "docker", "iis", "nginx", "nodejs", "kubernetes", "pm2")
     if target == "auto":
         if runtime == "static":
             if os.name == "nt" and get_iis_info().get("installed"):
                 return "iis"
             if command_exists("docker"):
                 return "docker"
+            if command_exists("nginx"):
+                return "nginx"
             return "service"
-        if runtime in ("node", "php"):
+        if runtime == "node":
             if command_exists("docker"):
                 return "docker"
+            if command_exists("pm2"):
+                return "pm2"
+            if command_exists("node"):
+                return "nodejs"
             return "service"
-    return target if target in ("service", "docker", "iis") else "service"
+        if runtime == "php":
+            if command_exists("docker"):
+                return "docker"
+            if command_exists("nginx"):
+                return "nginx"
+            return "service"
+    return target if target in valid_targets else "service"
 
 
 def _validate_website_target(stack_kind, runtime, target):
@@ -2282,11 +2295,333 @@ def _validate_website_target(stack_kind, runtime, target):
         if runtime_value != "static":
             raise RuntimeError(f"{stack or 'This'} website cannot run directly on IIS from this dashboard. Use Docker or OS service.")
     if selected == "docker" and not command_exists("docker"):
-        raise RuntimeError("Docker target requires Docker to be installed and running.")
+        # Auto-install Docker
+        _install_website_engine("docker")
+        if not command_exists("docker"):
+            raise RuntimeError("Docker target requires Docker to be installed and running.")
+    if selected == "nginx":
+        if os.name == "nt":
+            raise RuntimeError("Nginx is not available on Windows. Use IIS or Docker instead.")
+        if runtime_value == "node":
+            raise RuntimeError("Next.js requires a Node.js runtime. Nginx cannot serve it directly. Use Docker, Node.js, or PM2.")
+        if not command_exists("nginx"):
+            _install_website_engine("nginx")
+            if not command_exists("nginx"):
+                raise RuntimeError("Nginx installation failed. Install it manually or use Docker.")
+    if selected == "nodejs":
+        if runtime_value == "php":
+            raise RuntimeError("PHP code cannot run on Node.js. Use Nginx, Docker, or the OS service target.")
+        if not command_exists("node"):
+            _install_website_engine("nodejs")
+            if not command_exists("node"):
+                raise RuntimeError("Node.js installation failed. Install it manually.")
+    if selected == "pm2":
+        if runtime_value == "php":
+            raise RuntimeError("PHP code cannot run under PM2. Use Nginx or Docker.")
+        if not command_exists("pm2"):
+            _install_website_engine("pm2")
+            if not command_exists("pm2"):
+                raise RuntimeError("PM2 installation failed. Install Node.js and run 'npm install -g pm2'.")
+    if selected == "kubernetes":
+        if os.name == "nt":
+            raise RuntimeError("Kubernetes deployment from this dashboard requires Linux. Enable Kubernetes in Docker Desktop on Windows.")
+        if not (command_exists("kubectl") or command_exists("k3s")):
+            _install_website_engine("kubernetes")
+            if not (command_exists("kubectl") or command_exists("k3s")):
+                raise RuntimeError("Kubernetes installation failed.")
     if selected == "service" and runtime_value == "node" and not (command_exists("node") and command_exists("npm")):
         raise RuntimeError("Next.js service target requires Node.js and npm on the host.")
     if selected == "service" and runtime_value == "php" and not command_exists("php"):
         raise RuntimeError("PHP service target requires php on the host.")
+
+
+def _detect_website_engines():
+    """Detect which runtime engines are available on this system."""
+    engines = {}
+
+    def _cmd_version(cmd, flag="--version"):
+        try:
+            r = subprocess.run([cmd, flag], capture_output=True, timeout=10, text=True)
+            if r.returncode == 0:
+                ver = (r.stdout or r.stderr or "").strip().splitlines()[0].strip()
+                # Clean up version string
+                for prefix in ("Docker version ", "nginx version: nginx/", "v", "pm2 "):
+                    if ver.lower().startswith(prefix.lower()):
+                        ver = ver[len(prefix):].split(",")[0].split(" ")[0].strip()
+                        break
+                return ver
+        except Exception:
+            pass
+        return ""
+
+    # Docker
+    if command_exists("docker"):
+        engines["docker"] = {"installed": True, "version": _cmd_version("docker", "--version")}
+    else:
+        engines["docker"] = {"installed": False}
+
+    # Nginx
+    if command_exists("nginx"):
+        engines["nginx"] = {"installed": True, "version": _cmd_version("nginx", "-v")}
+    else:
+        engines["nginx"] = {"installed": False}
+
+    # IIS (Windows only)
+    if os.name == "nt":
+        iis_info = get_iis_info()
+        engines["iis"] = {"installed": bool(iis_info.get("installed")), "version": str(iis_info.get("version") or "")}
+    else:
+        engines["iis"] = {"installed": False}
+
+    # Node.js
+    if command_exists("node"):
+        engines["nodejs"] = {"installed": True, "version": _cmd_version("node", "--version")}
+    else:
+        engines["nodejs"] = {"installed": False}
+
+    # Kubernetes (kubectl + k3s/microk8s)
+    k8s_installed = False
+    k8s_version = ""
+    if command_exists("kubectl"):
+        k8s_installed = True
+        k8s_version = _cmd_version("kubectl", "version --client --short") or _cmd_version("kubectl", "version")
+    elif command_exists("k3s"):
+        k8s_installed = True
+        k8s_version = _cmd_version("k3s", "--version")
+    elif command_exists("microk8s"):
+        k8s_installed = True
+        k8s_version = "microk8s"
+    engines["kubernetes"] = {"installed": k8s_installed, "version": k8s_version}
+
+    # PM2
+    if command_exists("pm2"):
+        engines["pm2"] = {"installed": True, "version": _cmd_version("pm2", "--version")}
+    else:
+        engines["pm2"] = {"installed": False}
+
+    # OS Service (always available)
+    if os.name == "nt":
+        engines["service"] = {"installed": True, "version": "Windows Service"}
+    else:
+        engines["service"] = {"installed": True, "version": "systemd" if command_exists("systemctl") else "launchd" if sys.platform == "darwin" else "service"}
+
+    return engines
+
+
+def _install_website_engine(engine_id, live_cb=None):
+    """Install a runtime engine. Returns (exit_code, output_text)."""
+    engine_id = str(engine_id or "").strip().lower()
+    output_lines = []
+
+    def log(msg):
+        output_lines.append(msg)
+        if live_cb:
+            live_cb(msg + "\n")
+
+    log(f"=== Installing {engine_id} ===")
+
+    if engine_id == "docker":
+        return _install_engine_docker(log)
+    elif engine_id == "nginx":
+        return _install_engine_nginx(log)
+    elif engine_id == "nodejs":
+        return _install_engine_nodejs(log)
+    elif engine_id == "kubernetes":
+        return _install_engine_kubernetes(log)
+    elif engine_id == "pm2":
+        return _install_engine_pm2(log)
+    elif engine_id == "iis":
+        return _install_engine_iis(log)
+    else:
+        log(f"Unknown engine: {engine_id}")
+        return 1, "\n".join(output_lines)
+
+
+def _run_install_cmd(cmd, log, timeout=300):
+    """Run an installation command, streaming output."""
+    log(f"Running: {' '.join(cmd) if isinstance(cmd, list) else cmd}")
+    try:
+        if isinstance(cmd, str):
+            proc = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        else:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        for line in proc.stdout:
+            log(line.rstrip())
+        proc.wait(timeout=timeout)
+        return proc.returncode
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        log("Command timed out.")
+        return 1
+    except Exception as e:
+        log(f"Error: {e}")
+        return 1
+
+
+def _install_engine_docker(log):
+    """Install Docker."""
+    output_lines = []
+    if command_exists("docker"):
+        log("Docker is already installed.")
+        return 0, "Docker is already installed."
+
+    if os.name == "nt":
+        log("On Windows, Docker Desktop must be installed manually.")
+        log("Download from: https://www.docker.com/products/docker-desktop/")
+        log("After installing, enable WSL2 backend and restart.")
+        return 1, "\n".join(["Docker Desktop must be installed manually on Windows.",
+                             "Download: https://www.docker.com/products/docker-desktop/"])
+    else:
+        log("Installing Docker via official script...")
+        code = _run_install_cmd("curl -fsSL https://get.docker.com | sh", log)
+        if code == 0:
+            _run_install_cmd(["systemctl", "enable", "--now", "docker"], log)
+            log("Docker installed successfully.")
+        return code, "Docker installation complete." if code == 0 else "Docker installation failed."
+
+
+def _install_engine_nginx(log):
+    """Install Nginx."""
+    if command_exists("nginx"):
+        log("Nginx is already installed.")
+        return 0, "Nginx is already installed."
+
+    if os.name == "nt":
+        log("Nginx is not supported on Windows through this installer. Use IIS or Docker instead.")
+        return 1, "Nginx not supported on Windows."
+
+    # Detect package manager
+    if command_exists("apt-get"):
+        log("Installing Nginx via apt...")
+        _run_install_cmd(["apt-get", "update", "-y"], log)
+        code = _run_install_cmd(["apt-get", "install", "-y", "nginx"], log)
+    elif command_exists("dnf"):
+        log("Installing Nginx via dnf...")
+        code = _run_install_cmd(["dnf", "install", "-y", "nginx"], log)
+    elif command_exists("yum"):
+        log("Installing Nginx via yum...")
+        code = _run_install_cmd(["yum", "install", "-y", "nginx"], log)
+    elif command_exists("brew"):
+        log("Installing Nginx via Homebrew...")
+        code = _run_install_cmd(["brew", "install", "nginx"], log)
+    else:
+        log("No supported package manager found (apt/dnf/yum/brew).")
+        return 1, "No supported package manager found."
+
+    if code == 0:
+        if command_exists("systemctl"):
+            _run_install_cmd(["systemctl", "enable", "--now", "nginx"], log)
+        log("Nginx installed successfully.")
+    return code, "Nginx installation complete." if code == 0 else "Nginx installation failed."
+
+
+def _install_engine_nodejs(log):
+    """Install Node.js."""
+    if command_exists("node"):
+        log("Node.js is already installed.")
+        return 0, "Node.js is already installed."
+
+    if os.name == "nt":
+        log("Installing Node.js via winget...")
+        code = _run_install_cmd(["winget", "install", "-e", "--id", "OpenJS.NodeJS.LTS", "--accept-package-agreements", "--accept-source-agreements"], log)
+        if code != 0:
+            log("winget failed. Trying direct download...")
+            log("Download Node.js from: https://nodejs.org/")
+            return 1, "Please install Node.js manually from https://nodejs.org/"
+    else:
+        log("Installing Node.js via NodeSource...")
+        if command_exists("apt-get"):
+            _run_install_cmd("curl -fsSL https://deb.nodesource.com/setup_lts.x | bash -", log)
+            code = _run_install_cmd(["apt-get", "install", "-y", "nodejs"], log)
+        elif command_exists("dnf"):
+            _run_install_cmd("curl -fsSL https://rpm.nodesource.com/setup_lts.x | bash -", log)
+            code = _run_install_cmd(["dnf", "install", "-y", "nodejs"], log)
+        elif command_exists("yum"):
+            _run_install_cmd("curl -fsSL https://rpm.nodesource.com/setup_lts.x | bash -", log)
+            code = _run_install_cmd(["yum", "install", "-y", "nodejs"], log)
+        elif command_exists("brew"):
+            code = _run_install_cmd(["brew", "install", "node"], log)
+        else:
+            log("No supported package manager found.")
+            return 1, "No supported package manager found."
+
+    if code == 0:
+        log("Node.js installed successfully.")
+    return code, "Node.js installation complete." if code == 0 else "Node.js installation failed."
+
+
+def _install_engine_kubernetes(log):
+    """Install lightweight Kubernetes (K3s on Linux)."""
+    if command_exists("kubectl") or command_exists("k3s"):
+        log("Kubernetes is already installed.")
+        return 0, "Kubernetes is already installed."
+
+    if os.name == "nt":
+        log("Kubernetes on Windows requires Docker Desktop with Kubernetes enabled, or WSL2 with K3s.")
+        return 1, "Enable Kubernetes in Docker Desktop settings."
+
+    log("Installing K3s (lightweight Kubernetes)...")
+    code = _run_install_cmd("curl -sfL https://get.k3s.io | sh -", log)
+    if code == 0:
+        log("K3s installed successfully. kubectl is available via 'k3s kubectl'.")
+    return code, "K3s installation complete." if code == 0 else "K3s installation failed."
+
+
+def _install_engine_pm2(log):
+    """Install PM2 (Node.js process manager)."""
+    if command_exists("pm2"):
+        log("PM2 is already installed.")
+        return 0, "PM2 is already installed."
+
+    if not command_exists("npm"):
+        log("PM2 requires Node.js/npm. Installing Node.js first...")
+        node_code, _ = _install_engine_nodejs(log)
+        if node_code != 0:
+            return node_code, "Failed to install Node.js (required for PM2)."
+
+    log("Installing PM2 globally via npm...")
+    code = _run_install_cmd(["npm", "install", "-g", "pm2"], log)
+    if code == 0:
+        if os.name != "nt" and command_exists("pm2"):
+            _run_install_cmd(["pm2", "startup"], log)
+        log("PM2 installed successfully.")
+    return code, "PM2 installation complete." if code == 0 else "PM2 installation failed."
+
+
+def _install_engine_iis(log):
+    """Install IIS (Windows only)."""
+    if os.name != "nt":
+        log("IIS is only available on Windows.")
+        return 1, "IIS is only available on Windows."
+
+    iis_info = get_iis_info()
+    if iis_info.get("installed"):
+        log("IIS is already installed.")
+        return 0, "IIS is already installed."
+
+    log("Installing IIS via DISM...")
+    features = [
+        "IIS-WebServerRole",
+        "IIS-WebServer",
+        "IIS-CommonHttpFeatures",
+        "IIS-StaticContent",
+        "IIS-DefaultDocument",
+        "IIS-DirectoryBrowsing",
+        "IIS-HttpErrors",
+        "IIS-HttpRedirect",
+        "IIS-ManagementConsole",
+        "IIS-RequestFiltering",
+        "IIS-HttpCompressionStatic",
+    ]
+    for feature in features:
+        code = _run_install_cmd(
+            ["dism", "/Online", "/Enable-Feature", f"/FeatureName:{feature}", "/All", "/NoRestart"],
+            log
+        )
+        if code != 0:
+            log(f"Warning: Feature {feature} returned code {code}")
+    log("IIS installation complete. A restart may be required.")
+    return 0, "IIS installation complete."
 
 
 def resolve_unix_python():
@@ -3262,13 +3597,282 @@ def run_windows_website_iis(form=None, live_cb=None):
 def run_website_deploy(form=None, live_cb=None):
     form = form or {}
     target = (form.get("WEBSITE_TARGET", ["service"])[0] or "service").strip().lower()
+    engine = (form.get("WEBSITE_ENGINE", [""])[0] or "").strip().lower()
+    # Map engine → target if engine is specified but target is generic
+    if engine and engine != target:
+        target = engine if engine in ("docker", "iis", "nginx", "nodejs", "kubernetes", "pm2") else target
+        form["WEBSITE_TARGET"] = [target]
     if target == "iis":
         return run_windows_website_iis(form=form, live_cb=live_cb)
     if target == "docker":
         return run_website_docker(form=form, live_cb=live_cb)
+    if target == "kubernetes":
+        return _run_website_kubernetes(form=form, live_cb=live_cb)
+    if target == "nginx":
+        return _run_website_nginx(form=form, live_cb=live_cb)
+    if target == "nodejs":
+        return _run_website_nodejs(form=form, live_cb=live_cb)
+    if target == "pm2":
+        return _run_website_pm2(form=form, live_cb=live_cb)
     if os.name == "nt":
         return run_windows_website_service(form=form, live_cb=live_cb)
     return run_unix_website_service(form=form, live_cb=live_cb)
+
+
+def _run_website_nginx(form=None, live_cb=None):
+    """Deploy website using Nginx."""
+    form = form or {}
+    try:
+        deploy = _prepare_website_deployment(form, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    if live_cb:
+        live_cb(f"Deploying to Nginx: {deploy['site_name']}\n")
+    # Ensure nginx is installed
+    if not command_exists("nginx"):
+        if live_cb:
+            live_cb("Nginx not found. Installing...\n")
+        code, msg = _install_website_engine("nginx", live_cb=live_cb)
+        if code != 0:
+            return code, msg
+    site_conf_name = f"serverinstaller-{deploy['runtime_name']}"
+    content_root = deploy["publish_root"]
+    port = deploy["site_port"] or 80
+    server_name = deploy.get("domain") or "_"
+    # Build nginx config
+    conf_lines = [
+        f"server {{",
+        f"    listen {port};",
+        f"    server_name {server_name};",
+        f"    root {content_root};",
+        f"    index index.html index.htm index.php;",
+        f"",
+    ]
+    if deploy.get("runtime") == "php":
+        conf_lines += [
+            f"    location ~ \\.php$ {{",
+            f"        fastcgi_pass unix:/run/php/php-fpm.sock;",
+            f"        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;",
+            f"        include fastcgi_params;",
+            f"    }}",
+        ]
+    conf_lines += [
+        f"    location / {{",
+        f"        try_files $uri $uri/ /index.html =404;",
+        f"    }}",
+        f"}}",
+    ]
+    conf_text = "\n".join(conf_lines) + "\n"
+    # Write config
+    nginx_sites = Path("/etc/nginx/sites-enabled")
+    nginx_conf_d = Path("/etc/nginx/conf.d")
+    if nginx_sites.exists():
+        conf_path = nginx_sites / f"{site_conf_name}.conf"
+    elif nginx_conf_d.exists():
+        conf_path = nginx_conf_d / f"{site_conf_name}.conf"
+    else:
+        return 1, "Cannot find /etc/nginx/sites-enabled or /etc/nginx/conf.d."
+    conf_path.write_text(conf_text, encoding="utf-8")
+    if live_cb:
+        live_cb(f"Wrote Nginx config to {conf_path}\n")
+    # Test and reload
+    rc, out = run_capture(["nginx", "-t"], timeout=15)
+    if rc != 0:
+        return 1, f"Nginx config test failed:\n{out}"
+    rc, out = run_capture(["nginx", "-s", "reload"], timeout=15)
+    if rc != 0:
+        if command_exists("systemctl"):
+            rc, out = run_capture(["systemctl", "reload", "nginx"], timeout=15)
+    manage_firewall_port("open", str(port), "tcp", host=deploy.get("host"))
+    url = f"http://{deploy['host']}:{port}"
+    _write_website_state_entry({
+        "name": deploy["runtime_name"], "form_name": deploy["site_name"],
+        "kind": "website_nginx", "target": "nginx",
+        "website_kind": deploy["website_kind"], "stack_label": deploy["stack_label"],
+        "url": url, "bind_ip": deploy["bind_ip"], "host": deploy["host"],
+        "port": port, "deploy_root": deploy["deploy_root"],
+        "source_root": deploy["source_root"], "publish_root": deploy["publish_root"],
+        "conf_path": str(conf_path),
+    })
+    return 0, f"Website deployed to Nginx.\nConfig: {conf_path}\nURL: {url}\nContent: {content_root}\n"
+
+
+def _run_website_nodejs(form=None, live_cb=None):
+    """Deploy website using Node.js (serve or next start)."""
+    form = form or {}
+    try:
+        deploy = _prepare_website_deployment(form, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    if live_cb:
+        live_cb(f"Deploying to Node.js: {deploy['site_name']}\n")
+    if not command_exists("node"):
+        if live_cb:
+            live_cb("Node.js not found. Installing...\n")
+        code, msg = _install_website_engine("nodejs", live_cb=live_cb)
+        if code != 0:
+            return code, msg
+    # For Node.js, fall through to the OS service deployer which already handles node runtime
+    form["WEBSITE_TARGET"] = ["service"]
+    if os.name == "nt":
+        return run_windows_website_service(form=form, live_cb=live_cb)
+    return run_unix_website_service(form=form, live_cb=live_cb)
+
+
+def _run_website_pm2(form=None, live_cb=None):
+    """Deploy website using PM2 process manager."""
+    form = form or {}
+    try:
+        deploy = _prepare_website_deployment(form, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    if live_cb:
+        live_cb(f"Deploying to PM2: {deploy['site_name']}\n")
+    if not command_exists("pm2"):
+        if live_cb:
+            live_cb("PM2 not found. Installing...\n")
+        code, msg = _install_website_engine("pm2", live_cb=live_cb)
+        if code != 0:
+            return code, msg
+    port = deploy["site_port"] or 3000
+    app_name = deploy["runtime_name"]
+    content_root = deploy["publish_root"]
+    # Determine start command
+    if deploy.get("runtime") == "node" and deploy.get("website_kind") == "nextjs":
+        # Next.js — npm start
+        if live_cb:
+            live_cb("Installing npm dependencies...\n")
+        try:
+            subprocess.run(["npm", "install"], cwd=content_root, timeout=300, capture_output=True)
+            subprocess.run(["npm", "run", "build"], cwd=content_root, timeout=300, capture_output=True)
+        except Exception:
+            pass
+        start_script = f"PORT={port} npm start"
+    else:
+        # Static — use npx serve
+        if not command_exists("serve"):
+            run_capture(["npm", "install", "-g", "serve"], timeout=60)
+        start_script = f"serve -s {content_root} -l {port}"
+    # Stop existing PM2 process with same name
+    run_capture(["pm2", "delete", app_name], timeout=15)
+    # Start with PM2
+    rc, out = run_capture(["pm2", "start", "--name", app_name, "--", "bash", "-c", start_script], timeout=60)
+    if rc != 0:
+        # Try alternative: use pm2 ecosystem file
+        ecosystem = {
+            "name": app_name,
+            "script": "npx",
+            "args": f"serve -s {content_root} -l {port}" if deploy.get("runtime") != "node" else "npm start",
+            "cwd": content_root,
+            "env": {"PORT": str(port)},
+        }
+        eco_path = Path(content_root) / "ecosystem.config.js"
+        eco_path.write_text(f"module.exports = {{ apps: [{json.dumps(ecosystem)}] }};", encoding="utf-8")
+        rc, out = run_capture(["pm2", "start", str(eco_path)], timeout=60)
+    if rc == 0:
+        run_capture(["pm2", "save"], timeout=15)
+    manage_firewall_port("open", str(port), "tcp", host=deploy.get("host"))
+    url = f"http://{deploy['host']}:{port}"
+    _write_website_state_entry({
+        "name": deploy["runtime_name"], "form_name": deploy["site_name"],
+        "kind": "website_pm2", "target": "pm2",
+        "website_kind": deploy["website_kind"], "stack_label": deploy["stack_label"],
+        "url": url, "bind_ip": deploy["bind_ip"], "host": deploy["host"],
+        "port": port, "deploy_root": deploy["deploy_root"],
+        "source_root": deploy["source_root"], "publish_root": deploy["publish_root"],
+    })
+    return rc, f"Website deployed to PM2.\nApp: {app_name}\nURL: {url}\nContent: {content_root}\n" if rc == 0 else f"PM2 deployment failed:\n{out}"
+
+
+def _run_website_kubernetes(form=None, live_cb=None):
+    """Deploy website to Kubernetes (K3s)."""
+    form = form or {}
+    try:
+        deploy = _prepare_website_deployment(form, live_cb=live_cb)
+    except Exception as ex:
+        return 1, str(ex)
+    if live_cb:
+        live_cb(f"Deploying to Kubernetes: {deploy['site_name']}\n")
+    kubectl = "kubectl" if command_exists("kubectl") else "k3s kubectl" if command_exists("k3s") else None
+    if not kubectl:
+        code, msg = _install_website_engine("kubernetes", live_cb=live_cb)
+        if code != 0:
+            return code, msg
+        kubectl = "kubectl" if command_exists("kubectl") else "k3s kubectl"
+    # Build Docker image first (K8s needs an image)
+    if not command_exists("docker"):
+        return 1, "Kubernetes deployment requires Docker to build images. Install Docker first."
+    app_name = deploy["runtime_name"].replace("_", "-").lower()
+    port = deploy["site_port"] or 80
+    content_root = deploy["publish_root"]
+    image_tag = f"serverinstaller/{app_name}:latest"
+    # Create Dockerfile
+    dockerfile = Path(content_root) / "Dockerfile.serverinstaller"
+    if deploy.get("runtime") == "node" and deploy.get("website_kind") == "nextjs":
+        dockerfile.write_text("FROM node:lts-alpine\nWORKDIR /app\nCOPY . .\nRUN npm install && npm run build\nEXPOSE 3000\nCMD [\"npm\", \"start\"]\n", encoding="utf-8")
+    else:
+        dockerfile.write_text(f"FROM nginx:alpine\nCOPY . /usr/share/nginx/html\nEXPOSE 80\n", encoding="utf-8")
+    # Build image
+    if live_cb:
+        live_cb(f"Building Docker image {image_tag}...\n")
+    rc, out = run_capture(["docker", "build", "-f", str(dockerfile), "-t", image_tag, content_root], timeout=300)
+    if rc != 0:
+        return 1, f"Docker build failed:\n{out}"
+    # Create K8s manifests
+    k8s_manifest = f"""apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {app_name}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {app_name}
+  template:
+    metadata:
+      labels:
+        app: {app_name}
+    spec:
+      containers:
+      - name: {app_name}
+        image: {image_tag}
+        imagePullPolicy: Never
+        ports:
+        - containerPort: {80 if deploy.get("runtime") != "node" else 3000}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {app_name}
+spec:
+  type: NodePort
+  selector:
+    app: {app_name}
+  ports:
+  - port: {80 if deploy.get("runtime") != "node" else 3000}
+    nodePort: {port}
+    targetPort: {80 if deploy.get("runtime") != "node" else 3000}
+"""
+    manifest_path = Path(content_root) / "k8s-manifest.yaml"
+    manifest_path.write_text(k8s_manifest, encoding="utf-8")
+    if live_cb:
+        live_cb(f"Applying Kubernetes manifest...\n")
+    if isinstance(kubectl, str) and " " in kubectl:
+        rc, out = run_capture(kubectl.split() + ["apply", "-f", str(manifest_path)], timeout=60)
+    else:
+        rc, out = run_capture([kubectl, "apply", "-f", str(manifest_path)], timeout=60)
+    manage_firewall_port("open", str(port), "tcp", host=deploy.get("host"))
+    url = f"http://{deploy['host']}:{port}"
+    _write_website_state_entry({
+        "name": deploy["runtime_name"], "form_name": deploy["site_name"],
+        "kind": "website_k8s", "target": "kubernetes",
+        "website_kind": deploy["website_kind"], "stack_label": deploy["stack_label"],
+        "url": url, "bind_ip": deploy["bind_ip"], "host": deploy["host"],
+        "port": port, "deploy_root": deploy["deploy_root"],
+        "source_root": deploy["source_root"], "publish_root": deploy["publish_root"],
+        "image": image_tag, "manifest_path": str(manifest_path),
+    })
+    return rc, f"Website deployed to Kubernetes.\nDeployment: {app_name}\nURL: {url}\nImage: {image_tag}\n" if rc == 0 else f"Kubernetes deployment failed:\n{out}"
 
 
 def _windows_service_state(service_name):
@@ -11947,6 +12551,15 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/status":
             self.write_json({"ok": True}, HTTPStatus.OK)
             return
+        if self.path == "/api/website/engines":
+            if (not self.is_local_client()) and (not self.is_auth()):
+                self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
+                return
+            try:
+                self.write_json({"ok": True, "engines": _detect_website_engines()}, HTTPStatus.OK)
+            except Exception as ex:
+                self.write_json({"ok": False, "error": str(ex)}, HTTPStatus.INTERNAL_SERVER_ERROR)
+            return
         if self.path.startswith("/api/system/status"):
             if (not self.is_local_client()) and (not self.is_auth()):
                 self.write_json({"error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
@@ -12604,17 +13217,24 @@ class Handler(BaseHTTPRequestHandler):
                 code, output = run_windows_website_iis(form)
                 self.respond_run_result(title, code, output)
             return
+        if self.path == "/run/website_engine_install":
+            engine_id = (form.get("ENGINE_ID", [""])[0] or "").strip().lower()
+            if not engine_id:
+                self.write_json({"ok": False, "error": "ENGINE_ID is required."}, HTTPStatus.BAD_REQUEST)
+                return
+            title = f"Install {engine_id}"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: _install_website_engine(engine_id, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = _install_website_engine(engine_id)
+                self.respond_run_result(title, code, output)
+            return
         if self.path == "/run/website_deploy":
             target = (form.get("WEBSITE_TARGET", ["service"])[0] or "service").strip().lower()
-            title = "Website Deploy"
-            if target == "docker":
-                title = "Website Docker"
-            elif target == "iis":
-                title = "Website IIS"
-            elif os.name == "nt":
-                title = "Website OS Service (Windows)"
-            else:
-                title = "Website OS Service"
+            engine = (form.get("WEBSITE_ENGINE", [""])[0] or "").strip().lower()
+            engine_label_map = {"docker": "Docker", "iis": "IIS", "nginx": "Nginx", "nodejs": "Node.js", "kubernetes": "Kubernetes", "pm2": "PM2", "service": "OS Service"}
+            title = f"Website Deploy → {engine_label_map.get(engine or target, target)}"
             if self.is_fetch():
                 job_id = start_live_job(title, lambda cb: run_website_deploy(form, live_cb=cb))
                 self.write_json({"job_id": job_id, "title": title})
