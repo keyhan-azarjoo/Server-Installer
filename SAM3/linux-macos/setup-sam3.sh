@@ -282,15 +282,24 @@ echo "[INFO] Installing CLIP..."
 
 # ── SSL Certificates ──────────────────────────────────────
 
-if [ ! -f "${CERT_FILE}" ] || [ ! -f "${KEY_FILE}" ]; then
-    echo "[INFO] Generating self-signed SSL certificate..."
-    openssl req -x509 -nodes -newkey rsa:2048 \
-        -keyout "${KEY_FILE}" \
-        -out "${CERT_FILE}" \
-        -days 3650 \
-        -subj "/CN=${DOMAIN:-${HOST_IP:-localhost}}/O=ServerInstaller/C=US" >/dev/null 2>&1
-    chmod 600 "${KEY_FILE}"
-    chmod 644 "${CERT_FILE}"
+if [ -n "${HTTPS_PORT}" ]; then
+    if [ ! -f "${CERT_FILE}" ] || [ ! -f "${KEY_FILE}" ]; then
+        echo "[INFO] Generating self-signed SSL certificate..."
+        openssl req -x509 -nodes -newkey rsa:2048 \
+            -keyout "${KEY_FILE}" \
+            -out "${CERT_FILE}" \
+            -days 3650 \
+            -subj "/CN=${DOMAIN:-${HOST_IP:-localhost}}/O=ServerInstaller/C=US" 2>&1
+        chmod 600 "${KEY_FILE}" 2>/dev/null || true
+        chmod 644 "${CERT_FILE}" 2>/dev/null || true
+        if [ -f "${CERT_FILE}" ] && [ -f "${KEY_FILE}" ]; then
+            echo "[INFO] SSL certificate generated successfully."
+        else
+            echo "[WARN] SSL certificate generation failed. HTTPS will not be available."
+        fi
+    else
+        echo "[INFO] SSL certificate already exists."
+    fi
 fi
 
 # ── Authentication ─────────────────────────────────────────
@@ -340,7 +349,7 @@ fi
 # ── Create Startup Script ──────────────────────────────────
 
 cat > "${INSTALL_DIR}/start-sam3.py" <<PYEOF
-import os, sys, functools, base64
+import os, sys, ssl, functools, threading
 from flask import request, Response
 
 os.environ.setdefault('SAM3_MODEL_PATH', os.path.join(os.path.dirname(__file__), 'models', 'sam3.pt'))
@@ -353,6 +362,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 SAM3_USERNAME = os.environ.get('SAM3_USERNAME', '${USERNAME}')
 SAM3_PASSWORD = os.environ.get('SAM3_PASSWORD', '${PASSWORD}')
 SAM3_USE_OS_AUTH = os.environ.get('SAM3_USE_OS_AUTH', '${USE_OS_AUTH}')
+SAM3_HTTPS_PORT = os.environ.get('SAM3_HTTPS_PORT', '${HTTPS_PORT}')
+SAM3_CERT_FILE = os.environ.get('SAM3_CERT_FILE', '${CERT_FILE}')
+SAM3_KEY_FILE = os.environ.get('SAM3_KEY_FILE', '${KEY_FILE}')
 
 from app import app
 
@@ -387,11 +399,36 @@ for rule in list(app.url_map.iter_rules()):
     if endpoint and rule.endpoint != 'static':
         app.view_functions[rule.endpoint] = requires_auth(endpoint)
 
+def run_https(app, host, port, certfile, keyfile):
+    """Run Flask with SSL in a separate thread."""
+    try:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(certfile, keyfile)
+        from werkzeug.serving import make_server
+        server = make_server(host, port, app, ssl_context=ctx, threaded=True)
+        print(f'SAM3 HTTPS running on https://{host}:{port}')
+        server.serve_forever()
+    except Exception as e:
+        print(f'HTTPS server failed: {e}')
+
 if __name__ == '__main__':
     host = os.environ.get('SAM3_HOST', '0.0.0.0')
-    port = int(os.environ.get('SAM3_PORT', ${HTTP_PORT}))
-    print(f'SAM3 starting on http://{host}:{port}')
-    app.run(host=host, port=port, debug=False)
+    http_port = int(os.environ.get('SAM3_PORT', ${HTTP_PORT}))
+
+    # Start HTTPS in a background thread if certs exist
+    https_port = SAM3_HTTPS_PORT.strip()
+    if https_port and https_port.isdigit() and os.path.isfile(SAM3_CERT_FILE) and os.path.isfile(SAM3_KEY_FILE):
+        https_thread = threading.Thread(
+            target=run_https,
+            args=(app, host, int(https_port), SAM3_CERT_FILE, SAM3_KEY_FILE),
+            daemon=True,
+        )
+        https_thread.start()
+        print(f'SAM3 starting HTTP on http://{host}:{http_port} and HTTPS on https://{host}:{https_port}')
+    else:
+        print(f'SAM3 starting on http://{host}:{http_port}')
+
+    app.run(host=host, port=http_port, debug=False)
 PYEOF
 
 # ── Systemd Service (Linux only) ──────────────────────────
@@ -413,6 +450,9 @@ Environment=SAM3_MODEL_PATH=${MODEL_PATH}
 Environment=SAM3_DEVICE=${SELECTED_DEVICE}
 Environment=SAM3_HOST=0.0.0.0
 Environment=SAM3_PORT=${HTTP_PORT}
+Environment=SAM3_HTTPS_PORT=${HTTPS_PORT}
+Environment=SAM3_CERT_FILE=${CERT_FILE}
+Environment=SAM3_KEY_FILE=${KEY_FILE}
 Environment=SAM3_USERNAME=${USERNAME}
 Environment=SAM3_PASSWORD=${PASSWORD}
 Environment=SAM3_USE_OS_AUTH=${USE_OS_AUTH}

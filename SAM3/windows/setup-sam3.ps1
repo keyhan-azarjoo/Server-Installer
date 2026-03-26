@@ -253,26 +253,24 @@ if ($downloadModel -in @("1", "true", "yes", "y", "on")) {
 
 $startupScript = Join-Path $installDir "start-sam3.py"
 $startupContent = @"
-import os, sys
+import os, sys, ssl, functools, threading
+from flask import request, Response
 
-# Configure environment
 os.environ.setdefault('SAM3_MODEL_PATH', os.path.join(os.path.dirname(__file__), 'models', 'sam3.pt'))
 os.environ.setdefault('SAM3_DEVICE', '$selectedDevice')
 os.environ.setdefault('SAM3_HOST', '0.0.0.0')
 os.environ.setdefault('SAM3_PORT', '$httpPort')
 
-# Add app directory to path
 sys.path.insert(0, os.path.dirname(__file__))
 
-# Authentication settings
 SAM3_USERNAME = os.environ.get('SAM3_USERNAME', '$username')
 SAM3_PASSWORD = os.environ.get('SAM3_PASSWORD', '$password')
 SAM3_USE_OS_AUTH = os.environ.get('SAM3_USE_OS_AUTH', '$useOsAuth')
+SAM3_HTTPS_PORT = os.environ.get('SAM3_HTTPS_PORT', '$httpsPort')
+SAM3_CERT_FILE = os.environ.get('SAM3_CERT_FILE', '$certFile')
+SAM3_KEY_FILE = os.environ.get('SAM3_KEY_FILE', '$keyFile')
 
 from app import app
-import functools
-from flask import request, Response
-import base64
 
 def check_auth(u, p):
     if SAM3_USE_OS_AUTH in ('1', 'true', 'yes'):
@@ -289,10 +287,7 @@ def check_auth(u, p):
     return u == SAM3_USERNAME and p == SAM3_PASSWORD
 
 def authenticate():
-    return Response(
-        'Authentication required', 401,
-        {'WWW-Authenticate': 'Basic realm="SAM3"'}
-    )
+    return Response('Authentication required', 401, {'WWW-Authenticate': 'Basic realm="SAM3"'})
 
 def requires_auth(f):
     @functools.wraps(f)
@@ -305,17 +300,39 @@ def requires_auth(f):
         return f(*args, **kwargs)
     return decorated
 
-# Apply auth to all routes
 for rule in list(app.url_map.iter_rules()):
     endpoint = app.view_functions.get(rule.endpoint)
     if endpoint and rule.endpoint != 'static':
         app.view_functions[rule.endpoint] = requires_auth(endpoint)
 
+def run_https(app, host, port, certfile, keyfile):
+    try:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.load_cert_chain(certfile, keyfile)
+        from werkzeug.serving import make_server
+        server = make_server(host, port, app, ssl_context=ctx, threaded=True)
+        print(f'SAM3 HTTPS running on https://{host}:{port}')
+        server.serve_forever()
+    except Exception as e:
+        print(f'HTTPS server failed: {e}')
+
 if __name__ == '__main__':
     host = os.environ.get('SAM3_HOST', '0.0.0.0')
-    port = int(os.environ.get('SAM3_PORT', $httpPort))
-    print(f'SAM3 starting on http://{host}:{port}')
-    app.run(host=host, port=port, debug=False)
+    http_port = int(os.environ.get('SAM3_PORT', $httpPort))
+
+    https_port = SAM3_HTTPS_PORT.strip()
+    if https_port and https_port.isdigit() and os.path.isfile(SAM3_CERT_FILE) and os.path.isfile(SAM3_KEY_FILE):
+        https_thread = threading.Thread(
+            target=run_https,
+            args=(app, host, int(https_port), SAM3_CERT_FILE, SAM3_KEY_FILE),
+            daemon=True,
+        )
+        https_thread.start()
+        print(f'SAM3 starting HTTP on http://{host}:{http_port} and HTTPS on https://{host}:{https_port}')
+    else:
+        print(f'SAM3 starting on http://{host}:{http_port}')
+
+    app.run(host=host, port=http_port, debug=False)
 "@
 Set-Content -Path $startupScript -Value $startupContent -Encoding UTF8
 
