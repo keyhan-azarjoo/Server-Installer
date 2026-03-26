@@ -11767,8 +11767,21 @@ def run_dashboard_update(live_cb=None):
             "dashboard/ui/pages/website/website.js",
             "dashboard/ui/pages/ai/ai.js",
             "dashboard/ui/pages/ai/sam3.js",
+            "dashboard/ui/pages/ai/ollama.js",
+            "dashboard/ui/pages/ai/tgwui.js",
+            "dashboard/ui/pages/ai/comfyui.js",
+            "dashboard/ui/pages/ai/whisper.js",
+            "dashboard/ui/pages/ai/piper.js",
+            "dashboard/ui/pages/ai/ai-all.js",
+            "dashboard/ui/pages/api/api-docs.js",
             "dashboard/ui/pages/files/files.js",
             "dashboard/ui/app.js",
+            "dashboard/api_gateway.py",
+            "Ollama/windows/setup-ollama.ps1",
+            "Ollama/linux-macos/setup-ollama.sh",
+            "Ollama/common/ollama_web.py",
+            "Ollama/common/requirements.txt",
+            "Ollama/common/web/templates/index.html",
         ]
 
     total = len(files)

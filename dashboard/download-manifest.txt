@@ -5,6 +5,7 @@ dashboard/windows_dashboard_service.py
 dashboard/file_manager.py
 dashboard/ssl_manager.py
 dashboard/ui_assets.py
+dashboard/api_gateway.py
 dashboard/ui/core.js
 dashboard/ui/utils.js
 dashboard/ui/actions.js
@@ -12,6 +13,7 @@ dashboard/ui/components.js
 dashboard/ui/file-manager.js
 dashboard/ui/pages/home/home.js
 dashboard/ui/pages/api/api.js
+dashboard/ui/pages/api/api-docs.js
 dashboard/ui/pages/sysinfo/sysinfo.js
 dashboard/ui/pages/ports/ports.js
 dashboard/ui/pages/services/services.js
@@ -35,7 +37,14 @@ dashboard/ui/pages/ssl/ssl.js
 dashboard/ui/pages/files/files.js
 dashboard/ui/pages/ai/ai.js
 dashboard/ui/pages/ai/sam3.js
+dashboard/ui/pages/ai/ollama.js
+dashboard/ui/pages/ai/tgwui.js
+dashboard/ui/pages/ai/comfyui.js
+dashboard/ui/pages/ai/whisper.js
+dashboard/ui/pages/ai/piper.js
+dashboard/ui/pages/ai/ai-all.js
 dashboard/ui/app.js
+# SAM3
 SAM3/windows/setup-sam3.ps1
 SAM3/linux-macos/setup-sam3.sh
 SAM3/common/app.py
@@ -49,12 +58,22 @@ SAM3/common/core/__init__.py
 SAM3/common/web/templates/index.html
 SAM3/common/web/static/js/dashboard.js
 SAM3/common/web/static/css/dashboard.css
+# Ollama
+Ollama/windows/setup-ollama.ps1
+Ollama/linux-macos/setup-ollama.sh
+Ollama/common/ollama_web.py
+Ollama/common/requirements.txt
+Ollama/common/web/templates/index.html
+# Python
 Python/windows/setup-python.ps1
+# MongoDB
 Mongo/windows/setup-mongodb.ps1
+# DotNet
 DotNet/windows/install-windows-dotnet-host.ps1
 DotNet/windows/modules/common.ps1
 DotNet/windows/modules/iis-mode.ps1
 DotNet/windows/modules/docker-mode.ps1
+# S3
 S3/windows/setup-storage.ps1
 S3/windows/modules/common.ps1
 S3/windows/modules/minio.ps1
@@ -62,6 +81,7 @@ S3/windows/modules/cleanup.ps1
 S3/windows/modules/iis.ps1
 S3/windows/modules/docker.ps1
 S3/windows/modules/main.ps1
+# Proxy
 Proxy/linux-macos/setup-proxy.sh
 Proxy/windows/setup-proxy.ps1
 Proxy/common/add-user.sh
