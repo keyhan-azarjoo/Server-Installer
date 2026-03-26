@@ -18,17 +18,17 @@ $certDir = Join-Path $programData "Server-Installer\sam3\certs"
 $nginxConfDir = Join-Path $programData "Server-Installer\sam3\nginx"
 
 # Read environment variables
-$hostIp = ($env:SAM3_HOST_IP | ForEach-Object { $_.Trim() })
-$httpPort = ($env:SAM3_HTTP_PORT | ForEach-Object { $_.Trim() })
-$httpsPort = ($env:SAM3_HTTPS_PORT | ForEach-Object { $_.Trim() })
-$domain = ($env:SAM3_DOMAIN | ForEach-Object { $_.Trim() })
-$username = ($env:SAM3_USERNAME | ForEach-Object { $_.Trim() })
-$password = ($env:SAM3_PASSWORD | ForEach-Object { $_.Trim() })
-$useOsAuth = ($env:SAM3_USE_OS_AUTH | ForEach-Object { $_.Trim().ToLowerInvariant() })
-$gpuDevice = ($env:SAM3_GPU_DEVICE | ForEach-Object { $_.Trim() })
-$downloadModel = ($env:SAM3_DOWNLOAD_MODEL | ForEach-Object { $_.Trim().ToLowerInvariant() })
-$deployMode = ($env:SAM3_DEPLOY_MODE | ForEach-Object { $_.Trim().ToLowerInvariant() })
-$pythonVersion = ($env:PYTHON_VERSION | ForEach-Object { $_.Trim() })
+$hostIp = if ($env:SAM3_HOST_IP) { $env:SAM3_HOST_IP.Trim() } else { "" }
+$httpPort = if ($env:SAM3_HTTP_PORT) { $env:SAM3_HTTP_PORT.Trim() } else { "" }
+$httpsPort = if ($env:SAM3_HTTPS_PORT) { $env:SAM3_HTTPS_PORT.Trim() } else { "" }
+$domain = if ($env:SAM3_DOMAIN) { $env:SAM3_DOMAIN.Trim() } else { "" }
+$username = if ($env:SAM3_USERNAME) { $env:SAM3_USERNAME.Trim() } else { "" }
+$password = if ($env:SAM3_PASSWORD) { $env:SAM3_PASSWORD.Trim() } else { "" }
+$useOsAuth = if ($env:SAM3_USE_OS_AUTH) { $env:SAM3_USE_OS_AUTH.Trim().ToLowerInvariant() } else { "" }
+$gpuDevice = if ($env:SAM3_GPU_DEVICE) { $env:SAM3_GPU_DEVICE.Trim() } else { "" }
+$downloadModel = if ($env:SAM3_DOWNLOAD_MODEL) { $env:SAM3_DOWNLOAD_MODEL.Trim().ToLowerInvariant() } else { "" }
+$deployMode = if ($env:SAM3_DEPLOY_MODE) { $env:SAM3_DEPLOY_MODE.Trim().ToLowerInvariant() } else { "" }
+$pythonVersion = if ($env:PYTHON_VERSION) { $env:PYTHON_VERSION.Trim() } else { "" }
 
 if (-not $httpPort) { $httpPort = "5000" }
 if (-not $httpsPort) { $httpsPort = "5443" }
