@@ -2482,11 +2482,16 @@ def _website_service_items():
         if https_port_text.isdigit() and int(https_port_text) > 0:
             ports.append({"port": int(https_port_text), "protocol": "tcp"})
         https_url = str(payload.get("https_url") or "").strip()
-        all_urls = []
-        if url:
-            all_urls.append(url)
-        if https_url:
-            all_urls.append(https_url)
+        # Use saved urls array if available (includes both domain and IP URLs)
+        saved_urls = payload.get("urls")
+        if isinstance(saved_urls, list) and saved_urls:
+            all_urls = [str(u) for u in saved_urls if u]
+        else:
+            all_urls = []
+            if url:
+                all_urls.append(url)
+            if https_url:
+                all_urls.append(https_url)
         items.append({
             "kind": item_kind,
             "name": name,
@@ -3209,6 +3214,7 @@ def run_windows_website_iis(form=None, live_cb=None):
         "website_kind": deploy["website_kind"],
         "stack_label": deploy["stack_label"],
         "url": url,
+        "urls": urls,
         "https_url": https_url,
         "bind_ip": deploy["bind_ip"],
         "domain": domain,
