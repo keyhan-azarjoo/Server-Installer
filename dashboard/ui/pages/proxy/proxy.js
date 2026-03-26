@@ -37,10 +37,7 @@
           <Grid item xs={12}>
             <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
               <CardContent>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                  <Typography variant="h6" fontWeight={800} sx={{ flexGrow: 1 }}>Proxy</Typography>
-                  <Button variant="outlined" size="small" onClick={() => setPage("api-docs-proxy")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#1d4ed8", color: "#1d4ed8" }}>API Documents</Button>
-                </Stack>
+                <Typography variant="h6" fontWeight={800} sx={{ mb: 1 }}>Proxy</Typography>
                 <Typography variant="body2">
                   Install and manage a reverse-proxy stack that tunnels traffic through multiple protocol layers.
                   On Windows the proxy runs inside WSL with persistent keepalive and autostart; on Linux it installs natively from a vendored project copy.
@@ -194,6 +191,7 @@
               </CardContent>
             </Card>
           </Grid>
+          {ns.renderApiDocs && ns.apiDocs && ns.apiDocs.proxy && ns.renderApiDocs(p, ns.apiDocs.proxy)}
         </Grid>
       );
     }

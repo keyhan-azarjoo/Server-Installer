@@ -52,23 +52,13 @@
       </Box>
     );
 
-    const apiDocsCard = (
-      <Grid item xs={12}>
-        <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-          <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <Typography variant="h6" fontWeight={800} sx={{ flexGrow: 1 }}>DotNet APIs</Typography>
-              <Button variant="outlined" size="small" onClick={() => setPage("api-docs-dotnet")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#6d28d9", color: "#6d28d9" }}>API Documents</Button>
-            </Stack>
-          </CardContent>
-        </Card>
-      </Grid>
-    );
+    const _renderApiDocs = ns.renderApiDocs;
+    const _apiDocData = ns.apiDocs && ns.apiDocs.dotnet;
+    const apiDocsInline = _renderApiDocs && _apiDocData ? _renderApiDocs(p, _apiDocData) : null;
 
     if (cfg.os === "windows") {
       return (
         <Grid container spacing={2}>
-          {apiDocsCard}
           <Grid item xs={12} md={6}>
             <NavCard title="IIS" text="Install and deploy on IIS." onClick={() => setPage("dotnet-iis")} />
           </Grid>
@@ -98,13 +88,13 @@
               </CardContent>
             </Card>
           </Grid>
+          {apiDocsInline}
         </Grid>
       );
     }
     if (cfg.os === "linux") {
       return (
         <Grid container spacing={2}>
-          {apiDocsCard}
           <Grid item xs={12} md={6}>
             <NavCard title="Linux" text="Install and deploy on Linux." onClick={() => setPage("dotnet-linux")} />
           </Grid>
@@ -134,6 +124,7 @@
               </CardContent>
             </Card>
           </Grid>
+          {apiDocsInline}
         </Grid>
       );
     }

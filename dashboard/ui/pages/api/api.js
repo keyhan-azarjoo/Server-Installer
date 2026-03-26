@@ -40,16 +40,6 @@
 
     return (
       <Grid container spacing={2}>
-        <Grid item xs={12}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
-            <CardContent sx={{ py: 1.5, "&:last-child": { pb: 1.5 } }}>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <Typography variant="h6" fontWeight={800} sx={{ flexGrow: 1 }}>API Services</Typography>
-                <Button variant="outlined" size="small" onClick={() => setPage("api-docs-dashboard")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, borderColor: "#475569", color: "#475569" }}>Dashboard API Docs</Button>
-              </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
         <Grid item xs={12} md={6}>
           <NavCard title="DotNet" text="Open the existing .NET installer and deployment pages." onClick={() => setPage("dotnet")} />
         </Grid>
