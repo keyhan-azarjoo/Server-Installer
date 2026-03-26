@@ -11781,7 +11781,8 @@ class Handler(BaseHTTPRequestHandler):
                 return
             try:
                 # Support both POST form data and GET query params
-                path_str = (form.get("path", [""])[0] or "").strip() if form else ""
+                info_form = self.parse_request_form()
+                path_str = (info_form.get("path", [""])[0] or "").strip() if info_form else ""
                 if not path_str:
                     query = {}
                     if "?" in self.path:
