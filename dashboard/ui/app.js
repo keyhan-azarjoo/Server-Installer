@@ -1905,6 +1905,11 @@ function App() {
     if (page === "ai-comfyui") return "comfyui";
     if (page === "ai-whisper") return "whisper";
     if (page === "ai-piper") return "piper";
+    // Generic AI service pages: ai-vllm, ai-llamacpp, ai-deepseek, etc.
+    if (String(page).startsWith("ai-")) {
+      const aiScope = String(page).replace(/^ai-/, "").replace(/-api$/, "");
+      return aiScope;
+    }
     if (page === "dotnet" || String(page).startsWith("dotnet-")) return "dotnet";
     return null;
   })();

@@ -7608,6 +7608,16 @@ def filter_service_items(scope):
         if svc_items:
             return svc_items
         return [x for x in items if is_name_fn(x.get("name", "")) or is_name_fn(x.get("display_name", ""))]
+    # Generic AI services — use state file if exists
+    _generic_ai_scopes = ["vllm", "llamacpp", "deepseek", "localai", "sdwebui", "fooocus", "coqui", "bark", "rvc", "openwebui", "chromadb", "custom"]
+    if scope in _generic_ai_scopes:
+        state_file = SERVER_INSTALLER_DATA / scope / f"{scope}-state.json"
+        info = _get_ai_service_info(state_file, SERVER_INSTALLER_DATA / scope, f"serverinstaller-{scope}", scope, "8080")
+        svc_items = info.get("services") or []
+        if svc_items:
+            return svc_items
+        pat = re.compile(re.escape(scope), re.IGNORECASE)
+        return [x for x in items if pat.search(str(x.get("name", ""))) or pat.search(str(x.get("display_name", "")))]
     return items
 
 
@@ -14086,6 +14096,82 @@ class Handler(BaseHTTPRequestHandler):
                 code, output = run_piper_docker(form)
                 self.respond_run_result(title, code, output)
             return
+        # ── Generic AI service install routes ─────────────────────────────────
+        _ai_generic_map = {
+            "vllm": ("vLLM", "vllm/vllm-openai:latest", "8000", "pip install vllm"),
+            "llamacpp": ("llama.cpp", "ghcr.io/ggerganov/llama.cpp:server", "8080", "git clone https://github.com/ggerganov/llama.cpp && cd llama.cpp && make -j"),
+            "deepseek": ("DeepSeek", "ollama/ollama:latest", "11434", "ollama pull deepseek-coder-v2:lite"),
+            "localai": ("LocalAI", "localai/localai:latest-aio-cpu", "8080", ""),
+            "sdwebui": ("SD WebUI", "universonic/stable-diffusion-webui:latest", "7860", "git clone https://github.com/AUTOMATIC1111/stable-diffusion-webui"),
+            "fooocus": ("Fooocus", "ashleykza/fooocus:latest", "7865", "git clone https://github.com/lllyasviel/Fooocus"),
+            "coqui": ("Coqui TTS", "ghcr.io/coqui-ai/tts:latest", "5002", "pip install coqui-tts"),
+            "bark": ("Bark", "", "5005", "pip install git+https://github.com/suno-ai/bark.git"),
+            "rvc": ("RVC", "alexta69/rvc-webui:latest", "7897", "git clone https://github.com/RVC-Project/Retrieval-based-Voice-Conversion-WebUI"),
+            "openwebui": ("Open WebUI", "ghcr.io/open-webui/open-webui:main", "3000", "pip install open-webui"),
+            "chromadb": ("ChromaDB", "chromadb/chroma:latest", "8000", "pip install chromadb"),
+            "custom": ("Custom Model", "", "8080", ""),
+        }
+        for _ai_key, (_ai_name, _ai_image, _ai_port, _ai_pip) in _ai_generic_map.items():
+            if self.path in (f"/run/{_ai_key}_windows_os", f"/run/{_ai_key}_unix_os"):
+                title = f"{_ai_name} Install"
+                def _make_installer(_name, _pip, _port, _key, _form):
+                    def _fn(cb):
+                        output = []
+                        def log(m):
+                            output.append(m)
+                            if cb: cb(m + "\n")
+                        log(f"=== Installing {_name} ===")
+                        host_ip = (_form.get(f"{_key.upper()}_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
+                        port = (_form.get(f"{_key.upper()}_HTTP_PORT", [_port])[0] or _port).strip()
+                        if _pip:
+                            code = _run_install_cmd(_pip, log, timeout=600)
+                        else:
+                            log(f"No automated OS installer for {_name}. Use Docker instead.")
+                            code = 1
+                        if code == 0:
+                            # Save state
+                            sdir = SERVER_INSTALLER_DATA / _key
+                            sdir.mkdir(parents=True, exist_ok=True)
+                            sfile = sdir / f"{_key}-state.json"
+                            display_host = host_ip if host_ip not in ("0.0.0.0", "*", "") else choose_service_host()
+                            _write_json_file(sfile, {
+                                "installed": True, "service_name": f"serverinstaller-{_key}",
+                                "install_dir": str(sdir / "app"), "host": host_ip,
+                                "http_port": port, "http_url": f"http://{display_host}:{port}",
+                                "deploy_mode": "os",
+                            })
+                            manage_firewall_port("open", port, "tcp")
+                            log(f"\n{_name} installed. URL: http://{display_host}:{port}")
+                        return code, "\n".join(output)
+                    return _fn
+                installer = _make_installer(_ai_name, _ai_pip, _ai_port, _ai_key, form)
+                if self.is_fetch():
+                    job_id = start_live_job(title, installer)
+                    self.write_json({"job_id": job_id, "title": title})
+                else:
+                    code, output = installer(None)
+                    self.respond_run_result(title, code, output)
+                return
+            if self.path == f"/run/{_ai_key}_docker" and _ai_image:
+                title = f"{_ai_name} Docker"
+                def _make_docker(_name, _image, _port, _key, _form):
+                    def _fn(cb):
+                        return _run_ai_docker_generic(
+                            _key, _image, _form, _port,
+                            _port, _name,
+                            SERVER_INSTALLER_DATA / _key / f"{_key}-state.json",
+                            SERVER_INSTALLER_DATA / _key,
+                            live_cb=cb,
+                        )
+                    return _fn
+                docker_fn = _make_docker(_ai_name, _ai_image, _ai_port, _ai_key, form)
+                if self.is_fetch():
+                    job_id = start_live_job(title, docker_fn)
+                    self.write_json({"job_id": job_id, "title": title})
+                else:
+                    code, output = docker_fn(None)
+                    self.respond_run_result(title, code, output)
+                return
         if self.path == "/run/dashboard_update":
             title = "Dashboard Update"
             if self.is_fetch():
