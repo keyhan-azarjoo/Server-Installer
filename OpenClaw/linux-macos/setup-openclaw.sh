@@ -2,7 +2,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # OpenClaw Installer for Linux / macOS
 # ─────────────────────────────────────────────────────────────────────────────
-set -euo pipefail
+set -eo pipefail
+HOME="${HOME:-/root}"
+export HOME
 
 SERVICE_NAME="serverinstaller-openclaw"
 HTTP_PORT="${OPENCLAW_HTTP_PORT:-}"

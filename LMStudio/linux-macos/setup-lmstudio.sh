@@ -2,7 +2,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # LM Studio Installer for Linux / macOS
 # ─────────────────────────────────────────────────────────────────────────────
-set -euo pipefail
+set -eo pipefail
+HOME="${HOME:-/root}"
+export HOME
 
 LMSTUDIO_SERVICE_NAME="serverinstaller-lmstudio"
 LMSTUDIO_INTERNAL_PORT="1234"

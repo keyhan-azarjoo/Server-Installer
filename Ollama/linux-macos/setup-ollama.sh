@@ -3,7 +3,11 @@
 # Ollama Installer for Linux / macOS
 # Installs Ollama LLM server + Web UI on user-selected IP:Port
 # ─────────────────────────────────────────────────────────────────────────────
-set -euo pipefail
+set -eo pipefail
+
+# Ensure HOME is set (may be empty when running via sudo)
+HOME="${HOME:-/root}"
+export HOME
 
 OLLAMA_SERVICE_NAME="serverinstaller-ollama"
 OLLAMA_INTERNAL_PORT="11434"  # Ollama always runs internally on this
