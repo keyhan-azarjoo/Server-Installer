@@ -8633,18 +8633,60 @@ def validate_os_credentials(username, password):
             return True, ""
         return False, "Invalid Windows username/password."
 
+    # macOS: use dscl to authenticate
+    if sys.platform == "darwin":
+        try:
+            rc, out = run_capture(
+                ["dscl", "/Local/Default", "-authonly", username, password],
+                timeout=10,
+            )
+            if rc == 0:
+                return True, ""
+            return False, "Invalid macOS username/password."
+        except Exception as ex:
+            return False, f"macOS authentication failed: {ex}"
+
+    # Linux: use crypt/spwd or PAM
     try:
         import crypt
         import spwd
 
         hashed = spwd.getspnam(username).sp_pwdp
         if not hashed or hashed in ("x", "*", "!", "!!"):
-            return False, "This Linux account cannot be validated by password."
+            # Try PAM as fallback
+            try:
+                rc, _ = run_capture(["su", "-c", "true", username], timeout=10)
+                # su requires stdin password — use a different approach
+                raise Exception("spwd unavailable")
+            except Exception:
+                return False, "This account cannot be validated by password."
         return (crypt.crypt(password, hashed) == hashed, "Invalid Linux username/password.")
+    except ImportError:
+        # crypt/spwd not available (Python 3.13+ removed crypt)
+        # Fallback: use PAM via subprocess
+        try:
+            proc = subprocess.run(
+                ["python3", "-c", f"import pam; p=pam.pam(); print(p.authenticate('{username}','{password}'))"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if "True" in proc.stdout:
+                return True, ""
+        except Exception:
+            pass
+        # Last resort: try su
+        try:
+            import pty
+            # Can't easily do su non-interactively, so try dscl even on Linux
+            rc, _ = run_capture(["dscl", "/Local/Default", "-authonly", username, password], timeout=10)
+            if rc == 0:
+                return True, ""
+        except Exception:
+            pass
+        return False, "Could not validate credentials. Install python3-pam or run as root."
     except PermissionError:
         return False, "Run dashboard as root to validate Linux system credentials for remote login."
     except Exception:
-        return False, "Invalid Linux username/password."
+        return False, "Invalid username/password."
 
 
 def run_process(cmd, env=None, live_cb=None, input_text=None):
