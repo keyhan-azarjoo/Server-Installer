@@ -143,6 +143,13 @@ SVCEOF
     systemctl daemon-reload
     systemctl enable "${LMSTUDIO_SERVICE_NAME}-webui" 2>/dev/null || true
     systemctl restart "${LMSTUDIO_SERVICE_NAME}-webui"
+    log "Web UI systemd service started."
+else
+    log "Starting Web UI in background on port ${WEB_PORT}..."
+    export LMSTUDIO_API_BASE="http://127.0.0.1:${LMSTUDIO_INTERNAL_PORT}"
+    export LMSTUDIO_WEB_PORT="${WEB_PORT}"
+    nohup "${VENV_PYTHON}" "${INSTALL_DIR}/start-lmstudio-webui.py" >> "${LOG_FILE}" 2>&1 &
+    log "Web UI started (PID: $!)."
 fi
 
 # ── Step 9: Firewall ────────────────────────────────────────────────────────

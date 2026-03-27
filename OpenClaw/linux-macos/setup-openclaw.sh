@@ -121,6 +121,12 @@ SVCEOF
     systemctl daemon-reload
     systemctl enable "${SERVICE_NAME}" 2>/dev/null || true
     systemctl restart "${SERVICE_NAME}"
+    log "Web UI systemd service started."
+else
+    log "Starting Web UI in background on port ${WEB_PORT}..."
+    export OPENCLAW_WEB_PORT="${WEB_PORT}"
+    nohup "${VENV_PYTHON}" "${INSTALL_DIR}/start-openclaw-webui.py" >> "${LOG_FILE}" 2>&1 &
+    log "Web UI started (PID: $!)."
 fi
 
 # ── Step 8: Firewall ────────────────────────────────────────────────────────

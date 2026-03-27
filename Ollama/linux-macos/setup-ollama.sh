@@ -36,10 +36,24 @@ if command -v ollama &>/dev/null; then
     log "Ollama already installed: $(command -v ollama)"
 else
     log "Installing Ollama..."
-    curl -fsSL https://ollama.com/install.sh | sh
+    # The official install script may return non-zero on macOS even when successful
+    curl -fsSL https://ollama.com/install.sh | sh || true
+    # macOS: ollama may be in /usr/local/bin or installed as an app
     if ! command -v ollama &>/dev/null; then
-        log "ERROR: Ollama installation failed."
-        exit 1
+        # Check common macOS paths
+        for p in /usr/local/bin/ollama /opt/homebrew/bin/ollama "$HOME/.ollama/bin/ollama"; do
+            if [ -x "$p" ]; then
+                export PATH="$(dirname "$p"):$PATH"
+                break
+            fi
+        done
+    fi
+    if command -v ollama &>/dev/null; then
+        log "Ollama installed: $(command -v ollama)"
+    else
+        log "WARNING: Ollama binary not found in PATH after install."
+        log "If Ollama was installed as an app, open it once to enable the CLI."
+        log "Continuing with web UI setup..."
     fi
 fi
 
@@ -70,22 +84,47 @@ SVCEOF
     systemctl restart "${OLLAMA_SERVICE_NAME}"
     log "Ollama systemd service started on 127.0.0.1:${OLLAMA_INTERNAL_PORT}"
 else
+    # macOS or no systemd — start Ollama in background
     export OLLAMA_HOST="127.0.0.1:${OLLAMA_INTERNAL_PORT}"
     export OLLAMA_ORIGINS="*"
-    nohup ollama serve >> "$LOG_FILE" 2>&1 &
-    log "Ollama started in background."
+    if command -v ollama &>/dev/null; then
+        nohup ollama serve >> "$LOG_FILE" 2>&1 &
+        log "Ollama started in background."
+    else
+        # On macOS, Ollama app may already be running its own server on 11434
+        log "Ollama CLI not in PATH. Checking if Ollama app server is running..."
+    fi
 fi
 sleep 3
 
-# Verify
-for i in $(seq 1 10); do
-    if curl -sf "http://127.0.0.1:${OLLAMA_INTERNAL_PORT}/api/tags" >/dev/null 2>&1; then
-        log "Ollama is running."
+# Verify — check both configured port and default 11434
+OLLAMA_RUNNING=false
+for check_port in "${OLLAMA_INTERNAL_PORT}" "11434"; do
+    if curl -sf "http://127.0.0.1:${check_port}/api/tags" >/dev/null 2>&1; then
+        log "Ollama is running on port ${check_port}."
+        OLLAMA_INTERNAL_PORT="${check_port}"
+        OLLAMA_RUNNING=true
         break
     fi
-    [ "$i" -eq 10 ] && log "WARNING: Ollama not responding yet."
-    sleep 2
 done
+if [ "$OLLAMA_RUNNING" = "false" ]; then
+    # Wait more and retry
+    for i in $(seq 1 10); do
+        if curl -sf "http://127.0.0.1:${OLLAMA_INTERNAL_PORT}/api/tags" >/dev/null 2>&1; then
+            log "Ollama is running."
+            OLLAMA_RUNNING=true
+            break
+        fi
+        if curl -sf "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
+            log "Ollama is running on default port 11434."
+            OLLAMA_INTERNAL_PORT="11434"
+            OLLAMA_RUNNING=true
+            break
+        fi
+        [ "$i" -eq 10 ] && log "WARNING: Ollama not responding. Start it manually: open /Applications/Ollama.app or run 'ollama serve'"
+        sleep 2
+    done
+fi
 
 # ── Step 3: Skip web UI if no ports ──────────────────────────────────────────
 if [ -z "${HTTP_PORT}" ] && [ -z "${HTTPS_PORT}" ]; then
@@ -223,7 +262,13 @@ NGXEOF
     fi
 fi
 
-# ── Step 8: Register Web UI service ──────────────────────────────────────────
+# ── Step 8: Register and start Web UI service ────────────────────────────────
+export OLLAMA_API_BASE="http://127.0.0.1:${OLLAMA_INTERNAL_PORT}"
+export OLLAMA_WEB_PORT="${WEB_PORT}"
+export OLLAMA_HTTPS_PORT="${HTTPS_PORT}"
+export OLLAMA_CERT_FILE="${CERT_DIR}/ollama.crt"
+export OLLAMA_KEY_FILE="${CERT_DIR}/ollama.key"
+
 if command -v systemctl &>/dev/null; then
     cat > "${SYSTEMD_WEBUI_FILE}" <<WUIEOF
 [Unit]
@@ -251,7 +296,18 @@ WUIEOF
     systemctl daemon-reload
     systemctl enable "${OLLAMA_SERVICE_NAME}-webui" 2>/dev/null || true
     systemctl restart "${OLLAMA_SERVICE_NAME}-webui"
-    log "Web UI service started."
+    log "Web UI systemd service started."
+else
+    # macOS or no systemd — start Web UI as background process
+    log "Starting Web UI in background on port ${WEB_PORT}..."
+    nohup "${VENV_PYTHON}" "${INSTALL_DIR}/start-ollama-webui.py" >> "${LOG_FILE}" 2>&1 &
+    WEBUI_PID=$!
+    sleep 2
+    if kill -0 "$WEBUI_PID" 2>/dev/null; then
+        log "Web UI started (PID: ${WEBUI_PID})."
+    else
+        log "WARNING: Web UI may not have started. Check log: ${LOG_FILE}"
+    fi
 fi
 
 # ── Step 9: Firewall ─────────────────────────────────────────────────────────
