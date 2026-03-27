@@ -7519,7 +7519,7 @@ def run_windows_ollama_installer(form=None, live_cb=None):
     form = form or {}
     if os.name != "nt":
         return 1, "Windows Ollama installer can only run on Windows hosts."
-    ensure_repo_files(OLLAMA_WINDOWS_FILES, live_cb=live_cb, refresh=False)
+    ensure_repo_files(OLLAMA_WINDOWS_FILES, live_cb=live_cb, refresh=True)
     env = os.environ.copy()
     for key in ["OLLAMA_HOST_IP", "OLLAMA_HTTP_PORT", "OLLAMA_HTTPS_PORT", "OLLAMA_DOMAIN",
                  "OLLAMA_USERNAME", "OLLAMA_PASSWORD"]:
@@ -7539,7 +7539,7 @@ def run_unix_ollama_installer(form=None, live_cb=None):
     form = form or {}
     if os.name == "nt":
         return 1, "Unix Ollama installer can only run on Linux or macOS."
-    ensure_repo_files(OLLAMA_UNIX_FILES, live_cb=live_cb, refresh=False)
+    ensure_repo_files(OLLAMA_UNIX_FILES, live_cb=live_cb, refresh=True)
     env = os.environ.copy()
     env_keys = ["OLLAMA_HOST_IP", "OLLAMA_HTTP_PORT", "OLLAMA_HTTPS_PORT", "OLLAMA_DOMAIN",
                  "OLLAMA_USERNAME", "OLLAMA_PASSWORD"]
@@ -7629,7 +7629,7 @@ def run_ollama_delete(live_cb=None):
 def run_lmstudio_os_install(form=None, live_cb=None):
     form = form or {}
     if os.name == "nt":
-        ensure_repo_files(LMSTUDIO_WINDOWS_FILES, live_cb=live_cb, refresh=False)
+        ensure_repo_files(LMSTUDIO_WINDOWS_FILES, live_cb=live_cb, refresh=True)
         env = os.environ.copy()
         for key in ["LMSTUDIO_HOST_IP", "LMSTUDIO_HTTP_PORT", "LMSTUDIO_HTTPS_PORT", "LMSTUDIO_DOMAIN", "LMSTUDIO_USERNAME", "LMSTUDIO_PASSWORD"]:
             val = (form.get(key, [""])[0] or "").strip()
@@ -7637,7 +7637,7 @@ def run_lmstudio_os_install(form=None, live_cb=None):
         env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
         return run_process(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(LMSTUDIO_WINDOWS_INSTALLER)], env=env, live_cb=live_cb)
     else:
-        ensure_repo_files(LMSTUDIO_UNIX_FILES, live_cb=live_cb, refresh=False)
+        ensure_repo_files(LMSTUDIO_UNIX_FILES, live_cb=live_cb, refresh=True)
         env = os.environ.copy()
         env_keys = ["LMSTUDIO_HOST_IP", "LMSTUDIO_HTTP_PORT", "LMSTUDIO_HTTPS_PORT", "LMSTUDIO_DOMAIN", "LMSTUDIO_USERNAME", "LMSTUDIO_PASSWORD"]
         for key in env_keys:
@@ -7701,7 +7701,7 @@ def run_lmstudio_delete(live_cb=None):
 def run_openclaw_os_install(form=None, live_cb=None):
     form = form or {}
     if os.name == "nt":
-        ensure_repo_files(OPENCLAW_WINDOWS_FILES, live_cb=live_cb, refresh=False)
+        ensure_repo_files(OPENCLAW_WINDOWS_FILES, live_cb=live_cb, refresh=True)
         env = os.environ.copy()
         for key in ["OPENCLAW_HOST_IP", "OPENCLAW_HTTP_PORT", "OPENCLAW_HTTPS_PORT", "OPENCLAW_DOMAIN", "OPENCLAW_USERNAME", "OPENCLAW_PASSWORD"]:
             val = (form.get(key, [""])[0] or "").strip()
@@ -7709,7 +7709,7 @@ def run_openclaw_os_install(form=None, live_cb=None):
         env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
         return run_process(["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", str(OPENCLAW_WINDOWS_INSTALLER)], env=env, live_cb=live_cb)
     else:
-        ensure_repo_files(OPENCLAW_UNIX_FILES, live_cb=live_cb, refresh=False)
+        ensure_repo_files(OPENCLAW_UNIX_FILES, live_cb=live_cb, refresh=True)
         env = os.environ.copy()
         env_keys = ["OPENCLAW_HOST_IP", "OPENCLAW_HTTP_PORT", "OPENCLAW_HTTPS_PORT", "OPENCLAW_DOMAIN", "OPENCLAW_USERNAME", "OPENCLAW_PASSWORD"]
         for key in env_keys:
@@ -9788,7 +9788,7 @@ def run_windows_sam3_installer(form=None, live_cb=None):
         return 1, "Windows SAM3 installer can only run on Windows hosts."
     if not is_windows_admin():
         return 1, "Dashboard is not running as Administrator. Restart launcher and accept UAC prompt."
-    ensure_repo_files(SAM3_WINDOWS_FILES, live_cb=live_cb, refresh=False)
+    ensure_repo_files(SAM3_WINDOWS_FILES, live_cb=live_cb, refresh=True)
     env = os.environ.copy()
     for key in [
         "SAM3_HOST_IP", "SAM3_HTTP_PORT", "SAM3_HTTPS_PORT", "SAM3_DOMAIN",
@@ -9811,7 +9811,7 @@ def run_unix_sam3_installer(form=None, live_cb=None):
     form = form or {}
     if os.name == "nt":
         return 1, "Unix SAM3 installer can only run on Linux or macOS hosts."
-    ensure_repo_files(SAM3_UNIX_FILES, live_cb=live_cb, refresh=False)
+    ensure_repo_files(SAM3_UNIX_FILES, live_cb=live_cb, refresh=True)
     env = os.environ.copy()
     env_keys = [
         "SAM3_HOST_IP", "SAM3_HTTP_PORT", "SAM3_HTTPS_PORT", "SAM3_DOMAIN",
@@ -10019,7 +10019,7 @@ def run_sam3_docker(form=None, live_cb=None):
     if not command_exists("docker"):
         return 1, "Docker is not installed. Please install Docker first."
 
-    ensure_repo_files(SAM3_WINDOWS_FILES if os.name == "nt" else SAM3_UNIX_FILES, live_cb=live_cb, refresh=False)
+    ensure_repo_files(SAM3_WINDOWS_FILES if os.name == "nt" else SAM3_UNIX_FILES, live_cb=live_cb, refresh=True)
 
     common_dir = str(ROOT / "SAM3" / "common")
     sam3_data = str(SAM3_STATE_DIR / "docker-app")
