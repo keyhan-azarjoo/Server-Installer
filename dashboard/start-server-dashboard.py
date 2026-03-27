@@ -635,6 +635,8 @@ def install_or_update_linux_service(root: Path, bind_host: str, selected_port: i
         return 1
 
     script_path = (root / "dashboard" / "start-server-dashboard.py").resolve()
+    if not script_path.exists():
+        script_path = Path(os.path.abspath(__file__))
     app_path = (root / "dashboard" / "server_installer_dashboard.py").resolve()
 
     if os.geteuid() != 0:
