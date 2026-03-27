@@ -7044,7 +7044,7 @@ def _get_ai_service_info(state_file, state_dir, systemd_service, display_name, d
         "install_dir": install_dir,
         "host": str(state.get("host") or "").strip(),
         "domain": str(state.get("domain") or "").strip(),
-        "http_port": str(state.get("http_port") or default_port).strip(),
+        "http_port": str(state.get("http_port") or (default_port if _has_service else "")).strip(),
         "https_port": str(state.get("https_port") or "").strip(),
         "http_url": str(state.get("http_url") or "").strip(),
         "https_url": str(state.get("https_url") or "").strip(),
@@ -14268,6 +14268,20 @@ class Handler(BaseHTTPRequestHandler):
             "openwebui": ("Open WebUI", "ghcr.io/open-webui/open-webui:main", "3000", "pip install open-webui"),
             "chromadb": ("ChromaDB", "chromadb/chroma:latest", "8000", "pip install chromadb"),
             "custom": ("Custom Model", "", "8080", ""),
+            # OS Agents
+            "openinterpreter": ("Open Interpreter", "openinterpreter/open-interpreter:latest", "8080", "pip install open-interpreter"),
+            "openhands": ("OpenHands", "ghcr.io/all-hands-ai/openhands:latest", "3000", ""),
+            "autogpt": ("AutoGPT", "", "8000", "pip install autogpt-forge"),
+            "crewai": ("CrewAI", "", "8080", "pip install crewai crewai-tools"),
+            "metagpt": ("MetaGPT", "", "8080", "pip install metagpt"),
+            "langchain": ("LangChain", "", "8000", "pip install langchain langchain-community langserve uvicorn"),
+            "langgraph": ("LangGraph", "", "8123", "pip install langgraph langgraph-cli"),
+            "llamaindex": ("LlamaIndex", "", "8000", "pip install llama-index"),
+            "haystack": ("Haystack", "", "8000", "pip install haystack-ai"),
+            "dify": ("Dify", "langgenius/dify-api:latest", "3000", ""),
+            "flowise": ("Flowise", "flowiseai/flowise:latest", "3000", "npx flowise start"),
+            "n8n": ("n8n", "n8nio/n8n:latest", "5678", "npx n8n start"),
+            "activepieces": ("Activepieces", "activepieces/activepieces:latest", "8080", ""),
         }
         for _ai_key, (_ai_name, _ai_image, _ai_port, _ai_pip) in _ai_generic_map.items():
             if self.path in (f"/run/{_ai_key}_windows_os", f"/run/{_ai_key}_unix_os"):

@@ -252,6 +252,132 @@
     );
   };
 
+  // ── OS Agents page ──────────────────────────────────────────────────────────
+  ns.pages["os-agents"] = function renderOsAgentsPage(p) {
+    var Grid = p.Grid, Card = p.Card, CardContent = p.CardContent;
+    var Typography = p.Typography, Stack = p.Stack, Button = p.Button;
+    var Box = p.Box, Paper = p.Paper, Chip = p.Chip, Alert = p.Alert;
+    var setPage = p.setPage;
+
+    var _ac = React.useState("all");
+    var activeCategory = _ac[0], setActiveCategory = _ac[1];
+
+    var categories = [
+      {
+        id: "agents",
+        label: "AI Agents",
+        color: "#b45309",
+        bg: "#fffbeb",
+        border: "#fde68a",
+        description: "Autonomous AI agents that can execute tasks, write code, browse the web, and interact with your OS.",
+        services: [
+          { title: "Open Interpreter", text: "Natural language interface to your computer. Runs code, manages files, browses web. Supports GPT-4, Claude, Llama.", page: "agent-openinterpreter" },
+          { title: "OpenHands (OpenDevin)", text: "Autonomous AI software developer. Plans, writes code, runs tests, and deploys. Full dev environment in sandbox.", page: "agent-openhands" },
+          { title: "AutoGPT", text: "Autonomous GPT-4 agent. Chains prompts to achieve complex goals. Web search, file I/O, code execution.", page: "agent-autogpt" },
+          { title: "CrewAI", text: "Framework for orchestrating multiple AI agents working together. Define roles, goals, and tasks for a team of agents.", page: "agent-crewai" },
+          { title: "MetaGPT", text: "Multi-agent framework that simulates a software company. Agents play PM, architect, engineer, QA roles.", page: "agent-metagpt" },
+        ],
+      },
+      {
+        id: "frameworks",
+        label: "Agent Frameworks",
+        color: "#0f766e",
+        bg: "#f0fdfa",
+        border: "#99f6e4",
+        description: "Frameworks and tools for building, orchestrating, and deploying AI agent workflows.",
+        services: [
+          { title: "LangChain", text: "Build LLM-powered applications with chains, agents, RAG, and tool use. Python and JS SDKs.", page: "agent-langchain" },
+          { title: "LangGraph", text: "Build stateful, multi-actor LLM applications with graph-based workflows. By LangChain team.", page: "agent-langgraph" },
+          { title: "LlamaIndex", text: "Data framework for LLM applications. Connect your data to LLMs with RAG pipelines and agents.", page: "agent-llamaindex" },
+          { title: "Haystack", text: "End-to-end NLP framework. Build search, QA, and conversational AI pipelines with any LLM.", page: "agent-haystack" },
+        ],
+      },
+      {
+        id: "tools",
+        label: "Agent Tools & UIs",
+        color: "#7c3aed",
+        bg: "#f5f3ff",
+        border: "#c4b5fd",
+        description: "Web UIs, dashboards, and tools for managing and interacting with AI agents.",
+        services: [
+          { title: "Dify", text: "Visual AI workflow builder. Create chatbots, agents, and RAG apps with drag-and-drop. Self-hosted.", page: "agent-dify" },
+          { title: "Flowise", text: "Drag-and-drop UI for building LLM flows. Visual LangChain/LlamaIndex builder. Self-hosted.", page: "agent-flowise" },
+          { title: "n8n", text: "Workflow automation platform with AI capabilities. Connect 400+ services with LLM-powered nodes.", page: "agent-n8n" },
+          { title: "Activepieces", text: "Open-source automation platform. Build AI-powered workflows with no-code builder.", page: "agent-activepieces" },
+        ],
+      },
+    ];
+
+    var visibleCategories = activeCategory === "all" ? categories : categories.filter(function(c) { return c.id === activeCategory; });
+
+    return (
+      <Grid container spacing={2}>
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent>
+              <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5, color: "#b45309" }}>
+                OS Agents & Automation
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+                Deploy autonomous AI agents that can browse the web, write code, execute commands, manage files, and automate complex tasks on your server.
+              </Typography>
+              <Alert severity="info" sx={{ mt: 1, borderRadius: 2 }}>
+                Most agents require an LLM backend (Ollama, OpenAI API, or Claude API). Install Ollama first for fully local operation.
+              </Alert>
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+            <Button variant={activeCategory === "all" ? "contained" : "outlined"} size="small" onClick={function() { setActiveCategory("all"); }}
+              sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, px: 2, ...(activeCategory === "all" ? { bgcolor: "#b45309", "&:hover": { bgcolor: "#92400e" } } : { borderColor: "#b45309", color: "#b45309" }) }}>
+              All
+            </Button>
+            {categories.map(function(cat) {
+              return (
+                <Button key={cat.id} variant={activeCategory === cat.id ? "contained" : "outlined"} size="small" onClick={function() { setActiveCategory(cat.id); }}
+                  sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, px: 2, ...(activeCategory === cat.id ? { bgcolor: cat.color, "&:hover": { bgcolor: cat.color, filter: "brightness(0.9)" } } : { borderColor: cat.color, color: cat.color }) }}>
+                  {cat.label}
+                </Button>
+              );
+            })}
+          </Stack>
+        </Grid>
+
+        {visibleCategories.map(function(cat) {
+          return (
+            <Grid item xs={12} key={cat.id}>
+              <Card sx={{ borderRadius: 3, border: "1.5px solid " + cat.border, background: "linear-gradient(135deg, " + cat.bg + " 0%, #ffffff 100%)" }}>
+                <CardContent>
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+                    <Chip label={cat.label} size="small" sx={{ bgcolor: cat.color, color: "#fff", fontWeight: 700 }} />
+                    <Typography variant="h6" fontWeight={800} sx={{ color: cat.color, flexGrow: 1 }}>{cat.label}</Typography>
+                    <Typography variant="body2" color="text.secondary">{cat.services.length} services</Typography>
+                  </Stack>
+                  <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>{cat.description}</Typography>
+                  <Grid container spacing={1.5}>
+                    {cat.services.map(function(svc) {
+                      return (
+                        <Grid item xs={12} sm={6} md={4} key={svc.page}>
+                          <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, cursor: "pointer", height: "100%", transition: "all 0.15s ease", "&:hover": { borderColor: cat.color, boxShadow: "0 2px 8px " + cat.color + "22", transform: "translateY(-1px)" } }}
+                            onClick={function() { setPage(svc.page); }}>
+                            <Typography variant="subtitle2" fontWeight={800} sx={{ mb: 0.5 }}>{svc.title}</Typography>
+                            <Typography variant="caption" color="text.secondary" sx={{ lineHeight: 1.4 }}>{svc.text}</Typography>
+                          </Paper>
+                        </Grid>
+                      );
+                    })}
+                  </Grid>
+                </CardContent>
+              </Card>
+            </Grid>
+          );
+        })}
+      </Grid>
+    );
+  };
+
   // ── Logs page ───────────────────────────────────────────────────────────────
   function LogsPageInner(p) {
     const { Box, Button, Card, CardContent, Typography, Stack, Paper, Tooltip, termText, copyText } = p;
@@ -332,12 +458,21 @@
         bg: "linear-gradient(135deg,#f5f3ff 0%,#ede9fe 100%)",
         border: "#c4b5fd",
       },
+      {
+        title: "OS Agents",
+        subtitle: "Autonomous AI Agents & Automation",
+        description: "Deploy autonomous AI agents that can browse the web, write code, execute commands, and automate tasks on your server.",
+        page: "os-agents",
+        color: "#b45309",
+        bg: "linear-gradient(135deg,#fffbeb 0%,#fef3c7 100%)",
+        border: "#fde68a",
+      },
     ];
 
     return (
       <Grid container spacing={3} sx={{ mt: 1 }}>
         {categories.map((cat) => (
-          <Grid item xs={12} md={6} key={cat.page}>
+          <Grid item xs={12} md={4} key={cat.page}>
             <Card
               sx={{
                 borderRadius: 4,

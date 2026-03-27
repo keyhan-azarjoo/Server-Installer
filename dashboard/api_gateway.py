@@ -696,11 +696,11 @@ def _get_ollama_url():
         if not url.startswith("http"):
             url = f"http://{url}"
         return url
-    # Check state files
+    # Check state files — match the paths used by the installer and get_ollama_info()
     state_paths = [
-        Path(os.environ.get("ProgramData", "C:/ProgramData")) / "ServerInstaller" / "ollama-state.json",
-        Path("/opt/server-installer/ollama/state.json"),
-        Path("/etc/server-installer/ollama-state.json"),
+        Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "ollama" / "ollama-state.json",
+        Path(os.path.expanduser("~")) / ".server-installer" / "ollama" / "ollama-state.json",
+        Path("/opt/server-installer/ollama/ollama-state.json"),
     ]
     for p in state_paths:
         if p.exists():
@@ -711,9 +711,11 @@ def _get_ollama_url():
                     if val:
                         return val
                 host = str(state.get("host") or "").strip()
-                port = str(state.get("port") or "11434").strip()
-                if host:
+                port = str(state.get("http_port") or state.get("port") or "11434").strip()
+                if host and host not in ("0.0.0.0", "*"):
                     return f"http://{host}:{port}"
+                elif port:
+                    return f"http://127.0.0.1:{port}"
             except Exception:
                 pass
     return "http://127.0.0.1:11434"

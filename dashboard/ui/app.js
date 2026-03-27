@@ -1971,6 +1971,7 @@ function App() {
       {sidebarSection("Services")}
       {sidebarBtn("Platform Services", "Plat", "platform-services", { activePages: ["platform-services", "api", "dotnet", "s3", "mongo", "python", "proxy", "website", "ssl", "docker"] })}
       {sidebarBtn("AI & ML Services", "AI", "ai-ml", { activePages: ["ai-ml", "ai-"] })}
+      {sidebarBtn("OS Agents", "Agent", "os-agents", { activePages: ["os-agents", "agent-"] })}
 
       {sidebarSection("Tools")}
       {sidebarBtn("Web Terminal", "Term", "terminal", { onClick: () => { setTermOpen(true); setTermMin(false); } })}

@@ -43,6 +43,7 @@ dashboard/ui/pages/ai/comfyui.js
 dashboard/ui/pages/ai/whisper.js
 dashboard/ui/pages/ai/piper.js
 dashboard/ui/pages/ai/ai-all.js
+dashboard/ui/pages/agents/agents-all.js
 dashboard/ui/app.js
 # SAM3
 SAM3/windows/setup-sam3.ps1

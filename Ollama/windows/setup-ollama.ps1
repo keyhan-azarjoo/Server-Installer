@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 # ── Configuration ────────────────────────────────────────────────────────────
 $OLLAMA_SERVICE_NAME = "ServerInstaller-Ollama"
 $programData         = [Environment]::GetFolderPath("CommonApplicationData")
-$baseStateDir        = if ($env:SERVER_INSTALLER_DATA_DIR) { $env:SERVER_INSTALLER_DATA_DIR } else { Join-Path $programData "Server-Installer" }
+if ($env:SERVER_INSTALLER_DATA_DIR) { $baseStateDir = $env:SERVER_INSTALLER_DATA_DIR } else { $baseStateDir = Join-Path $programData "Server-Installer" }
 $stateDir            = Join-Path $baseStateDir "ollama"
 $statePath           = Join-Path $stateDir "ollama-state.json"
 $installDir          = Join-Path $stateDir "app"
@@ -17,12 +17,12 @@ $venvDir             = Join-Path $installDir "venv"
 $certDir             = Join-Path $stateDir "certs"
 $logFile             = Join-Path $stateDir "ollama.log"
 
-$httpPort   = if ($env:OLLAMA_HTTP_PORT)  { $env:OLLAMA_HTTP_PORT }  else { "11434" }
-$httpsPort  = if ($env:OLLAMA_HTTPS_PORT) { $env:OLLAMA_HTTPS_PORT } else { "" }
-$hostIp     = if ($env:OLLAMA_HOST_IP)    { $env:OLLAMA_HOST_IP }    else { "0.0.0.0" }
-$domain     = if ($env:OLLAMA_DOMAIN)     { $env:OLLAMA_DOMAIN }     else { "" }
-$username   = if ($env:OLLAMA_USERNAME)   { $env:OLLAMA_USERNAME }   else { "" }
-$password   = if ($env:OLLAMA_PASSWORD)   { $env:OLLAMA_PASSWORD }   else { "" }
+if ($env:OLLAMA_HTTP_PORT)  { $httpPort  = $env:OLLAMA_HTTP_PORT }  else { $httpPort  = "11434" }
+if ($env:OLLAMA_HTTPS_PORT) { $httpsPort = $env:OLLAMA_HTTPS_PORT } else { $httpsPort = "" }
+if ($env:OLLAMA_HOST_IP)    { $hostIp    = $env:OLLAMA_HOST_IP }    else { $hostIp    = "0.0.0.0" }
+if ($env:OLLAMA_DOMAIN)     { $domain    = $env:OLLAMA_DOMAIN }     else { $domain    = "" }
+if ($env:OLLAMA_USERNAME)   { $username  = $env:OLLAMA_USERNAME }   else { $username  = "" }
+if ($env:OLLAMA_PASSWORD)   { $password  = $env:OLLAMA_PASSWORD }   else { $password  = "" }
 $webUiPort  = 3080  # Web UI proxy port
 
 function Log($msg) { Write-Host "[Ollama] $msg" }
@@ -158,7 +158,8 @@ if ($httpsPort -and $httpsPort -ne "0") {
     $keyFile  = Join-Path $certDir "ollama.key"
     if (-not (Test-Path $certFile)) {
         Log "Generating self-signed SSL certificate..."
-        $cn = if ($domain) { $domain } else { $hostIp }
+        $cn = $domain
+        if (-not $cn) { $cn = $hostIp }
         $opensslPath = Get-Command "openssl" -ErrorAction SilentlyContinue
         if ($opensslPath) {
             & openssl req -x509 -nodes -newkey rsa:2048 -keyout $keyFile -out $certFile -days 3650 -subj "/CN=$cn/O=ServerInstaller/C=US" 2>&1
@@ -220,7 +221,7 @@ $state = @{
     webui_port        = "$webUiPort"
     http_url          = "http://${displayHost}:${httpPort}"
     webui_url         = "http://${displayHost}:${webUiPort}"
-    https_url         = if ($httpsPort) { "https://${displayHost}:${httpsPort}" } else { "" }
+    https_url         = ""
     deploy_mode       = "os"
     auth_enabled      = [bool]$username
     auth_username     = $username
@@ -228,6 +229,7 @@ $state = @{
     version           = ""
 }
 try { $state.version = (& ollama --version 2>&1) -replace "ollama version ", "" } catch {}
+if ($httpsPort) { $state.https_url = "https://${displayHost}:${httpsPort}" }
 
 $state | ConvertTo-Json -Depth 10 | Set-Content -Path $statePath -Encoding UTF8
 
