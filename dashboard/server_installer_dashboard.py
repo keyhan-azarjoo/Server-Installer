@@ -8633,18 +8633,28 @@ def validate_os_credentials(username, password):
             return True, ""
         return False, "Invalid Windows username/password."
 
-    # macOS: use dscl to authenticate
+    # macOS: use dscl to authenticate against Open Directory
     if sys.platform == "darwin":
-        try:
-            rc, out = run_capture(
-                ["dscl", "/Local/Default", "-authonly", username, password],
-                timeout=10,
-            )
-            if rc == 0:
-                return True, ""
-            return False, "Invalid macOS username/password."
-        except Exception as ex:
-            return False, f"macOS authentication failed: {ex}"
+        last_err = ""
+        # Try all combinations of directory node and user path format
+        attempts = [
+            ["dscl", "/Local/Default", "-authonly", f"/Users/{username}", password],
+            ["dscl", ".", "-authonly", f"/Users/{username}", password],
+            ["dscl", "/Local/Default", "-authonly", username, password],
+            ["dscl", ".", "-authonly", username, password],
+            ["dscl", "/Search", "-authonly", f"/Users/{username}", password],
+        ]
+        for cmd in attempts:
+            try:
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                if proc.returncode == 0:
+                    return True, ""
+                last_err = (proc.stderr or proc.stdout or "").strip()
+            except Exception as ex:
+                last_err = str(ex)
+        # Log the error for debugging
+        print(f"[AUTH] macOS dscl auth failed for '{username}': {last_err}")
+        return False, "Invalid macOS username or password."
 
     # Linux: use crypt/spwd or PAM
     try:
