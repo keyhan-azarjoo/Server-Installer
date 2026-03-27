@@ -1234,6 +1234,14 @@ def main() -> int:
     dash_user = args.user or args.positional_user or ""
     dash_pass = args.password or args.positional_pass or ""
 
+    # macOS: default to admin/admin if no credentials provided and none saved
+    if sys.platform == "darwin" and not dash_user and not dash_pass:
+        creds_check = cache_root() / "dashboard-credentials.json"
+        if not creds_check.exists():
+            dash_user = "admin"
+            dash_pass = "admin"
+            print("[INFO] macOS: default credentials set (admin / admin)")
+
     os.environ["DASHBOARD_HTTPS"] = "1"
     if args.cert:
         os.environ["DASHBOARD_CERT"] = args.cert

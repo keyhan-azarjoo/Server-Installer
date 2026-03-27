@@ -83,12 +83,36 @@ Example in Docker mode:
 .\install-windows-dotnet-host.ps1 -DeploymentMode Docker -DotNetChannel 10 -SiteName MyApi -DockerHostPort 8080
 ```
 
-## Linux
+## macOS
 
-Run dashboard mode:
+Run the dashboard on macOS (default login: **admin / admin**):
 
 ```bash
-curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -o ./start-server-dashboard.py && python3 ./start-server-dashboard.py
+curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -o ./start-server-dashboard.py && sudo python3 ./start-server-dashboard.py
+```
+
+Or set a custom username and password:
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -o ./start-server-dashboard.py && sudo python3 ./start-server-dashboard.py myuser mypassword
+```
+
+- Default credentials: `admin` / `admin` (set automatically on macOS)
+- Dashboard URL: `https://<your-mac-ip>:8090` or `http://<hostname>.local:8090`
+- Service: runs as a `launchd` daemon with auto-start on boot
+
+## Linux
+
+Run the dashboard on Linux (uses OS username/password for login):
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main/dashboard/start-server-dashboard.py" -o ./start-server-dashboard.py && sudo python3 ./start-server-dashboard.py
+```
+
+Or set a custom username and password:
+
+```bash
+sudo python3 ./start-server-dashboard.py --user admin --password admin
 ```
 
 Repository folders:
