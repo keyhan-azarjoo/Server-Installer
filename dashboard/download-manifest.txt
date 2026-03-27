@@ -44,6 +44,7 @@ dashboard/ui/pages/ai/comfyui.js
 dashboard/ui/pages/ai/whisper.js
 dashboard/ui/pages/ai/piper.js
 dashboard/ui/pages/ai/ai-all.js
+dashboard/ui/pages/agents/openclaw.js
 dashboard/ui/pages/agents/agents-all.js
 dashboard/ui/app.js
 # SAM3
@@ -60,6 +61,12 @@ SAM3/common/core/__init__.py
 SAM3/common/web/templates/index.html
 SAM3/common/web/static/js/dashboard.js
 SAM3/common/web/static/css/dashboard.css
+# OpenClaw
+OpenClaw/windows/setup-openclaw.ps1
+OpenClaw/linux-macos/setup-openclaw.sh
+OpenClaw/common/openclaw_web.py
+OpenClaw/common/requirements.txt
+OpenClaw/common/web/templates/index.html
 # LM Studio
 LMStudio/windows/setup-lmstudio.ps1
 LMStudio/linux-macos/setup-lmstudio.sh

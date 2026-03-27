@@ -82,6 +82,7 @@ SYNC_DASHBOARD_FILES = [
     "dashboard/ui/pages/ai/sam3.js",
     "dashboard/ui/pages/ai/ollama.js",
     "dashboard/ui/pages/ai/lmstudio.js",
+    "dashboard/ui/pages/agents/openclaw.js",
     "dashboard/ui/pages/ai/tgwui.js",
     "dashboard/ui/pages/ai/comfyui.js",
     "dashboard/ui/pages/ai/whisper.js",

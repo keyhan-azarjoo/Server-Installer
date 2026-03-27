@@ -40,6 +40,7 @@ DASHBOARD_UI_SCRIPTS = [
     "/static/ui/pages/ai/whisper.js",
     "/static/ui/pages/ai/piper.js",
     "/static/ui/pages/ai/ai-all.js",
+    "/static/ui/pages/agents/openclaw.js",
     "/static/ui/pages/agents/agents-all.js",
     "/static/ui/pages/ssl/ssl.js",
     "/static/ui/pages/files/files.js",
