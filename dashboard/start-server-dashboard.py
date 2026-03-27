@@ -684,7 +684,89 @@ def install_or_update_linux_service(root: Path, bind_host: str, selected_port: i
         stop_existing_dashboard_on_port(selected_port)
 
     use_https, cert_path, key_path = resolve_https_config()
+
+    # ── macOS: use launchd instead of systemd ────────────────────────────
+    if sys.platform == "darwin":
+        plist_label = "com.serverinstaller.dashboard"
+        plist_path = Path("/Library/LaunchDaemons") / f"{plist_label}.plist"
+        if not plist_path.parent.exists():
+            plist_path = Path.home() / "Library" / "LaunchAgents" / f"{plist_label}.plist"
+            plist_path.parent.mkdir(parents=True, exist_ok=True)
+        plist_text = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{plist_label}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{sys.executable}</string>
+    <string>{script_path}</string>
+    <string>--run-server</string>
+    <string>--host</string><string>{bind_host}</string>
+    <string>--port</string><string>{selected_port}</string>
+    <string>--https</string>
+    <string>--cert</string><string>{cert_path}</string>
+    <string>--key</string><string>{key_path}</string>
+  </array>
+  <key>WorkingDirectory</key><string>{root}</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>{root}/dashboard/dashboard.log</string>
+  <key>StandardErrorPath</key><string>{root}/dashboard/dashboard.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key><string>1</string>
+    <key>DASHBOARD_HTTPS</key><string>1</string>
+  </dict>
+</dict>
+</plist>
+"""
+        plist_path.write_text(plist_text, encoding="utf-8")
+        # Unload old, load new
+        run_capture(["launchctl", "bootout", "system", str(plist_path)], timeout=15)
+        rc, out = run_capture(["launchctl", "bootstrap", "system", str(plist_path)], timeout=30)
+        if rc != 0:
+            # Try user-level launchctl
+            run_capture(["launchctl", "unload", str(plist_path)], timeout=15)
+            rc, out = run_capture(["launchctl", "load", "-w", str(plist_path)], timeout=30)
+        if rc != 0:
+            print(f"launchctl load failed, starting directly...", file=sys.stderr)
+            # Fallback: just run in foreground
+            return run_dashboard_foreground(root, bind_host, selected_port, display_host, preclean=True)
+        # Wait for startup
+        time.sleep(3)
+        state_file = root / "dashboard" / "service-state.json"
+        state_file.write_text(json.dumps({"service": plist_label, "root": str(root), "host": bind_host, "port": selected_port, "updated_at": int(time.time())}, indent=2), encoding="utf-8")
+        ok, detail = check_local_http(selected_port, use_https=use_https)
+        hostname = socket.gethostname()
+        local_suffix = hostname if hostname.endswith(".local") else hostname + ".local"
+        primary_url, extra_urls = build_dashboard_urls(bind_host, selected_port)
+        print("")
+        print("=" * 60)
+        print("  Server Installer Dashboard — Running!")
+        print("=" * 60)
+        print(f"  URL:      {primary_url}")
+        if extra_urls:
+            for u in extra_urls:
+                print(f"            {u}")
+        print(f"            http://{local_suffix}:{selected_port}")
+        print(f"  Service:  {plist_label} (launchd)")
+        print(f"  Port:     {selected_port}")
+        if ok:
+            print(f"  Status:   RUNNING (HTTP {detail})")
+        else:
+            print(f"  Status:   STARTING (check: {root}/dashboard/dashboard.log)")
+        print("=" * 60)
+        print("")
+        return 0
+
+    # ── Linux: use systemd ───────────────────────────────────────────────
     unit_path = Path("/etc/systemd/system") / LINUX_SERVICE_NAME
+    if not unit_path.parent.exists():
+        print(f"systemd not available ({unit_path.parent} does not exist).", file=sys.stderr)
+        print("Starting dashboard in foreground instead...", file=sys.stderr)
+        return run_dashboard_foreground(root, bind_host, selected_port, display_host, preclean=True)
+
     unit_text = f"""[Unit]
 Description=Server Installer Dashboard
 After=network.target
