@@ -114,6 +114,25 @@
           </Card>
         </Grid>
 
+        {/* ── API Documents Button (top) ── */}
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #7c3aed44", background: "linear-gradient(135deg, #7c3aed05 0%, #ffffff 100%)" }}>
+            <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
+              <Stack direction="row" alignItems="center" spacing={1.5}>
+                <Box sx={{ width: 6, height: 36, borderRadius: 3, bgcolor: "#7c3aed" }} />
+                <Box sx={{ flexGrow: 1 }}>
+                  <Typography variant="h6" fontWeight={800} sx={{ color: "#7c3aed" }}>SAM3 API Documentation</Typography>
+                  <Typography variant="caption" color="text.secondary">16 API endpoints — detect, video, export, model info</Typography>
+                </Box>
+                <Chip label="16 endpoints" size="small" sx={{ bgcolor: "#7c3aed15", color: "#7c3aed", fontWeight: 700, border: "1px solid #7c3aed33" }} />
+                <Button variant="contained" size="small" onClick={() => setPage("ai-sam3-api")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, px: 3 }}>
+                  API Documents
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+
         {/* ── Install SAM3 (OS Service) ────────────────────────── */}
         <Grid item xs={12} md={cfg.os === "windows" ? 4 : 6}>
           <ActionCard
@@ -293,24 +312,6 @@
             </CardContent>
           </Card>
         </Grid>
-        {/* ── API Documents Button ── */}
-        <Grid item xs={12}>
-          <Card sx={{ borderRadius: 3, border: "1.5px solid #7c3aed44", background: "linear-gradient(135deg, #7c3aed05 0%, #ffffff 100%)" }}>
-            <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
-              <Stack direction="row" alignItems="center" spacing={1.5}>
-                <Box sx={{ width: 6, height: 36, borderRadius: 3, bgcolor: "#7c3aed" }} />
-                <Box sx={{ flexGrow: 1 }}>
-                  <Typography variant="h6" fontWeight={800} sx={{ color: "#7c3aed" }}>SAM3 API Documentation</Typography>
-                  <Typography variant="caption" color="text.secondary">16 API endpoints — detect, video, export, model info</Typography>
-                </Box>
-                <Chip label="16 endpoints" size="small" sx={{ bgcolor: "#7c3aed15", color: "#7c3aed", fontWeight: 700, border: "1px solid #7c3aed33" }} />
-                <Button variant="contained" size="small" onClick={() => setPage("ai-sam3-api")} sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, px: 3 }}>
-                  API Documents
-                </Button>
-              </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
       </Grid>
     );
   };
@@ -320,18 +321,16 @@
     const { Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip, Tooltip, Alert, setPage, sam3Service, copyText } = p;
     const sam3 = sam3Service || {};
     const host = String(sam3.host || "").trim();
-    const port = String(sam3.http_port || "5000").trim();
-    const base = "http://" + (host || "{host}") + ":" + (port || "{port}");
+    const httpPort = String(sam3.http_port || "5000").trim();
+    const httpsPort = String(sam3.https_port || "").trim();
+    const urlHost = (host && host !== "0.0.0.0" && host !== "*") ? host : "{host}";
+    const httpBase = "http://" + urlHost + ":" + httpPort;
+    const httpsBase = httpsPort ? "https://" + urlHost + ":" + httpsPort : "";
 
     const MC = { GET: { bg: "#dcfce7", c: "#166534", b: "#86efac" }, POST: { bg: "#dbeafe", c: "#1e40af", b: "#93c5fd" }, DELETE: { bg: "#fee2e2", c: "#991b1b", b: "#fca5a5" } };
     const mc = (m) => MC[m] || { bg: "#f3f4f6", c: "#374151", b: "#d1d5db" };
 
     const doCopy = (text) => { if (copyText) copyText(text, "cURL"); else if (navigator.clipboard) navigator.clipboard.writeText(text); };
-    const makeCurl = (method, path, body) => {
-      let c = 'curl -X ' + method + ' "' + base + path + '"';
-      if (body && body.indexOf("multipart") !== 0) c += ' \\\n  -H "Content-Type: application/json" \\\n  -d \'' + body + "'";
-      return c;
-    };
 
     const sections = [
       { name: "Image Detection", color: "#7c3aed", eps: [
@@ -376,11 +375,12 @@
                 <Chip label="16 endpoints" size="small" sx={{ bgcolor: "#7c3aed15", color: "#7c3aed", fontWeight: 700, border: "1px solid #7c3aed33" }} />
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
-                Complete API reference for SAM3 object detection & segmentation service. All endpoints are REST APIs accessible via HTTP.
+                Complete API reference for SAM3 object detection & segmentation. All endpoints support both HTTP and HTTPS.
               </Typography>
               <Alert severity="info" sx={{ borderRadius: 2 }}>
-                <b>Base URL:</b> <code style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>{base}</code>
-                {" "} — All paths below are relative to this base URL. Replace {"{host}:{port}"} with your SAM3 server address.
+                <b>HTTP:</b> <code style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>{httpBase}</code>
+                {httpsBase && <><br/><b>HTTPS:</b> <code style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>{httpsBase}</code></>}
+                {!httpsBase && <><br/><b>HTTPS:</b> <span style={{ color: "#94a3b8" }}>Not configured — set HTTPS Port during install to enable</span></>}
               </Alert>
             </CardContent>
           </Card>
@@ -401,14 +401,21 @@
                   const cl = mc(ep.m);
                   return (
                     <Paper key={ei} variant="outlined" sx={{ p: 2, mb: 1.5, borderRadius: 2, "&:hover": { borderColor: (sec.color || "#7c3aed") + "66", boxShadow: "0 1px 4px rgba(0,0,0,0.04)" } }}>
-                      {/* Method + Path */}
+                      {/* Method + Paths (HTTP + HTTPS) */}
                       <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "flex-start", md: "center" }}>
                         <Chip label={ep.m} size="small" sx={{ bgcolor: cl.bg, color: cl.c, border: "1px solid " + cl.b, fontWeight: 800, fontFamily: "monospace", minWidth: 70, justifyContent: "center" }} />
-                        <Typography sx={{ fontFamily: "'Cascadia Code','Fira Code','Consolas',monospace", fontWeight: 600, wordBreak: "break-all", flexGrow: 1, fontSize: 14 }}>
-                          {base}{ep.p}
-                        </Typography>
+                        <Box sx={{ flexGrow: 1 }}>
+                          <Typography sx={{ fontFamily: "'Cascadia Code','Fira Code','Consolas',monospace", fontWeight: 600, wordBreak: "break-all", fontSize: 14 }}>
+                            {httpBase}{ep.p}
+                          </Typography>
+                          {httpsBase && (
+                            <Typography sx={{ fontFamily: "'Cascadia Code','Fira Code','Consolas',monospace", fontWeight: 600, wordBreak: "break-all", fontSize: 13, color: "#059669", mt: 0.3 }}>
+                              {httpsBase}{ep.p}
+                            </Typography>
+                          )}
+                        </Box>
                         <Tooltip title="Copy cURL command">
-                          <Button size="small" variant="outlined" onClick={() => doCopy(makeCurl(ep.m, ep.p, ep.body))} sx={{ textTransform: "none", minWidth: 0, px: 1.5, fontSize: 11, borderColor: "#e2e8f0" }}>
+                          <Button size="small" variant="outlined" onClick={() => doCopy("curl -X " + ep.m + " \"" + httpBase + ep.p + "\"")} sx={{ textTransform: "none", minWidth: 0, px: 1.5, fontSize: 11, borderColor: "#e2e8f0" }}>
                             cURL
                           </Button>
                         </Tooltip>

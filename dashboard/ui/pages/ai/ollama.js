@@ -20,13 +20,18 @@
 
     var httpUrl = String(ollamaInfo.http_url || "").trim();
     var httpsUrl = String(ollamaInfo.https_url || "").trim();
-    var httpPort = String(ollamaInfo.http_port || "11434").trim();
+    var httpPort = String(ollamaInfo.http_port || "").trim();
+    var httpsPort = String(ollamaInfo.https_port || "").trim();
     var hostIp = String(ollamaInfo.host || "").trim();
     var installed = !!ollamaInfo.installed;
     var running = !!ollamaInfo.running;
     var webuiUrl = String(ollamaInfo.webui_url || "").trim();
-    var computedUrl = httpsUrl || httpUrl || (httpPort ? "http://" + (hostIp || "127.0.0.1") + ":" + httpPort : "");
-    var bestUrl = webuiUrl || computedUrl;
+    // Only show URLs when installed — use the user-selected IP
+    var displayHost = (hostIp && hostIp !== "0.0.0.0" && hostIp !== "*") ? hostIp : "";
+    var computedHttpUrl = installed && displayHost && httpPort ? "http://" + displayHost + ":" + httpPort : (installed ? httpUrl : "");
+    var computedHttpsUrl = installed && displayHost && httpsPort ? "https://" + displayHost + ":" + httpsPort : (installed ? httpsUrl : "");
+    var computedUrl = computedHttpsUrl || computedHttpUrl;
+    var bestUrl = installed ? (webuiUrl || computedUrl) : "";
 
     var _ms = React.useState([]);
     var models = _ms[0], setModels = _ms[1];
@@ -173,6 +178,26 @@
           </Card>
         </Grid>
 
+        {/* API Documents Button (top) */}
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #1e40af44", background: "linear-gradient(135deg, #1e40af05 0%, #ffffff 100%)" }}>
+            <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
+              <Stack direction="row" alignItems="center" spacing={1.5}>
+                <Box sx={{ width: 6, height: 36, borderRadius: 3, bgcolor: "#1e40af" }} />
+                <Box sx={{ flexGrow: 1 }}>
+                  <Typography variant="h6" fontWeight={800} sx={{ color: "#1e40af" }}>Ollama API Documentation</Typography>
+                  <Typography variant="caption" color="text.secondary">OpenAI-compatible API — chat, generate, embeddings, model management</Typography>
+                </Box>
+                <Chip label="12 endpoints" size="small" sx={{ bgcolor: "#1e40af15", color: "#1e40af", fontWeight: 700, border: "1px solid #1e40af33" }} />
+                <Button variant="contained" size="small" onClick={function() { setPage("ai-ollama-api"); }}
+                  sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: "#1e40af", "&:hover": { bgcolor: "#1d4ed8" }, px: 3 }}>
+                  API Documents
+                </Button>
+              </Stack>
+            </CardContent>
+          </Card>
+        </Grid>
+
         {/* Install OS */}
         <Grid item xs={12} md={cfg.os === "windows" ? 4 : 6}>
           <ActionCard
@@ -217,12 +242,14 @@
             <CardContent>
               <Typography variant="h6" fontWeight={800} sx={{ mb: 1, color: "#1e40af" }}>Ollama Status</Typography>
               <Typography variant="body2">Installed: <Chip size="small" label={installed ? "Yes" : "No"} color={installed ? "success" : "default"} sx={{ ml: 0.5 }} /></Typography>
-              <Typography variant="body2">Running: <Chip size="small" label={running ? "Running" : "Stopped"} color={running ? "success" : "warning"} sx={{ ml: 0.5 }} /></Typography>
-              <Typography variant="body2">API Port: <b>{httpPort}</b></Typography>
+              {installed && <Typography variant="body2">Running: <Chip size="small" label={running ? "Running" : "Stopped"} color={running ? "success" : "warning"} sx={{ ml: 0.5 }} /></Typography>}
+              {installed && displayHost && <Typography variant="body2">Host: <b>{displayHost}</b></Typography>}
+              {installed && httpPort && <Typography variant="body2">API Port: <b>{httpPort}</b></Typography>}
               {ollamaInfo.version && <Typography variant="body2">Version: <b>{ollamaInfo.version}</b></Typography>}
-              {computedUrl && <Typography variant="body2" sx={{ mt: 0.5, wordBreak: "break-all" }}>API: <a href={computedUrl} target="_blank" rel="noopener">{computedUrl}</a></Typography>}
+              {computedHttpUrl && <Typography variant="body2" sx={{ mt: 0.5, wordBreak: "break-all" }}>HTTP: <a href={computedHttpUrl} target="_blank" rel="noopener">{computedHttpUrl}</a></Typography>}
+              {computedHttpsUrl && <Typography variant="body2" sx={{ wordBreak: "break-all" }}>HTTPS: <a href={computedHttpsUrl} target="_blank" rel="noopener">{computedHttpsUrl}</a></Typography>}
               {webuiUrl && <Typography variant="body2" sx={{ wordBreak: "break-all" }}>Web UI: <a href={webuiUrl} target="_blank" rel="noopener">{webuiUrl}</a></Typography>}
-              <Typography variant="body2" sx={{ mt: 0.5 }}>Models: <b>{models.length}</b></Typography>
+              {installed && <Typography variant="body2" sx={{ mt: 0.5 }}>Models: <b>{models.length}</b></Typography>}
               {bestUrl && (
                 <Button variant="contained" size="small" sx={{ mt: 1.5, textTransform: "none", bgcolor: "#1e40af", "&:hover": { bgcolor: "#1d4ed8" } }}
                   onClick={function() { window.open(bestUrl, "_blank", "noopener,noreferrer"); }}>
@@ -413,25 +440,7 @@
           </Card>
         </Grid>
 
-        {/* API Documents Button */}
-        <Grid item xs={12}>
-          <Card sx={{ borderRadius: 3, border: "1.5px solid #1e40af44", background: "linear-gradient(135deg, #1e40af05 0%, #ffffff 100%)" }}>
-            <CardContent sx={{ py: 2, "&:last-child": { pb: 2 } }}>
-              <Stack direction="row" alignItems="center" spacing={1.5}>
-                <Box sx={{ width: 6, height: 36, borderRadius: 3, bgcolor: "#1e40af" }} />
-                <Box sx={{ flexGrow: 1 }}>
-                  <Typography variant="h6" fontWeight={800} sx={{ color: "#1e40af" }}>Ollama API Documentation</Typography>
-                  <Typography variant="caption" color="text.secondary">OpenAI-compatible API — chat, generate, embeddings, model management</Typography>
-                </Box>
-                <Chip label="12 endpoints" size="small" sx={{ bgcolor: "#1e40af15", color: "#1e40af", fontWeight: 700, border: "1px solid #1e40af33" }} />
-                <Button variant="contained" size="small" onClick={function() { setPage("ai-ollama-api"); }}
-                  sx={{ textTransform: "none", borderRadius: 2, fontWeight: 700, bgcolor: "#1e40af", "&:hover": { bgcolor: "#1d4ed8" }, px: 3 }}>
-                  API Documents
-                </Button>
-              </Stack>
-            </CardContent>
-          </Card>
-        </Grid>
+        {/* (API button moved to top) */}
       </Grid>
     );
   };
@@ -444,10 +453,12 @@
     var setPage = p.setPage, copyText = p.copyText;
 
     var ollamaInfo = p.ollamaService || {};
-    var host = String(ollamaInfo.host || "").trim() || "{host}";
-    var port = String(ollamaInfo.http_port || "11434").trim();
-    if (host === "0.0.0.0") host = "127.0.0.1";
-    var base = "http://" + host + ":" + port;
+    var host = String(ollamaInfo.host || "").trim();
+    var urlHost = (host && host !== "0.0.0.0" && host !== "*") ? host : "{host}";
+    var httpPort = String(ollamaInfo.http_port || "11434").trim();
+    var httpsPort = String(ollamaInfo.https_port || "").trim();
+    var httpBase = "http://" + urlHost + ":" + httpPort;
+    var httpsBase = httpsPort ? "https://" + urlHost + ":" + httpsPort : "";
 
     var MC = { GET: { bg: "#dcfce7", c: "#166534", b: "#86efac" }, POST: { bg: "#dbeafe", c: "#1e40af", b: "#93c5fd" }, DELETE: { bg: "#fee2e2", c: "#991b1b", b: "#fca5a5" } };
     var mc = function(m) { return MC[m] || { bg: "#f3f4f6", c: "#374151", b: "#d1d5db" }; };
@@ -487,8 +498,10 @@
                 <Chip label="12 endpoints" size="small" sx={{ bgcolor: "#1e40af15", color: "#1e40af", fontWeight: 700 }} />
               </Stack>
               <Alert severity="info" sx={{ borderRadius: 2, mt: 1 }}>
-                <b>Base URL:</b> <code style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>{base}</code>
-                {" "} — Also supports OpenAI /v1/ endpoints. Point any OpenAI SDK to this URL.
+                <b>HTTP:</b> <code style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>{httpBase}</code>
+                {httpsBase && <><br/><b>HTTPS:</b> <code style={{ background: "#f1f5f9", padding: "2px 8px", borderRadius: 4, fontWeight: 700 }}>{httpsBase}</code></>}
+                {!httpsBase && <><br/><b>HTTPS:</b> <span style={{ color: "#94a3b8" }}>Not configured — set HTTPS Port during install</span></>}
+                <br/>Also supports OpenAI /v1/ endpoints. Point any OpenAI SDK to these URLs.
               </Alert>
             </CardContent>
           </Card>
@@ -509,9 +522,14 @@
                       <Paper key={ei} variant="outlined" sx={{ p: 2, mb: 1.5, borderRadius: 2, "&:hover": { borderColor: sec.color + "66" } }}>
                         <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ xs: "flex-start", md: "center" }}>
                           <Chip label={ep.m} size="small" sx={{ bgcolor: cl.bg, color: cl.c, border: "1px solid " + cl.b, fontWeight: 800, fontFamily: "monospace", minWidth: 70, justifyContent: "center" }} />
-                          <Typography sx={{ fontFamily: "monospace", fontWeight: 600, wordBreak: "break-all", flexGrow: 1, fontSize: 14 }}>{base + ep.p}</Typography>
+                          <Box sx={{ flexGrow: 1 }}>
+                            <Typography sx={{ fontFamily: "monospace", fontWeight: 600, wordBreak: "break-all", fontSize: 14 }}>{httpBase + ep.p}</Typography>
+                            {httpsBase && (
+                              <Typography sx={{ fontFamily: "monospace", fontWeight: 600, wordBreak: "break-all", fontSize: 13, color: "#059669", mt: 0.3 }}>{httpsBase + ep.p}</Typography>
+                            )}
+                          </Box>
                           <Tooltip title="Copy cURL">
-                            <Button size="small" variant="outlined" onClick={function() { doCopy("curl -X " + ep.m + " \"" + base + ep.p + "\""); }} sx={{ textTransform: "none", minWidth: 0, px: 1.5, fontSize: 11, borderColor: "#e2e8f0" }}>cURL</Button>
+                            <Button size="small" variant="outlined" onClick={function() { doCopy("curl -X " + ep.m + " \"" + httpBase + ep.p + "\""); }} sx={{ textTransform: "none", minWidth: 0, px: 1.5, fontSize: 11, borderColor: "#e2e8f0" }}>cURL</Button>
                           </Tooltip>
                         </Stack>
                         <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>{ep.d}</Typography>
