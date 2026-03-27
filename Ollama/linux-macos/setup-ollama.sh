@@ -92,7 +92,8 @@ else
     export OLLAMA_HOST="127.0.0.1:${OLLAMA_INTERNAL_PORT}"
     export OLLAMA_ORIGINS="*"
     if command -v ollama &>/dev/null; then
-        nohup ollama serve >> "$LOG_FILE" 2>&1 &
+        ollama serve >> "$LOG_FILE" 2>&1 &
+        disown 2>/dev/null || true
         log "Ollama started in background."
     else
         # On macOS, Ollama app may already be running its own server on 11434
@@ -302,15 +303,30 @@ WUIEOF
     systemctl restart "${OLLAMA_SERVICE_NAME}-webui"
     log "Web UI systemd service started."
 else
-    # macOS or no systemd — start Web UI as background process
+    # macOS or no systemd — use Python to launch as daemon
     log "Starting Web UI in background on port ${WEB_PORT}..."
-    nohup "${VENV_PYTHON}" "${INSTALL_DIR}/start-ollama-webui.py" >> "${LOG_FILE}" 2>&1 &
-    WEBUI_PID=$!
-    sleep 2
-    if kill -0 "$WEBUI_PID" 2>/dev/null; then
-        log "Web UI started (PID: ${WEBUI_PID})."
+    "${VENV_PYTHON}" -c "
+import subprocess, sys, os
+log = open('${LOG_FILE}', 'a')
+env = dict(os.environ)
+env['OLLAMA_API_BASE'] = 'http://127.0.0.1:${OLLAMA_INTERNAL_PORT}'
+env['OLLAMA_WEB_PORT'] = '${WEB_PORT}'
+env['OLLAMA_HTTPS_PORT'] = '${HTTPS_PORT}'
+env['OLLAMA_CERT_FILE'] = '${CERT_DIR}/ollama.crt'
+env['OLLAMA_KEY_FILE'] = '${CERT_DIR}/ollama.key'
+p = subprocess.Popen(
+    [sys.executable, '${INSTALL_DIR}/start-ollama-webui.py'],
+    cwd='${INSTALL_DIR}', env=env,
+    stdout=log, stderr=log,
+    start_new_session=True
+)
+print(f'Started PID {p.pid}')
+" 2>&1
+    sleep 3
+    if curl -sf "http://127.0.0.1:${WEB_PORT}/api/health" >/dev/null 2>&1; then
+        log "Web UI running on port ${WEB_PORT}."
     else
-        log "WARNING: Web UI may not have started. Check log: ${LOG_FILE}"
+        log "Web UI may still be starting. Check log: ${LOG_FILE}"
     fi
 fi
 

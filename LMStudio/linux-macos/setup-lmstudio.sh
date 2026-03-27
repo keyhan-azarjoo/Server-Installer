@@ -230,10 +230,29 @@ SVCEOF
     log "Web UI systemd service started."
 else
     log "Starting Web UI in background on port ${WEB_PORT}..."
-    export LMSTUDIO_API_BASE="http://127.0.0.1:${LMSTUDIO_INTERNAL_PORT}"
-    export LMSTUDIO_WEB_PORT="${WEB_PORT}"
-    nohup "${VENV_PYTHON}" "${INSTALL_DIR}/start-lmstudio-webui.py" >> "${LOG_FILE}" 2>&1 &
-    log "Web UI started (PID: $!)."
+    "${VENV_PYTHON}" -c "
+import subprocess, sys, os
+log = open('${LOG_FILE}', 'a')
+env = dict(os.environ)
+env['LMSTUDIO_API_BASE'] = 'http://127.0.0.1:${LMSTUDIO_INTERNAL_PORT}'
+env['LMSTUDIO_WEB_PORT'] = '${WEB_PORT}'
+env['LMSTUDIO_HTTPS_PORT'] = '${HTTPS_PORT}'
+env['LMSTUDIO_CERT_FILE'] = '${CERT_DIR}/lmstudio.crt'
+env['LMSTUDIO_KEY_FILE'] = '${CERT_DIR}/lmstudio.key'
+p = subprocess.Popen(
+    [sys.executable, '${INSTALL_DIR}/start-lmstudio-webui.py'],
+    cwd='${INSTALL_DIR}', env=env,
+    stdout=log, stderr=log,
+    start_new_session=True
+)
+print(f'Started PID {p.pid}')
+" 2>&1
+    sleep 3
+    if curl -sf "http://127.0.0.1:${WEB_PORT}/api/health" >/dev/null 2>&1; then
+        log "Web UI running on port ${WEB_PORT}."
+    else
+        log "Web UI may still be starting. Check log: ${LOG_FILE}"
+    fi
 fi
 
 # ── Step 9: Firewall ────────────────────────────────────────────────────────

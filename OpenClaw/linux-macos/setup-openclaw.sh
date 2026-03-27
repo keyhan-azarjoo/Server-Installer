@@ -193,29 +193,29 @@ SVCEOF
 else
     log "Starting Web UI in background on port ${WEB_PORT}..."
     export OPENCLAW_WEB_PORT="${WEB_PORT}"
-    # Verify files exist before starting
-    if [ ! -f "${INSTALL_DIR}/openclaw_web.py" ]; then
-        log "WARNING: openclaw_web.py not found in ${INSTALL_DIR}. Listing files:"
-        ls -la "${INSTALL_DIR}/" 2>&1 | while read line; do log "  $line"; done
-    fi
-    if [ ! -f "${INSTALL_DIR}/start-openclaw-webui.py" ]; then
-        log "WARNING: start-openclaw-webui.py not found in ${INSTALL_DIR}"
-    fi
-    nohup "${VENV_PYTHON}" "${INSTALL_DIR}/start-openclaw-webui.py" >> "${LOG_FILE}" 2>&1 &
-    WEBUI_PID=$!
+    # Use Python to launch as a proper daemon (nohup fails from non-terminal)
+    "${VENV_PYTHON}" -c "
+import subprocess, sys, os
+log = open('${LOG_FILE}', 'a')
+env = dict(os.environ)
+env['OPENCLAW_WEB_PORT'] = '${WEB_PORT}'
+env['OPENCLAW_HTTPS_PORT'] = '${HTTPS_PORT}'
+env['OPENCLAW_CERT_FILE'] = '${CERT_DIR}/openclaw.crt'
+env['OPENCLAW_KEY_FILE'] = '${CERT_DIR}/openclaw.key'
+p = subprocess.Popen(
+    [sys.executable, '${INSTALL_DIR}/start-openclaw-webui.py'],
+    cwd='${INSTALL_DIR}', env=env,
+    stdout=log, stderr=log,
+    start_new_session=True
+)
+print(f'Started PID {p.pid}')
+" 2>&1
     sleep 3
-    # Check if still running
-    if kill -0 "$WEBUI_PID" 2>/dev/null; then
-        log "Web UI running (PID: ${WEBUI_PID})."
-        # Verify it's responding
-        if curl -sf "http://127.0.0.1:${WEB_PORT}/api/health" >/dev/null 2>&1; then
-            log "Web UI responding on port ${WEB_PORT}."
-        else
-            log "Web UI process running but not responding yet. Check log: ${LOG_FILE}"
-        fi
+    if curl -sf "http://127.0.0.1:${WEB_PORT}/api/health" >/dev/null 2>&1; then
+        log "Web UI running on port ${WEB_PORT}."
     else
-        log "WARNING: Web UI process died. Last log lines:"
-        tail -20 "${LOG_FILE}" 2>/dev/null | while read line; do log "  $line"; done
+        log "Web UI may still be starting. Check log: ${LOG_FILE}"
+        tail -5 "${LOG_FILE}" 2>/dev/null | while read line; do log "  $line"; done
     fi
 fi
 
