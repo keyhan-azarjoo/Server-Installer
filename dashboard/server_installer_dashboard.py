@@ -2562,9 +2562,36 @@ def _install_engine_docker(log):
                 log("https://www.docker.com/products/docker-desktop/")
                 return 1, "Docker installation failed."
         else:
-            log("Homebrew not found. Install Docker Desktop manually:")
-            log("https://www.docker.com/products/docker-desktop/")
-            return 1, "Install Docker Desktop from docker.com"
+            # No brew — download Docker Desktop .dmg directly
+            log("Homebrew not found. Downloading Docker Desktop directly...")
+            import platform as _plat
+            arch = _plat.machine()
+            if arch == "arm64":
+                dmg_url = "https://desktop.docker.com/mac/main/arm64/Docker.dmg"
+            else:
+                dmg_url = "https://desktop.docker.com/mac/main/amd64/Docker.dmg"
+            dmg_path = "/tmp/Docker.dmg"
+            code = _run_install_cmd(["curl", "-fSL", dmg_url, "-o", dmg_path], log, timeout=300)
+            if code == 0 and Path(dmg_path).exists():
+                log("Mounting Docker.dmg...")
+                _run_install_cmd(["hdiutil", "attach", dmg_path, "-nobrowse"], log, timeout=30)
+                _run_install_cmd(["cp", "-R", "/Volumes/Docker/Docker.app", "/Applications/"], log, timeout=60)
+                _run_install_cmd(["hdiutil", "detach", "/Volumes/Docker"], log, timeout=15)
+                Path(dmg_path).unlink(missing_ok=True)
+                log("Docker Desktop installed. Opening...")
+                _run_install_cmd(["open", "/Applications/Docker.app"], log, timeout=10)
+                import time
+                for i in range(30):
+                    time.sleep(2)
+                    if command_exists("docker"):
+                        log("Docker is ready.")
+                        return 0, "Docker installed."
+                    log(f"Waiting for Docker... ({i+1}/30)")
+                return 0, "Docker installed. Open Docker Desktop to complete setup."
+            else:
+                log("Download failed. Install Docker Desktop manually:")
+                log("https://www.docker.com/products/docker-desktop/")
+                return 1, "Docker installation failed."
     else:
         # Linux
         log("Installing Docker via official script...")

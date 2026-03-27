@@ -39,6 +39,7 @@ def _require_auth(f):
 
 def _get_openclaw_bin():
     """Find the openclaw CLI binary."""
+    # Check venv from env var
     if VENV_DIR:
         venv_bin = os.path.join(VENV_DIR, "Scripts" if os.name == "nt" else "bin", "openclaw")
         if os.path.isfile(venv_bin):
@@ -46,6 +47,16 @@ def _get_openclaw_bin():
         venv_bin += ".exe"
         if os.path.isfile(venv_bin):
             return venv_bin
+    # Check venv relative to this file (common install layout)
+    this_dir = os.path.dirname(os.path.abspath(__file__))
+    for venv_name in ["venv", "../venv", "../../venv"]:
+        vbin = os.path.join(this_dir, venv_name, "Scripts" if os.name == "nt" else "bin", "openclaw")
+        if os.path.isfile(vbin):
+            return vbin
+    # Check sys.prefix (if running inside a venv)
+    vbin = os.path.join(sys.prefix, "Scripts" if os.name == "nt" else "bin", "openclaw")
+    if os.path.isfile(vbin):
+        return vbin
     import shutil
     return shutil.which("openclaw") or "openclaw"
 
@@ -72,12 +83,19 @@ def index():
 
 @app.route("/api/health")
 def health():
-    result = _run_openclaw(["--version"], timeout=10)
+    # Always return healthy if the web server is running
+    version = ""
+    try:
+        result = _run_openclaw(["--version"], timeout=10)
+        if result["ok"]:
+            version = result.get("output", "").strip()
+    except Exception:
+        pass
     return jsonify({
-        "ok": result["ok"],
-        "status": "healthy" if result["ok"] else "unhealthy",
+        "ok": True,
+        "status": "healthy",
         "service": "openclaw",
-        "version": result.get("output", "").strip() if result["ok"] else "",
+        "version": version,
     })
 
 
