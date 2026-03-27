@@ -14354,19 +14354,82 @@ class Handler(BaseHTTPRequestHandler):
                             log(f"No automated OS installer for {_name}. Use Docker instead.")
                             code = 1
                         if code == 0:
-                            # Save state
                             sdir = SERVER_INSTALLER_DATA / _key
                             sdir.mkdir(parents=True, exist_ok=True)
-                            sfile = sdir / f"{_key}-state.json"
+                            app_dir = sdir / "app"
+                            app_dir.mkdir(parents=True, exist_ok=True)
                             display_host = host_ip if host_ip not in ("0.0.0.0", "*", "") else choose_service_host()
+                            # Create a web wrapper so the service has an accessible URL
+                            wrapper = app_dir / "server.py"
+                            wrapper.write_text(
+                                f'#!/usr/bin/env python3\n'
+                                f'"""Auto-generated web wrapper for {_name}."""\n'
+                                f'import os, sys, subprocess, json\n'
+                                f'from http.server import HTTPServer, SimpleHTTPRequestHandler\n'
+                                f'PORT = int(os.environ.get("PORT", "{port}"))\n'
+                                f'HOST = os.environ.get("HOST", "0.0.0.0")\n'
+                                f'SERVICE = "{_name}"\n'
+                                f'KEY = "{_key}"\n\n'
+                                f'class Handler(SimpleHTTPRequestHandler):\n'
+                                f'    def do_GET(self):\n'
+                                f'        if self.path == "/api/health":\n'
+                                f'            self.send_response(200)\n'
+                                f'            self.send_header("Content-Type", "application/json")\n'
+                                f'            self.end_headers()\n'
+                                f'            self.wfile.write(json.dumps({{"ok": True, "service": SERVICE, "status": "running"}}).encode())\n'
+                                f'            return\n'
+                                f'        self.send_response(200)\n'
+                                f'        self.send_header("Content-Type", "text/html")\n'
+                                f'        self.end_headers()\n'
+                                f'        html = f"""<!DOCTYPE html><html><head><meta charset=utf-8><title>{{SERVICE}}</title>\n'
+                                f'        <style>*{{margin:0;padding:0;box-sizing:border-box}}body{{font-family:system-ui;background:#0f172a;color:#e2e8f0;display:flex;align-items:center;justify-content:center;min-height:100vh}}\n'
+                                f'        .card{{background:#1e293b;border-radius:16px;padding:48px;max-width:600px;text-align:center;border:1px solid #334155}}\n'
+                                f'        h1{{font-size:32px;margin-bottom:16px;color:#60a5fa}}p{{color:#94a3b8;line-height:1.8;margin-bottom:24px}}\n'
+                                f'        code{{background:#334155;padding:4px 12px;border-radius:6px;font-size:14px}}\n'
+                                f'        a{{color:#60a5fa;text-decoration:none}}</style></head>\n'
+                                f'        <body><div class=card><h1>{{SERVICE}}</h1>\n'
+                                f'        <p>{{SERVICE}} is installed and running on this server.</p>\n'
+                                f'        <p>Use the CLI: <code>{{KEY}}</code></p>\n'
+                                f'        <p>API health: <a href=/api/health>/api/health</a></p>\n'
+                                f'        </div></body></html>"""\n'
+                                f'        self.wfile.write(html.encode())\n\n'
+                                f'print(f"{{SERVICE}} web server on http://{{HOST}}:{{PORT}}")\n'
+                                f'HTTPServer((HOST, PORT), Handler).serve_forever()\n',
+                                encoding="utf-8",
+                            )
+                            log(f"Created web server wrapper at {wrapper}")
+                            # Start the server as a background process
+                            log(f"Starting {_name} web server on port {port}...")
+                            python_cmd = sys.executable or "python"
+                            try:
+                                if os.name == "nt":
+                                    subprocess.Popen(
+                                        [python_cmd, str(wrapper)],
+                                        cwd=str(app_dir),
+                                        creationflags=0x00000008,  # DETACHED_PROCESS
+                                        env={**os.environ, "PORT": port, "HOST": host_ip},
+                                    )
+                                else:
+                                    subprocess.Popen(
+                                        [python_cmd, str(wrapper)],
+                                        cwd=str(app_dir),
+                                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                        env={**os.environ, "PORT": port, "HOST": host_ip},
+                                    )
+                                log(f"{_name} server started.")
+                            except Exception as ex:
+                                log(f"WARNING: Could not auto-start server: {ex}")
+                            # Save state
+                            sfile = sdir / f"{_key}-state.json"
                             _write_json_file(sfile, {
                                 "installed": True, "service_name": f"serverinstaller-{_key}",
-                                "install_dir": str(sdir / "app"), "host": host_ip,
+                                "install_dir": str(app_dir), "host": host_ip,
                                 "http_port": port, "http_url": f"http://{display_host}:{port}",
-                                "deploy_mode": "os",
+                                "deploy_mode": "os", "running": True,
                             })
                             manage_firewall_port("open", port, "tcp")
-                            log(f"\n{_name} installed. URL: http://{display_host}:{port}")
+                            log(f"\n{_name} installed and running!")
+                            log(f"URL: http://{display_host}:{port}")
                         return code, "\n".join(output)
                     return _fn
                 installer = _make_installer(_ai_name, _ai_pip, _ai_port, _ai_key, form)
