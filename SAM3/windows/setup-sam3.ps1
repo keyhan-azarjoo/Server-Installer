@@ -218,7 +218,9 @@ if (-not (Test-Path $certFile) -or -not (Test-Path $keyFile)) {
     Write-Host "[INFO] Generating self-signed SSL certificate..."
     $opensslExe = Get-Command openssl.exe -ErrorAction SilentlyContinue
     if ($opensslExe) {
-        $certCN = if ($domain) { $domain } elseif ($hostIp) { $hostIp } else { 'localhost' }
+        $certCN = $domain
+        if (-not $certCN) { $certCN = $hostIp }
+        if (-not $certCN) { $certCN = 'localhost' }
         $subj = "/CN=$certCN/O=ServerInstaller/C=US"
         & $opensslExe.Source req -x509 -nodes -newkey rsa:2048 -keyout $keyFile -out $certFile -days 3650 -subj $subj 2>$null
     } else {
@@ -268,8 +270,8 @@ SAM3_USERNAME = os.environ.get('SAM3_USERNAME', '$username')
 SAM3_PASSWORD = os.environ.get('SAM3_PASSWORD', '$password')
 SAM3_USE_OS_AUTH = os.environ.get('SAM3_USE_OS_AUTH', '$useOsAuth')
 SAM3_HTTPS_PORT = os.environ.get('SAM3_HTTPS_PORT', '$httpsPort')
-SAM3_CERT_FILE = os.environ.get('SAM3_CERT_FILE', '$certFile')
-SAM3_KEY_FILE = os.environ.get('SAM3_KEY_FILE', '$keyFile')
+SAM3_CERT_FILE = os.environ.get('SAM3_CERT_FILE', r'$certFile')
+SAM3_KEY_FILE = os.environ.get('SAM3_KEY_FILE', r'$keyFile')
 
 from app import app
 
@@ -308,29 +310,45 @@ for rule in list(app.url_map.iter_rules()):
 
 def run_https(app, host, port, certfile, keyfile):
     try:
+        certfile = os.path.normpath(certfile)
+        keyfile = os.path.normpath(keyfile)
+        print(f'SAM3 HTTPS: loading cert={certfile} key={keyfile}')
+        if not os.path.isfile(certfile):
+            print(f'SAM3 HTTPS ERROR: cert file not found: {certfile}')
+            return
+        if not os.path.isfile(keyfile):
+            print(f'SAM3 HTTPS ERROR: key file not found: {keyfile}')
+            return
         ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
         ctx.load_cert_chain(certfile, keyfile)
         from werkzeug.serving import make_server
         server = make_server(host, port, app, ssl_context=ctx, threaded=True)
         print(f'SAM3 HTTPS running on https://{host}:{port}')
         server.serve_forever()
     except Exception as e:
-        print(f'HTTPS server failed: {e}')
+        import traceback
+        print(f'SAM3 HTTPS server failed: {e}')
+        traceback.print_exc()
 
 if __name__ == '__main__':
     host = os.environ.get('SAM3_HOST', '0.0.0.0')
     http_port = int(os.environ.get('SAM3_PORT', $httpPort))
 
     https_port = SAM3_HTTPS_PORT.strip()
-    if https_port and https_port.isdigit() and os.path.isfile(SAM3_CERT_FILE) and os.path.isfile(SAM3_KEY_FILE):
+    cert_path = os.path.normpath(SAM3_CERT_FILE) if SAM3_CERT_FILE else ''
+    key_path = os.path.normpath(SAM3_KEY_FILE) if SAM3_KEY_FILE else ''
+    if https_port and https_port.isdigit() and os.path.isfile(cert_path) and os.path.isfile(key_path):
         https_thread = threading.Thread(
             target=run_https,
-            args=(app, host, int(https_port), SAM3_CERT_FILE, SAM3_KEY_FILE),
+            args=(app, host, int(https_port), cert_path, key_path),
             daemon=True,
         )
         https_thread.start()
         print(f'SAM3 starting HTTP on http://{host}:{http_port} and HTTPS on https://{host}:{https_port}')
     else:
+        if https_port and https_port.isdigit():
+            print(f'SAM3 HTTPS: cert not found at {cert_path} or {key_path} - HTTPS disabled')
         print(f'SAM3 starting on http://{host}:{http_port}')
 
     app.run(host=host, port=http_port, debug=False, threaded=True)
