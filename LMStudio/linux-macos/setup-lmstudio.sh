@@ -25,27 +25,109 @@ SYSTEMD_FILE="/etc/systemd/system/${LMSTUDIO_SERVICE_NAME}-webui.service"
 log() { echo "[LM Studio] $*"; }
 mkdir -p "$STATE_DIR" "$INSTALL_DIR" "$CERT_DIR"
 
-# ── Step 1: Check/Install LM Studio CLI ─────────────────────────────────────
-log "Checking for LM Studio CLI (lms)..."
-if command -v lms &>/dev/null; then
-    log "lms CLI found: $(command -v lms)"
+# ── Step 1: Install LM Studio ────────────────────────────────────────────────
+log "Checking for LM Studio..."
+OS_TYPE="$(uname -s)"
+ARCH="$(uname -m)"
+
+# Check if LM Studio app is already installed
+LMSTUDIO_APP_INSTALLED=false
+if [ "$OS_TYPE" = "Darwin" ]; then
+    [ -d "/Applications/LM Studio.app" ] && LMSTUDIO_APP_INSTALLED=true
+elif [ -f "/opt/lmstudio/lm-studio" ] || [ -f "$HOME/.local/bin/lm-studio" ]; then
+    LMSTUDIO_APP_INSTALLED=true
+fi
+command -v lms &>/dev/null && LMSTUDIO_APP_INSTALLED=true
+
+if [ "$LMSTUDIO_APP_INSTALLED" = "true" ]; then
+    log "LM Studio already installed."
 else
-    log "lms CLI not found. Trying npm install..."
-    if command -v npm &>/dev/null; then
-        npm install -g @lmstudio/cli 2>/dev/null || true
+    log "Downloading and installing LM Studio..."
+    if [ "$OS_TYPE" = "Darwin" ]; then
+        # macOS: download .dmg and install
+        if [ "$ARCH" = "arm64" ]; then
+            DMG_URL="https://installers.lmstudio.ai/darwin/arm64/LM-Studio-latest.dmg"
+        else
+            DMG_URL="https://installers.lmstudio.ai/darwin/x64/LM-Studio-latest.dmg"
+        fi
+        DMG_PATH="/tmp/LMStudio.dmg"
+        log "Downloading from ${DMG_URL}..."
+        curl -fSL "$DMG_URL" -o "$DMG_PATH" || true
+        if [ -f "$DMG_PATH" ]; then
+            log "Mounting DMG..."
+            MOUNT_POINT=$(hdiutil attach "$DMG_PATH" -nobrowse -noverify 2>/dev/null | grep "/Volumes" | awk '{print $NF}')
+            if [ -n "$MOUNT_POINT" ]; then
+                log "Copying LM Studio to /Applications..."
+                cp -R "${MOUNT_POINT}/LM Studio.app" /Applications/ 2>/dev/null || \
+                    cp -R "${MOUNT_POINT}/"*".app" /Applications/ 2>/dev/null || true
+                hdiutil detach "$MOUNT_POINT" 2>/dev/null || true
+                log "LM Studio installed to /Applications."
+                # Launch it once to initialize
+                open "/Applications/LM Studio.app" 2>/dev/null || true
+                sleep 5
+            else
+                log "WARNING: Could not mount DMG."
+            fi
+            rm -f "$DMG_PATH"
+        else
+            log "WARNING: Download failed. Install manually from https://lmstudio.ai/download"
+        fi
+    else
+        # Linux: download AppImage
+        if [ "$ARCH" = "x86_64" ]; then
+            APPIMAGE_URL="https://installers.lmstudio.ai/linux/x64/LM-Studio-latest.AppImage"
+        else
+            APPIMAGE_URL="https://installers.lmstudio.ai/linux/arm64/LM-Studio-latest.AppImage"
+        fi
+        APPIMAGE_PATH="/opt/lmstudio/lm-studio"
+        mkdir -p /opt/lmstudio
+        log "Downloading from ${APPIMAGE_URL}..."
+        curl -fSL "$APPIMAGE_URL" -o "$APPIMAGE_PATH" || true
+        if [ -f "$APPIMAGE_PATH" ]; then
+            chmod +x "$APPIMAGE_PATH"
+            log "LM Studio installed to ${APPIMAGE_PATH}."
+        else
+            log "WARNING: Download failed. Install manually from https://lmstudio.ai/download"
+        fi
     fi
-    if ! command -v lms &>/dev/null; then
-        log "LM Studio CLI not available."
-        log "Install LM Studio from https://lmstudio.ai/download"
-        log "Then: LM Studio > Settings > Enable CLI"
-        log "Continuing with web UI setup..."
+fi
+
+# Install CLI tool
+if ! command -v lms &>/dev/null; then
+    if command -v npm &>/dev/null; then
+        log "Installing LM Studio CLI (lms) via npm..."
+        npm install -g @lmstudio/cli 2>/dev/null || true
     fi
 fi
 
 # ── Step 2: Start LM Studio server ──────────────────────────────────────────
+log "Starting LM Studio server..."
 if command -v lms &>/dev/null; then
-    log "Starting LM Studio server on port ${LMSTUDIO_INTERNAL_PORT}..."
     lms server start --port "${LMSTUDIO_INTERNAL_PORT}" 2>/dev/null || true
+    log "LM Studio server started on port ${LMSTUDIO_INTERNAL_PORT}."
+elif [ "$OS_TYPE" = "Darwin" ] && [ -d "/Applications/LM Studio.app" ]; then
+    # On macOS, open the app which starts its own server
+    open "/Applications/LM Studio.app" 2>/dev/null || true
+    log "LM Studio app opened. Enable the local server in: LM Studio > Local Server > Start"
+    sleep 3
+elif [ -x "/opt/lmstudio/lm-studio" ]; then
+    nohup /opt/lmstudio/lm-studio --headless --port "${LMSTUDIO_INTERNAL_PORT}" >> "${LOG_FILE}" 2>&1 &
+    log "LM Studio started in headless mode."
+    sleep 3
+fi
+
+# Check if LM Studio server is responding
+LMSTUDIO_RUNNING=false
+for check_port in "${LMSTUDIO_INTERNAL_PORT}" "1234"; do
+    if curl -sf "http://127.0.0.1:${check_port}/v1/models" >/dev/null 2>&1; then
+        log "LM Studio server running on port ${check_port}."
+        LMSTUDIO_INTERNAL_PORT="${check_port}"
+        LMSTUDIO_RUNNING=true
+        break
+    fi
+done
+if [ "$LMSTUDIO_RUNNING" = "false" ]; then
+    log "WARNING: LM Studio server not responding. Open LM Studio and start the local server."
 fi
 
 # ── Step 3: Skip web UI if no ports ──────────────────────────────────────────
