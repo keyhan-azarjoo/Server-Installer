@@ -142,6 +142,14 @@
           />
         </Grid>
         <Grid item xs={12} md={6}>
+          <ActionCard
+            title="Install LM Studio \u2014 Docker"
+            description="Deploy LM Studio Web UI as a Docker container. Connects to the LM Studio desktop app running on the host."
+            action="/run/lmstudio_docker"
+            fields={commonFields} onRun={run} color="#7c3aed"
+          />
+        </Grid>
+        <Grid item xs={12} md={6}>
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
             <CardContent>
               <Typography variant="h6" fontWeight={800} sx={{ mb: 1, color: "#7c3aed" }}>LM Studio Status</Typography>

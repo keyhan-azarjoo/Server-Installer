@@ -8061,6 +8061,115 @@ CMD ["python", "ollama_web.py"]
     return 0, "\n".join(output)
 
 
+def run_lmstudio_docker(form=None, live_cb=None):
+    """Deploy LM Studio Web UI as a Docker container connected to host LM Studio server."""
+    form = form or {}
+    http_port = (form.get("LMSTUDIO_HTTP_PORT", [""])[0] or "").strip()
+    https_port = (form.get("LMSTUDIO_HTTPS_PORT", [""])[0] or "").strip()
+    host = (form.get("LMSTUDIO_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
+    username = (form.get("LMSTUDIO_USERNAME", [""])[0] or "").strip()
+    password = (form.get("LMSTUDIO_PASSWORD", [""])[0] or "").strip()
+    web_port = http_port or https_port or "8084"
+    output = []
+    def log(m):
+        output.append(m)
+        if live_cb: live_cb(m + "\n")
+    log("=== Installing LM Studio Web UI via Docker ===")
+    log("Note: LM Studio desktop app must be installed and running on the host.")
+    log("      The web UI connects to LM Studio's local server (port 1234).")
+
+    if sys.platform == "darwin":
+        _docker_add_macos_path()
+    if not command_exists("docker"):
+        log("Docker not found. Installing Docker first...")
+        _install_engine_docker(log)
+        if sys.platform == "darwin":
+            _docker_add_macos_path()
+    if not command_exists("docker"):
+        return 1, "Docker is not available. Install Docker Desktop manually."
+
+    # Stop existing container
+    run_capture(["docker", "stop", "serverinstaller-lmstudio-webui"], timeout=15)
+    run_capture(["docker", "rm", "serverinstaller-lmstudio-webui"], timeout=15)
+
+    # Build web UI
+    log("\nBuilding LM Studio Web UI...")
+    ensure_repo_files(LMSTUDIO_UNIX_FILES if os.name != "nt" else LMSTUDIO_WINDOWS_FILES, live_cb=live_cb, refresh=True)
+    common_dir = str(ROOT / "LMStudio" / "common")
+    webui_build = str(LMSTUDIO_STATE_DIR / "docker-webui")
+    Path(webui_build).mkdir(parents=True, exist_ok=True)
+
+    # Copy web UI files
+    for item in Path(common_dir).rglob("*"):
+        if item.is_file() and "__pycache__" not in str(item) and "venv" not in str(item):
+            rel = item.relative_to(common_dir)
+            dest = Path(webui_build) / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(item), str(dest))
+
+    # LM Studio runs on the host, not in Docker. Use host.docker.internal to reach it.
+    lms_api_base = "http://host.docker.internal:1234"
+    dockerfile = f"""FROM python:3.12-slim
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /app
+COPY . /app/
+RUN pip install --no-cache-dir flask requests
+ENV LMSTUDIO_API_BASE={lms_api_base}
+ENV LMSTUDIO_WEB_PORT={web_port}
+ENV LMSTUDIO_AUTH_USERNAME={username}
+ENV LMSTUDIO_AUTH_PASSWORD={password}
+EXPOSE {web_port}
+CMD ["python", "lmstudio_web.py"]
+"""
+    Path(webui_build, "Dockerfile").write_text(dockerfile, encoding="utf-8")
+
+    code = _run_install_cmd(["docker", "build", "--no-cache", "-t", "serverinstaller/lmstudio-webui:latest", webui_build], log, timeout=300)
+    if code != 0:
+        return code, "\n".join(output)
+
+    # Run web UI container with host networking access
+    webui_cmd = ["docker", "run", "-d", "--name", "serverinstaller-lmstudio-webui",
+                 "-p", f"{web_port}:{web_port}",
+                 "--add-host", "host.docker.internal:host-gateway",
+                 "-e", f"LMSTUDIO_API_BASE={lms_api_base}",
+                 "-e", f"LMSTUDIO_WEB_PORT={web_port}",
+                 "-e", f"LMSTUDIO_AUTH_USERNAME={username}",
+                 "-e", f"LMSTUDIO_AUTH_PASSWORD={password}",
+                 "--restart", "unless-stopped",
+                 "serverinstaller/lmstudio-webui:latest"]
+    code2 = _run_install_cmd(webui_cmd, log, timeout=60)
+
+    # Save state
+    LMSTUDIO_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    display_host = host if host not in ("0.0.0.0", "*", "") else choose_service_host()
+    http_url = f"http://{display_host}:{web_port}" if http_port else f"http://{display_host}:{web_port}"
+    https_url = f"https://{display_host}:{https_port}" if https_port else ""
+    state = _read_json_file(LMSTUDIO_STATE_FILE)
+    state.update({
+        "installed": True, "service_name": "serverinstaller-lmstudio-webui",
+        "deploy_mode": "docker", "host": host,
+        "http_port": http_port or web_port, "https_port": https_port,
+        "http_url": http_url, "https_url": https_url,
+        "auth_enabled": bool(username), "auth_username": username,
+        "running": code2 == 0,
+    })
+    _write_json_file(LMSTUDIO_STATE_FILE, state)
+    manage_firewall_port("open", web_port, "tcp")
+
+    log("\n" + "=" * 60)
+    log(" LM Studio Web UI Docker Deployment Complete!")
+    log("=" * 60)
+    log(f" Web UI:         {http_url}")
+    if https_url:
+        log(f" Web UI (HTTPS): {https_url}")
+    log(f" LM Studio API:  http://localhost:1234 (on host)")
+    if username:
+        log(f" Auth:           {username} / ****")
+    log(" Note: Start the local server in LM Studio desktop app")
+    log("=" * 60)
+    return code2, "\n".join(output)
+
+
 def _run_ai_docker_generic(service_id, image, form, default_port, container_port, display_name, state_file, state_dir, live_cb=None, extra_args=None):
     """Generic Docker install for AI services."""
     form = form or {}
@@ -14988,6 +15097,15 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_lmstudio_os_install(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/lmstudio_docker":
+            title = "LM Studio Docker"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_lmstudio_docker(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_lmstudio_docker(form)
                 self.respond_run_result(title, code, output)
             return
         # ── Text Generation WebUI routes ──────────────────────────────────────
