@@ -165,7 +165,7 @@ Wants=network-online.target
 User=${OPENCLAW_USER}
 WorkingDirectory=${OPENCLAW_HOME}
 Environment=PATH=/usr/bin:/bin:${NPM_GLOBAL}/bin:/usr/local/bin
-ExecStart=${OPENCLAW_BIN} gateway ${BIND_ARG} --port ${HTTP_PORT} --verbose
+ExecStart=${OPENCLAW_BIN} gateway ${BIND_ARG} --allow-unconfigured --port ${HTTP_PORT} --verbose
 Restart=always
 RestartSec=5
 StandardOutput=append:${LOG_FILE}
@@ -199,7 +199,7 @@ else
     # macOS — run in background
     log "Starting gateway in background (macOS)..."
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        "$OPENCLAW_BIN" gateway $BIND_ARG --port "$HTTP_PORT" --verbose >> "$LOG_FILE" 2>&1 &
+        "$OPENCLAW_BIN" gateway $BIND_ARG --allow-unconfigured --port "$HTTP_PORT" --verbose >> "$LOG_FILE" 2>&1 &
         log "Gateway started (PID $!)."
         sleep 3
     fi

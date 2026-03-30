@@ -7951,19 +7951,11 @@ def run_openclaw_docker(form=None, live_cb=None):
     entrypoint_sh = f"""#!/bin/bash
 echo "=== OpenClaw Docker Container ==="
 echo "Port: {http_port}"
+echo "Starting OpenClaw gateway..."
 
-# Create minimal config if not exists (skip interactive onboard)
-mkdir -p /root/.openclaw
-if [ ! -f /root/.openclaw/gateway.json ]; then
-    echo '{{"port":{http_port},"bind":"custom","customHost":"0.0.0.0"}}' > /root/.openclaw/gateway.json
-    echo "Created default gateway config."
-fi
-
-echo "Starting OpenClaw gateway on 0.0.0.0:{http_port}..."
-# Use custom bind with 0.0.0.0 so Docker port mapping works
-exec openclaw gateway --bind custom --host 0.0.0.0 --port {http_port} --verbose 2>&1 || \\
-exec openclaw gateway --bind auto --port {http_port} --verbose 2>&1 || \\
-echo "Gateway failed to start. Check: docker logs serverinstaller-openclaw"
+# Start gateway with --allow-unconfigured to skip interactive setup
+# The user can configure channels/models via the web dashboard
+exec openclaw gateway --allow-unconfigured --bind lan --port {http_port} --verbose
 """
     Path(build_dir, "entrypoint.sh").write_text(entrypoint_sh, encoding="utf-8")
 
