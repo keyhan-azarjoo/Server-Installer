@@ -8012,6 +8012,15 @@ http {{
         "GW_PID=$!",
         "sleep 3",
         "",
+        "# Get gateway auth token and print dashboard URL",
+        "GATEWAY_TOKEN=$(openclaw config get gateway.auth.token 2>/dev/null || cat /root/.openclaw/config.yaml 2>/dev/null | grep -A1 'auth:' | grep 'token:' | awk '{print $2}' || echo '')",
+        'if [ -n "$GATEWAY_TOKEN" ]; then',
+        f'  echo "============================================="',
+        f'  echo "DASHBOARD URL (with token):"',
+        f'  echo "https://YOUR_IP:{http_port}/#token=$GATEWAY_TOKEN"',
+        f'  echo "============================================="',
+        "fi",
+        "",
         "# Stop default nginx if running",
         "nginx -s stop 2>/dev/null || true",
         "sleep 1",
@@ -8131,9 +8140,27 @@ CMD ["/entrypoint.sh"]
     log("\n" + "=" * 60)
     log(" OpenClaw Docker Deployment Complete!")
     log("=" * 60)
-    log(f" Dashboard:      {http_url}")
-    if https_url:
-        log(f" HTTPS:          {https_url}")
+    log(f" Dashboard:      https://{display_host}:{http_port}/")
+    log(f" NOTE: Use HTTPS (not HTTP)! Accept the self-signed cert warning.")
+    log(f"")
+    # Try to get the gateway token from container
+    gateway_token = ""
+    try:
+        import time as _t
+        _t.sleep(2)
+        rc, tok = run_capture(["docker", "exec", container_name, "openclaw", "config", "get", "gateway.auth.token"], timeout=10)
+        if rc == 0 and tok.strip():
+            gateway_token = tok.strip()
+    except Exception:
+        pass
+    if gateway_token:
+        log(f" Dashboard URL with token:")
+        log(f"   https://{display_host}:{http_port}/#token={gateway_token}")
+        log(f"")
+        log(f" Gateway Token:  {gateway_token}")
+    else:
+        log(f" Get token: docker exec {container_name} openclaw config get gateway.auth.token")
+        log(f" Then open: https://{display_host}:{http_port}/#token=YOUR_TOKEN")
     if username:
         log(f" Auth:           {username} / ****")
     log(f" Container:      {container_name}")
