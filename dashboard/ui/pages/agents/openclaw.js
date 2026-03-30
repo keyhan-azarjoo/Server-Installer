@@ -34,8 +34,16 @@
       { name: "OPENCLAW_HTTP_PORT", label: "Gateway Port", defaultValue: httpPort || "18789", checkPort: true, placeholder: "Default: 18789" },
       { name: "OPENCLAW_HTTPS_PORT", label: "HTTPS Port (optional)", defaultValue: "", checkPort: true, certSelect: "SSL_CERT_NAME", placeholder: "Leave empty to skip" },
       { name: "OPENCLAW_DOMAIN", label: "Domain (optional)", defaultValue: "", placeholder: "e.g. openclaw.example.com" },
-      { name: "OPENCLAW_USERNAME", label: "Username (optional)", defaultValue: "", placeholder: "Leave empty for no auth" },
-      { name: "OPENCLAW_PASSWORD", label: "Password (optional)", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
+      { name: "OPENCLAW_USERNAME", label: "Dashboard Username (optional)", defaultValue: "", placeholder: "Leave empty for no auth" },
+      { name: "OPENCLAW_PASSWORD", label: "Dashboard Password (optional)", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
+      { name: "OPENCLAW_LLM_PROVIDER", label: "LLM Provider", type: "select", options: ["ollama (local)", "openai", "anthropic"], defaultValue: "ollama (local)", placeholder: "Select LLM" },
+      { name: "OPENCLAW_LLM_MODEL", label: "Model Name", defaultValue: "llama3.2:3b", placeholder: "e.g. llama3.2:3b, gpt-4o, claude-sonnet-4-20250514" },
+      { name: "OPENCLAW_OPENAI_KEY", label: "OpenAI API Key (if using OpenAI)", type: "password", defaultValue: "", placeholder: "sk-..." },
+      { name: "OPENCLAW_ANTHROPIC_KEY", label: "Anthropic API Key (if using Claude)", type: "password", defaultValue: "", placeholder: "sk-ant-..." },
+      { name: "OPENCLAW_TELEGRAM_TOKEN", label: "Telegram Bot Token (optional)", defaultValue: "", placeholder: "123456:ABC-DEF... (from @BotFather)" },
+      { name: "OPENCLAW_DISCORD_TOKEN", label: "Discord Bot Token (optional)", type: "password", defaultValue: "", placeholder: "From Discord Developer Portal" },
+      { name: "OPENCLAW_SLACK_TOKEN", label: "Slack Bot Token (optional)", type: "password", defaultValue: "", placeholder: "xoxb-... (from Slack API)" },
+      { name: "OPENCLAW_WHATSAPP_PHONE", label: "WhatsApp Phone Number (optional)", defaultValue: "", placeholder: "+1234567890 (will show QR code)" },
     ];
 
     var CodeBlock = function(props) {
@@ -134,6 +142,112 @@
                   </Paper>
                 );
               })}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        {/* How to Get Tokens */}
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #f59e0b33" }}>
+            <CardContent>
+              <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2 }}>
+                <Box sx={{ width: 5, height: 32, borderRadius: 3, bgcolor: "#f59e0b" }} />
+                <Typography variant="h6" fontWeight={800} sx={{ color: "#f59e0b" }}>How to Get Tokens & API Keys</Typography>
+              </Stack>
+
+              <Grid container spacing={2}>
+                <Grid item xs={12} md={6}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: "100%" }}>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ color: "#dc2626", mb: 1 }}>Telegram Bot Token</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                      1. Open Telegram and search for <b>@BotFather</b><br/>
+                      2. Send <code>/newbot</code><br/>
+                      3. Choose a name and username for your bot<br/>
+                      4. Copy the token (format: <code>123456:ABC-DEF...</code>)
+                    </Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: "100%" }}>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ color: "#5865F2", mb: 1 }}>Discord Bot Token</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                      1. Go to <a href="https://discord.com/developers/applications" target="_blank" rel="noopener">Discord Developer Portal</a><br/>
+                      2. Click "New Application" &rarr; name it<br/>
+                      3. Go to "Bot" tab &rarr; "Add Bot"<br/>
+                      4. Click "Reset Token" &rarr; copy the token<br/>
+                      5. Enable "Message Content Intent" under Privileged Intents
+                    </Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: "100%" }}>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ color: "#25D366", mb: 1 }}>WhatsApp</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                      OpenClaw uses <b>Baileys</b> (no API key needed).<br/>
+                      1. Enter your phone number in the config<br/>
+                      2. On first start, a QR code will appear in the logs<br/>
+                      3. Scan it with WhatsApp on your phone<br/>
+                      4. Run: <code>docker logs serverinstaller-openclaw</code> to see QR
+                    </Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: "100%" }}>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ color: "#4A154B", mb: 1 }}>Slack Bot Token</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                      1. Go to <a href="https://api.slack.com/apps" target="_blank" rel="noopener">Slack API</a> &rarr; "Create New App"<br/>
+                      2. Choose "From scratch" &rarr; name it &rarr; select workspace<br/>
+                      3. Go to "OAuth & Permissions" &rarr; add scopes:<br/>
+                      &nbsp;&nbsp;<code>chat:write</code>, <code>channels:history</code>, <code>im:history</code><br/>
+                      4. Install to workspace &rarr; copy <code>xoxb-...</code> token
+                    </Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: "100%" }}>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ color: "#10a37f", mb: 1 }}>OpenAI API Key</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                      1. Go to <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">OpenAI API Keys</a><br/>
+                      2. Click "Create new secret key"<br/>
+                      3. Copy the key (starts with <code>sk-...</code>)<br/>
+                      4. Add billing at platform.openai.com/settings/billing
+                    </Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: "100%" }}>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ color: "#d97706", mb: 1 }}>Anthropic (Claude) API Key</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                      1. Go to <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">Anthropic Console</a><br/>
+                      2. Click "Create Key"<br/>
+                      3. Copy the key (starts with <code>sk-ant-...</code>)<br/>
+                      4. Add billing at console.anthropic.com/settings/billing
+                    </Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: "100%" }}>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ color: "#6366f1", mb: 1 }}>Ollama (Local — Free)</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                      No API key needed! Ollama runs locally.<br/>
+                      1. Install Ollama from the AI/ML page<br/>
+                      2. Pull a model: <code>ollama pull llama3.2:3b</code><br/>
+                      3. OpenClaw auto-detects Ollama at localhost:11434
+                    </Typography>
+                  </Paper>
+                </Grid>
+                <Grid item xs={12} md={6}>
+                  <Paper variant="outlined" sx={{ p: 2, borderRadius: 2, height: "100%" }}>
+                    <Typography variant="subtitle2" fontWeight={800} sx={{ color: "#0088cc", mb: 1 }}>Signal, iMessage, Matrix, IRC...</Typography>
+                    <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
+                      Other channels are configured via the OpenClaw dashboard<br/>
+                      after installation. Open the gateway URL and go to<br/>
+                      <b>Channels</b> to add more messaging platforms.<br/>
+                      See: <a href="https://docs.openclaw.ai" target="_blank" rel="noopener">docs.openclaw.ai</a>
+                    </Typography>
+                  </Paper>
+                </Grid>
+              </Grid>
             </CardContent>
           </Card>
         </Grid>

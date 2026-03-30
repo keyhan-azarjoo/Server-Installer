@@ -7852,7 +7852,11 @@ def run_openclaw_os_install(form=None, live_cb=None):
     if os.name == "nt":
         ensure_repo_files(OPENCLAW_WINDOWS_FILES, live_cb=live_cb, refresh=True)
         env = os.environ.copy()
-        for key in ["OPENCLAW_HOST_IP", "OPENCLAW_HTTP_PORT", "OPENCLAW_HTTPS_PORT", "OPENCLAW_DOMAIN", "OPENCLAW_USERNAME", "OPENCLAW_PASSWORD"]:
+        all_keys = ["OPENCLAW_HOST_IP", "OPENCLAW_HTTP_PORT", "OPENCLAW_HTTPS_PORT", "OPENCLAW_DOMAIN",
+                    "OPENCLAW_USERNAME", "OPENCLAW_PASSWORD",
+                    "OPENCLAW_TELEGRAM_TOKEN", "OPENCLAW_DISCORD_TOKEN", "OPENCLAW_SLACK_TOKEN", "OPENCLAW_WHATSAPP_PHONE",
+                    "OPENCLAW_LLM_PROVIDER", "OPENCLAW_LLM_MODEL", "OPENCLAW_OPENAI_KEY", "OPENCLAW_ANTHROPIC_KEY"]
+        for key in all_keys:
             val = (form.get(key, [""])[0] or "").strip()
             if val: env[key] = val
         env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
@@ -7860,7 +7864,10 @@ def run_openclaw_os_install(form=None, live_cb=None):
     else:
         ensure_repo_files(OPENCLAW_UNIX_FILES, live_cb=live_cb, refresh=True)
         env = os.environ.copy()
-        env_keys = ["OPENCLAW_HOST_IP", "OPENCLAW_HTTP_PORT", "OPENCLAW_HTTPS_PORT", "OPENCLAW_DOMAIN", "OPENCLAW_USERNAME", "OPENCLAW_PASSWORD"]
+        env_keys = ["OPENCLAW_HOST_IP", "OPENCLAW_HTTP_PORT", "OPENCLAW_HTTPS_PORT", "OPENCLAW_DOMAIN",
+                    "OPENCLAW_USERNAME", "OPENCLAW_PASSWORD",
+                    "OPENCLAW_TELEGRAM_TOKEN", "OPENCLAW_DISCORD_TOKEN", "OPENCLAW_SLACK_TOKEN", "OPENCLAW_WHATSAPP_PHONE",
+                    "OPENCLAW_LLM_PROVIDER", "OPENCLAW_LLM_MODEL", "OPENCLAW_OPENAI_KEY", "OPENCLAW_ANTHROPIC_KEY"]
         for key in env_keys:
             val = (form.get(key, [""])[0] or "").strip()
             if val: env[key] = val
@@ -7922,6 +7929,16 @@ def run_openclaw_docker(form=None, live_cb=None):
     host = (form.get("OPENCLAW_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
     username = (form.get("OPENCLAW_USERNAME", [""])[0] or "").strip()
     password = (form.get("OPENCLAW_PASSWORD", [""])[0] or "").strip()
+    # Channel tokens
+    telegram_token = (form.get("OPENCLAW_TELEGRAM_TOKEN", [""])[0] or "").strip()
+    discord_token = (form.get("OPENCLAW_DISCORD_TOKEN", [""])[0] or "").strip()
+    slack_token = (form.get("OPENCLAW_SLACK_TOKEN", [""])[0] or "").strip()
+    whatsapp_phone = (form.get("OPENCLAW_WHATSAPP_PHONE", [""])[0] or "").strip()
+    # LLM config
+    llm_provider = (form.get("OPENCLAW_LLM_PROVIDER", ["ollama (local)"])[0] or "ollama (local)").strip()
+    llm_model = (form.get("OPENCLAW_LLM_MODEL", ["llama3.2:3b"])[0] or "llama3.2:3b").strip()
+    openai_key = (form.get("OPENCLAW_OPENAI_KEY", [""])[0] or "").strip()
+    anthropic_key = (form.get("OPENCLAW_ANTHROPIC_KEY", [""])[0] or "").strip()
     output = []
     def log(m):
         output.append(m)
@@ -7990,9 +8007,32 @@ CMD ["/entrypoint.sh"]
                   "-p", f"{http_port}:{http_port}",
                   "--add-host", "host.docker.internal:host-gateway",
                   "-v", "openclaw-data:/root/.openclaw",
-                  "--restart", "unless-stopped",
-                  "serverinstaller/openclaw:latest"]
+                  "--restart", "unless-stopped"]
+    # Pass channel tokens and LLM config as env vars
+    env_map = {
+        "TELEGRAM_BOT_TOKEN": telegram_token,
+        "DISCORD_TOKEN": discord_token,
+        "SLACK_BOT_TOKEN": slack_token,
+        "WHATSAPP_PHONE": whatsapp_phone,
+        "OPENAI_API_KEY": openai_key,
+        "ANTHROPIC_API_KEY": anthropic_key,
+        "OPENCLAW_MODEL": llm_model,
+    }
+    for k, v in env_map.items():
+        if v:
+            docker_cmd += ["-e", f"{k}={v}"]
+    docker_cmd.append("serverinstaller/openclaw:latest")
     log("Starting OpenClaw gateway container...")
+    if telegram_token:
+        log(f"Telegram bot configured.")
+    if discord_token:
+        log(f"Discord bot configured.")
+    if slack_token:
+        log(f"Slack bot configured.")
+    if openai_key:
+        log(f"OpenAI API key configured.")
+    if anthropic_key:
+        log(f"Anthropic API key configured.")
     code2 = _run_install_cmd(docker_cmd, log, timeout=60)
 
     # Save state
