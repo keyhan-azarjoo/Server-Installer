@@ -10235,7 +10235,7 @@ RUN python3 -m venv /app/venv && \\
     /app/venv/bin/pip install -r /app/requirements.txt && \\
     /app/venv/bin/pip install "git+https://github.com/ultralytics/CLIP.git" || true
 
-RUN mkdir -p /app/models /app/temp/videos
+RUN mkdir -p /app/models /app/temp/videos /root/.config/Ultralytics
 
 ENV SAM3_MODEL_PATH=/app/models/sam3.pt
 ENV SAM3_DEVICE={gpu_device}
@@ -10243,6 +10243,7 @@ ENV SAM3_HOST=0.0.0.0
 ENV SAM3_PORT={http_port}
 ENV SAM3_USERNAME={username}
 ENV SAM3_PASSWORD={password}
+ENV YOLO_CONFIG_DIR=/app/temp/Ultralytics
 
 EXPOSE {http_port}
 
@@ -10266,11 +10267,11 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
     run_process(["docker", "stop", container_name], live_cb=None)
     run_process(["docker", "rm", container_name], live_cb=None)
 
-    # Build image
+    # Build image (--no-cache ensures fresh app code is always used)
     if live_cb:
         live_cb(f"Building SAM3 Docker image ({gpu_base})...\n")
     code, output = run_process(
-        ["docker", "build", "-t", image_name, str(sam3_data)],
+        ["docker", "build", "--no-cache", "-t", image_name, str(sam3_data)],
         live_cb=live_cb,
     )
     if code != 0:
@@ -10284,7 +10285,7 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
             dockerfile_path.write_text(dockerfile_content, encoding="utf-8")
             gpu_device = "cpu"
             code, output = run_process(
-                ["docker", "build", "-t", image_name, str(sam3_data)],
+                ["docker", "build", "--no-cache", "-t", image_name, str(sam3_data)],
                 live_cb=live_cb,
             )
             if code != 0:
