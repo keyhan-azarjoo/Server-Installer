@@ -10461,11 +10461,12 @@ ENV SAM3_MODEL_PATH=/app/models/sam3.pt
 ENV SAM3_DEVICE={gpu_device}
 ENV SAM3_HOST=0.0.0.0
 ENV SAM3_PORT={http_port}
+ENV SAM3_HTTPS_PORT={https_port}
 ENV SAM3_USERNAME={username}
 ENV SAM3_PASSWORD={password}
-ENV YOLO_CONFIG_DIR=/app/temp/Ultralytics
+ENV YOLO_CONFIG_DIR=/tmp/Ultralytics
 
-EXPOSE {http_port}
+EXPOSE {http_port} {https_port}
 
 CMD ["/app/venv/bin/python", "/app/app.py"]
 """
@@ -10516,15 +10517,19 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
     # Run container
     docker_cmd = ["docker", "run", "-d", "--name", container_name, "--restart", "unless-stopped"]
     docker_cmd += ["-p", f"{http_port}:{http_port}"]
+    if https_port:
+        docker_cmd += ["-p", f"{https_port}:{https_port}"]
     if gpu_device == "cuda":
         docker_cmd += ["--gpus", "all"]
     # Mount the model directory — find where sam3.pt actually is
     state = _read_json_file(SAM3_STATE_FILE)
     host_model_dir = None
+    found_model_file = None
     # Check state file for model_path first
     state_model_path = str(state.get("model_path") or "").strip()
-    if state_model_path and Path(state_model_path).exists():
-        host_model_dir = str(Path(state_model_path).parent)
+    if state_model_path and Path(state_model_path).exists() and Path(state_model_path).stat().st_size > 1000000:
+        found_model_file = Path(state_model_path)
+        host_model_dir = str(found_model_file.parent)
     # Search known locations for sam3.pt
     if not host_model_dir:
         search_dirs = [
@@ -10536,19 +10541,43 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
         for d in search_dirs:
             sam3_file = d / "sam3.pt"
             if sam3_file.exists() and sam3_file.stat().st_size > 1000000:
+                found_model_file = sam3_file
                 host_model_dir = str(d)
-                if live_cb:
-                    live_cb(f"Found model at {sam3_file}\n")
                 break
     if not host_model_dir:
         host_model_dir = str(SAM3_STATE_DIR / "app" / "models")
+
+    # On macOS, Docker Desktop can only mount certain paths. /var/root is NOT shared by default.
+    # Copy the model into the Docker build context instead of using a volume mount.
+    docker_model_dir = Path(sam3_data) / "models"
+    docker_model_dir.mkdir(parents=True, exist_ok=True)
+    if found_model_file and found_model_file.exists():
+        dest_model = docker_model_dir / "sam3.pt"
+        if not dest_model.exists() or dest_model.stat().st_size != found_model_file.stat().st_size:
+            if live_cb:
+                live_cb(f"Copying model from {found_model_file} to Docker build context...\n")
+                live_cb(f"Model size: {found_model_file.stat().st_size / (1024*1024):.0f} MB\n")
+            shutil.copy2(str(found_model_file), str(dest_model))
+        else:
+            if live_cb:
+                live_cb(f"Model already in build context: {dest_model}\n")
+    else:
         if live_cb:
-            live_cb(f"Warning: sam3.pt not found. Download it from the SAM3 dashboard page.\n")
-            live_cb(f"Expected locations: {SAM3_STATE_DIR / 'app' / 'models' / 'sam3.pt'}\n")
+            live_cb(f"Warning: sam3.pt not found on host. Searched:\n")
+            live_cb(f"  - State file model_path: {state_model_path or '(not set)'}\n")
+            for d in [SAM3_STATE_DIR / 'app' / 'models', SAM3_STATE_DIR / 'models']:
+                live_cb(f"  - {d / 'sam3.pt'}: {'EXISTS' if (d / 'sam3.pt').exists() else 'not found'}\n")
+            live_cb(f"Download the model from the SAM3 dashboard page first.\n")
+
+    # Use a Docker volume for model persistence (works across rebuilds)
+    # Also mount the host model dir if accessible
     Path(host_model_dir).mkdir(parents=True, exist_ok=True)
-    docker_cmd += ["-v", f"{host_model_dir}:/app/models"]
+    docker_cmd += ["-v", f"{host_model_dir}:/app/host-models"]
+    # The model is baked into the image via COPY, so it will always be at /app/models/sam3.pt
     if live_cb:
-        live_cb(f"Mounting model directory: {host_model_dir} -> /app/models\n")
+        if found_model_file:
+            live_cb(f"Model included in Docker image at /app/models/sam3.pt\n")
+        live_cb(f"Host model directory: {host_model_dir}\n")
     docker_cmd.append(image_name)
 
     if live_cb:

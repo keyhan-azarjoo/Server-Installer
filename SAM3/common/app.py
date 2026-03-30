@@ -939,4 +939,42 @@ if __name__ == "__main__":
     print("="*50 + "\n")
 
     port = int(os.environ.get("SAM3_PORT", "5000"))
+    https_port = os.environ.get("SAM3_HTTPS_PORT", "").strip()
+
+    # Start HTTPS server in a separate thread if configured
+    if https_port and https_port.isdigit() and int(https_port) > 0:
+        import ssl
+        import threading
+        cert_dir = os.environ.get("SAM3_CERT_DIR", "/app/certs")
+        cert_file = os.path.join(cert_dir, "sam3.crt")
+        key_file = os.path.join(cert_dir, "sam3.key")
+        # Auto-generate self-signed cert if not exists
+        if not os.path.exists(cert_file):
+            os.makedirs(cert_dir, exist_ok=True)
+            try:
+                import subprocess
+                subprocess.run([
+                    "openssl", "req", "-x509", "-nodes", "-newkey", "rsa:2048",
+                    "-keyout", key_file, "-out", cert_file, "-days", "3650",
+                    "-subj", "/CN=SAM3/O=ServerInstaller/C=US"
+                ], capture_output=True, timeout=30)
+                print(f"Self-signed SSL cert created at {cert_file}")
+            except Exception as e:
+                print(f"Could not create SSL cert: {e}")
+                https_port = ""
+        if https_port and os.path.exists(cert_file) and os.path.exists(key_file):
+            def run_https():
+                try:
+                    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+                    ctx.load_cert_chain(cert_file, key_file)
+                    from werkzeug.serving import make_server
+                    srv = make_server("0.0.0.0", int(https_port), app, ssl_context=ctx, threaded=True)
+                    print(f"HTTPS server on port {https_port}")
+                    srv.serve_forever()
+                except Exception as e:
+                    print(f"HTTPS failed: {e}")
+            threading.Thread(target=run_https, daemon=True).start()
+
+    print(f"HTTP server on port {port}")
     app.run(debug=False, host='0.0.0.0', port=port, threaded=True)
