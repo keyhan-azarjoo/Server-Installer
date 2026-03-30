@@ -7332,7 +7332,17 @@ def get_ollama_info():
 
 
 def get_openclaw_info():
-    return _get_ai_service_info(OPENCLAW_STATE_FILE, OPENCLAW_STATE_DIR, OPENCLAW_SYSTEMD_SERVICE, "OpenClaw Agent", "8088")
+    info = _get_ai_service_info(OPENCLAW_STATE_FILE, OPENCLAW_STATE_DIR, OPENCLAW_SYSTEMD_SERVICE, "OpenClaw Agent", "18789")
+    # Also check the real gateway service (clawdbot-gateway)
+    if not info.get("running") and os.name != "nt" and command_exists("systemctl"):
+        try:
+            svc_status = _linux_systemd_unit_status("clawdbot-gateway.service")
+            if svc_status.get("running"):
+                info["running"] = True
+                info["installed"] = True
+        except Exception:
+            pass
+    return info
 
 
 def get_lmstudio_info():
@@ -7863,9 +7873,13 @@ def run_openclaw_os_install(form=None, live_cb=None):
 
 def run_openclaw_start(live_cb=None):
     if os.name != "nt" and command_exists("systemctl"):
-        run_capture(["systemctl", "start", OPENCLAW_SYSTEMD_SERVICE], timeout=30)
-        state = _read_json_file(OPENCLAW_STATE_FILE); state["running"] = True; _write_json_file(OPENCLAW_STATE_FILE, state)
-        return 0, "OpenClaw started."
+        # Try the real OpenClaw gateway service first, then our wrapper
+        for svc in ["clawdbot-gateway", OPENCLAW_SYSTEMD_SERVICE]:
+            rc, _ = run_capture(["systemctl", "start", svc], timeout=30)
+            if rc == 0:
+                state = _read_json_file(OPENCLAW_STATE_FILE); state["running"] = True; _write_json_file(OPENCLAW_STATE_FILE, state)
+                return 0, f"OpenClaw started ({svc})."
+        return 1, "Could not start OpenClaw."
     elif os.name == "nt":
         try: run_capture(["schtasks", "/Run", "/TN", "ServerInstaller-OpenClaw"], timeout=15); return 0, "OpenClaw started."
         except Exception as e: return 1, str(e)
@@ -7874,9 +7888,13 @@ def run_openclaw_start(live_cb=None):
 
 def run_openclaw_stop(live_cb=None):
     if os.name != "nt" and command_exists("systemctl"):
-        run_capture(["systemctl", "stop", OPENCLAW_SYSTEMD_SERVICE], timeout=30)
+        for svc in ["clawdbot-gateway", OPENCLAW_SYSTEMD_SERVICE]:
+            run_capture(["systemctl", "stop", svc], timeout=30)
     elif os.name == "nt":
         run_capture(["schtasks", "/End", "/TN", "ServerInstaller-OpenClaw"], timeout=15)
+    # Also kill any openclaw gateway processes
+    if os.name != "nt":
+        run_capture(["pkill", "-f", "openclaw gateway"], timeout=10)
     state = _read_json_file(OPENCLAW_STATE_FILE); state["running"] = False; _write_json_file(OPENCLAW_STATE_FILE, state)
     return 0, "OpenClaw stopped."
 
@@ -7897,7 +7915,7 @@ def run_openclaw_delete(live_cb=None):
 
 
 def run_openclaw_docker(form=None, live_cb=None):
-    """Deploy OpenClaw as a Docker container using the official image."""
+    """Deploy real OpenClaw gateway as a Docker container with Node.js."""
     form = form or {}
     http_port = (form.get("OPENCLAW_HTTP_PORT", ["18789"])[0] or "18789").strip()
     https_port = (form.get("OPENCLAW_HTTPS_PORT", [""])[0] or "").strip()
@@ -7924,57 +7942,40 @@ def run_openclaw_docker(form=None, live_cb=None):
     run_capture(["docker", "stop", container_name], timeout=15)
     run_capture(["docker", "rm", container_name], timeout=15)
 
-    # Build web UI with OpenClaw gateway proxy
-    log("Building OpenClaw Web UI container...")
-    ensure_repo_files(OPENCLAW_UNIX_FILES if os.name != "nt" else OPENCLAW_WINDOWS_FILES, live_cb=live_cb, refresh=True)
-    common_dir = str(ROOT / "OpenClaw" / "common")
-    webui_build = str(OPENCLAW_STATE_DIR / "docker-webui")
-    Path(webui_build).mkdir(parents=True, exist_ok=True)
+    # Build real OpenClaw container with Node.js
+    log("Building OpenClaw container (Node.js + real OpenClaw gateway)...")
+    build_dir = str(OPENCLAW_STATE_DIR / "docker-build")
+    Path(build_dir).mkdir(parents=True, exist_ok=True)
 
-    for item in Path(common_dir).rglob("*"):
-        if item.is_file() and "__pycache__" not in str(item) and "venv" not in str(item):
-            rel = item.relative_to(common_dir)
-            dest = Path(webui_build) / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(item), str(dest))
+    dockerfile = f"""FROM node:22-slim
 
-    expose_ports = http_port
-    if https_port:
-        expose_ports += f" {https_port}"
-    # Try to connect to Ollama on host for LLM backend
-    ollama_url = "http://host.docker.internal:11434"
-    dockerfile = f"""FROM python:3.12-slim
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y openssl curl && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-COPY . /app/
-RUN pip install --no-cache-dir flask requests
-ENV OPENCLAW_WEB_PORT={http_port}
-ENV OPENCLAW_HTTPS_PORT={https_port}
-ENV OPENCLAW_AUTH_USERNAME={username}
-ENV OPENCLAW_AUTH_PASSWORD={password}
-ENV OLLAMA_URL={ollama_url}
-EXPOSE {expose_ports}
-CMD ["python", "openclaw_web.py"]
-"""
-    Path(webui_build, "Dockerfile").write_text(dockerfile, encoding="utf-8")
+RUN apt-get update && apt-get install -y curl python3 build-essential && rm -rf /var/lib/apt/lists/*
 
-    code = _run_install_cmd(["docker", "build", "--no-cache", "-t", "serverinstaller/openclaw-webui:latest", webui_build], log, timeout=300)
+# Install OpenClaw globally
+RUN npm install -g openclaw@latest
+
+# Gateway port
+ENV OPENCLAW_PORT={http_port}
+EXPOSE {http_port}
+
+# Run the gateway bound to all interfaces so it's accessible from outside
+CMD ["openclaw", "gateway", "--bind", "any", "--port", "{http_port}", "--verbose"]
+"""
+    Path(build_dir, "Dockerfile").write_text(dockerfile, encoding="utf-8")
+
+    code = _run_install_cmd(["docker", "build", "--no-cache", "-t", "serverinstaller/openclaw:latest", build_dir], log, timeout=600)
     if code != 0:
         return code, "\n".join(output)
 
-    # Run container
+    # Run container with host network access for Ollama
     docker_cmd = ["docker", "run", "-d", "--name", container_name,
                   "-p", f"{http_port}:{http_port}",
                   "--add-host", "host.docker.internal:host-gateway",
-                  "-e", f"OPENCLAW_WEB_PORT={http_port}",
-                  "-e", f"OPENCLAW_HTTPS_PORT={https_port}",
-                  "-e", f"OPENCLAW_AUTH_USERNAME={username}",
-                  "-e", f"OPENCLAW_AUTH_PASSWORD={password}",
-                  "--restart", "unless-stopped"]
-    if https_port:
-        docker_cmd += ["-p", f"{https_port}:{https_port}"]
-    docker_cmd.append("serverinstaller/openclaw-webui:latest")
+                  "-v", "openclaw-data:/root/.openclaw",
+                  "--restart", "unless-stopped",
+                  "serverinstaller/openclaw:latest"]
+    log("Starting OpenClaw gateway container...")
     code2 = _run_install_cmd(docker_cmd, log, timeout=60)
 
     # Save state
