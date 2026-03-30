@@ -8117,34 +8117,74 @@ def run_lmstudio_docker(form=None, live_cb=None):
             else:
                 log(f"LM Studio OS install returned code {code_inst}")
 
+        # Find lms CLI at known locations
+        lms_cmd = None
+        lms_search_paths = [
+            "lms",
+            str(Path.home() / ".lmstudio" / "bin" / "lms"),
+            "/Applications/LM Studio.app/Contents/Resources/bin/lms",
+            str(Path.home() / ".cache" / "lm-studio" / "bin" / "lms"),
+        ]
+        for lp in lms_search_paths:
+            if lp == "lms" and command_exists("lms"):
+                lms_cmd = "lms"
+                break
+            elif lp != "lms" and Path(lp).exists():
+                lms_cmd = lp
+                break
+
         # Try lms CLI to start the server
         lms_started = False
-        if command_exists("lms"):
-            log("Found lms CLI. Starting server...")
+        if lms_cmd:
+            log(f"Found lms CLI at: {lms_cmd}")
+            log("Starting LM Studio server...")
             try:
-                rc, out = run_capture(["lms", "server", "start"], timeout=30)
-                if rc == 0:
-                    import time
-                    time.sleep(5)
-                    try:
-                        req = urllib.request.urlopen("http://127.0.0.1:1234/v1/models", timeout=3)
-                        lms_started = req.status == 200
-                    except Exception:
-                        pass
-                if lms_started:
-                    log("LM Studio server started successfully.")
-                else:
-                    log("lms server start ran but server not responding yet.")
+                rc, out = run_capture([lms_cmd, "server", "start"], timeout=30)
+                log(f"lms server start: exit={rc}")
+                if out.strip():
+                    log(out.strip()[:200])
             except Exception as e:
-                log(f"Failed to start lms server: {e}")
-        # Try opening LM Studio app on macOS
+                log(f"lms server start failed: {e}")
+            # Try loading a model if server started
+            import time
+            time.sleep(3)
+            try:
+                rc2, models_out = run_capture([lms_cmd, "ls"], timeout=15)
+                if rc2 == 0 and models_out.strip():
+                    log(f"Available models:\n{models_out.strip()[:300]}")
+                    # Try to load the first model
+                    lines = [l.strip() for l in models_out.strip().splitlines() if l.strip() and not l.startswith("---") and not l.startswith("Model")]
+                    if lines:
+                        first_model = lines[0].split()[0] if lines[0].split() else lines[0]
+                        log(f"Loading model: {first_model}")
+                        try:
+                            rc3, _ = run_capture([lms_cmd, "load", first_model], timeout=60)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+            # Wait for server
+            for i in range(10):
+                time.sleep(2)
+                try:
+                    req = urllib.request.urlopen("http://127.0.0.1:1234/v1/models", timeout=2)
+                    if req.status == 200:
+                        lms_started = True
+                        log("LM Studio server is running!")
+                        break
+                except Exception:
+                    pass
+            if not lms_started:
+                log("Server not responding yet after lms start.")
+
+        # Try opening LM Studio app on macOS if CLI didn't work
         if not lms_started and sys.platform == "darwin":
-            log("Trying to open LM Studio app...")
+            log("Opening LM Studio app...")
             try:
                 _run_install_cmd(["open", "-a", "LM Studio"], log, timeout=10)
                 import time
-                for i in range(15):
-                    time.sleep(2)
+                for i in range(20):
+                    time.sleep(3)
                     try:
                         req = urllib.request.urlopen("http://127.0.0.1:1234/v1/models", timeout=2)
                         if req.status == 200:
@@ -8153,16 +8193,21 @@ def run_lmstudio_docker(form=None, live_cb=None):
                             break
                     except Exception:
                         pass
-                    log(f"Waiting for LM Studio server... ({i+1}/15)")
+                    if i % 5 == 4:
+                        log(f"Still waiting for LM Studio server... ({i+1}/20)")
+                        log("Please start the server: Developer > Start Server")
             except Exception:
                 pass
         if not lms_started and not lms_server_running:
             log("")
-            log("WARNING: LM Studio server is not running on port 1234.")
-            log("The web UI will deploy but won't connect until you:")
-            log("  1. Open LM Studio app")
-            log("  2. Load a model")
-            log("  3. Go to Developer > Start Server")
+            log("=" * 50)
+            log("LM Studio server could not be auto-started.")
+            log("Please do these steps manually:")
+            log("  1. Open LM Studio app on this computer")
+            log("  2. Download and load a model (e.g. Llama 3)")
+            log("  3. Go to Developer tab > Start Server")
+            log("  4. The web UI will connect automatically")
+            log("=" * 50)
             log("")
 
     if sys.platform == "darwin":
