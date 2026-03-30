@@ -7968,10 +7968,18 @@ def run_openclaw_docker(form=None, live_cb=None):
     entrypoint_sh = f"""#!/bin/bash
 echo "=== OpenClaw Docker Container ==="
 echo "Port: {http_port}"
-echo "Starting OpenClaw gateway..."
 
-# Start gateway with --allow-unconfigured to skip interactive setup
-# The user can configure channels/models via the web dashboard
+# Create config to allow non-loopback Control UI access
+mkdir -p /root/.openclaw
+cat > /root/.openclaw/config.yaml << 'CFGEOF'
+gateway:
+  mode: local
+  controlUi:
+    dangerouslyAllowHostHeaderOriginFallback: true
+CFGEOF
+echo "Config created at /root/.openclaw/config.yaml"
+
+echo "Starting OpenClaw gateway..."
 exec openclaw gateway --allow-unconfigured --bind lan --port {http_port} --verbose
 """
     Path(build_dir, "entrypoint.sh").write_text(entrypoint_sh, encoding="utf-8")
