@@ -7965,29 +7965,30 @@ def run_openclaw_docker(form=None, live_cb=None):
     Path(build_dir).mkdir(parents=True, exist_ok=True)
 
     # Create entrypoint that skips interactive onboard and starts gateway
+    # Use socat to forward 0.0.0.0:port to 127.0.0.1:port
+    # This lets OpenClaw bind to loopback (no controlUi error) while Docker port mapping works
+    gw_internal_port = str(int(http_port) + 1)
     entrypoint_sh = f"""#!/bin/bash
 echo "=== OpenClaw Docker Container ==="
 echo "Port: {http_port}"
 
-# Create config to allow non-loopback Control UI access
-mkdir -p /root/.openclaw
-cat > /root/.openclaw/config.yaml << 'CFGEOF'
-gateway:
-  mode: local
-  controlUi:
-    dangerouslyAllowHostHeaderOriginFallback: true
-CFGEOF
-echo "Config created at /root/.openclaw/config.yaml"
+# Start gateway on loopback (avoids controlUi origin error)
+openclaw gateway --allow-unconfigured --bind loopback --port {gw_internal_port} --verbose &
+GW_PID=$!
+sleep 3
 
-echo "Starting OpenClaw gateway..."
-exec openclaw gateway --allow-unconfigured --bind lan --port {http_port} --verbose
+# Forward 0.0.0.0:port -> 127.0.0.1:internal_port using socat
+echo "Starting port forwarder 0.0.0.0:{http_port} -> 127.0.0.1:{gw_internal_port}"
+socat TCP-LISTEN:{http_port},fork,reuseaddr TCP:127.0.0.1:{gw_internal_port} &
+
+wait $GW_PID
 """
     Path(build_dir, "entrypoint.sh").write_text(entrypoint_sh, encoding="utf-8")
 
     dockerfile = f"""FROM node:22-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y curl python3 build-essential && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl python3 build-essential socat && rm -rf /var/lib/apt/lists/*
 
 # Install OpenClaw globally
 RUN npm install -g openclaw@latest
