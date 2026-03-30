@@ -10348,20 +10348,42 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
                     break
             except Exception:
                 pass
-            # Check container is still running
+            # Check container health — detect crash loops
             try:
-                rc, out = run_capture(["docker", "ps", "--filter", f"name={container_name}", "--format", "{{.Status}}"], timeout=10)
+                rc, out = run_capture(["docker", "inspect", "--format", "{{.RestartCount}}", container_name], timeout=10)
+                if rc == 0 and out.strip().isdigit() and int(out.strip()) > 3:
+                    if live_cb:
+                        live_cb(f"Container is crash-looping (restarted {out.strip()} times). Checking logs...\n")
+                    rc2, logs = run_capture(["docker", "logs", "--tail", "40", container_name], timeout=10)
+                    if live_cb and logs:
+                        live_cb(logs + "\n")
+                    return 1, "SAM3 container keeps crashing. Check the logs above."
+            except Exception:
+                pass
+            # Check container is still there
+            try:
+                rc, out = run_capture(["docker", "ps", "-a", "--filter", f"name={container_name}", "--format", "{{.Status}}"], timeout=10)
                 if rc != 0 or not out.strip():
                     if live_cb:
                         live_cb("Container stopped unexpectedly. Checking logs...\n")
-                    rc2, logs = run_capture(["docker", "logs", "--tail", "30", container_name], timeout=10)
+                    rc2, logs = run_capture(["docker", "logs", "--tail", "40", container_name], timeout=10)
                     if live_cb and logs:
                         live_cb(logs + "\n")
-                    return 1, f"SAM3 container failed to start. Check Docker logs."
+                    return 1, "SAM3 container failed to start. Check Docker logs."
             except Exception:
                 pass
             if live_cb:
                 live_cb(f"Waiting for SAM3... ({i+1}/20)\n")
+
+        # Show container logs for debugging regardless of outcome
+        if live_cb and not ready:
+            live_cb("\nContainer logs:\n")
+            try:
+                rc2, logs = run_capture(["docker", "logs", "--tail", "20", container_name], timeout=10)
+                if logs:
+                    live_cb(logs + "\n")
+            except Exception:
+                pass
 
         if live_cb:
             live_cb("\n" + "=" * 60 + "\n")
