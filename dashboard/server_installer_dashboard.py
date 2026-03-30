@@ -7913,8 +7913,12 @@ def run_piper_os_install(form=None, live_cb=None):
 # ── Docker install for AI services ──────────────────────────────────────────
 def run_ollama_docker(form=None, live_cb=None):
     form = form or {}
-    port = (form.get("OLLAMA_HTTP_PORT", ["11434"])[0] or "11434").strip()
+    http_port = (form.get("OLLAMA_HTTP_PORT", [""])[0] or "").strip()
+    https_port = (form.get("OLLAMA_HTTPS_PORT", [""])[0] or "").strip()
     host = (form.get("OLLAMA_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
+    username = (form.get("OLLAMA_USERNAME", [""])[0] or "").strip()
+    password = (form.get("OLLAMA_PASSWORD", [""])[0] or "").strip()
+    web_port = http_port or https_port or "11434"
     output = []
     def log(m):
         output.append(m)
@@ -7929,31 +7933,132 @@ def run_ollama_docker(form=None, live_cb=None):
             _docker_add_macos_path()
     if not command_exists("docker"):
         return 1, "Docker is not available. Install Docker Desktop manually."
+
+    # Stop existing containers
+    run_capture(["docker", "stop", "serverinstaller-ollama"], timeout=15)
+    run_capture(["docker", "rm", "serverinstaller-ollama"], timeout=15)
+    run_capture(["docker", "stop", "serverinstaller-ollama-webui"], timeout=15)
+    run_capture(["docker", "rm", "serverinstaller-ollama-webui"], timeout=15)
+
+    # Step 1: Run Ollama server container (internal, no port exposed to host)
+    log("Starting Ollama server container...")
     cmd = ["docker", "run", "-d", "--name", "serverinstaller-ollama",
-           "-p", f"{port}:11434",
-           "-v", f"ollama-data:/root/.ollama",
+           "-v", "ollama-data:/root/.ollama",
            "--restart", "unless-stopped"]
     # GPU support
     try:
-        rc, _ = run_capture(["docker", "info", "--format", "{{.Runtimes}}"], timeout=10)
-        if "nvidia" in str(_).lower():
+        rc, out = run_capture(["docker", "info", "--format", "{{.Runtimes}}"], timeout=10)
+        if "nvidia" in str(out).lower():
             cmd.extend(["--gpus", "all"])
             log("NVIDIA GPU detected — enabling GPU passthrough.")
     except Exception:
         pass
     cmd.append("ollama/ollama:latest")
-    log(f"Running: {' '.join(cmd)}")
     code = _run_install_cmd(cmd, log, timeout=300)
-    if code == 0:
-        OLLAMA_STATE_DIR.mkdir(parents=True, exist_ok=True)
-        display_host = host if host not in ("0.0.0.0", "*", "") else choose_service_host()
-        state = _read_json_file(OLLAMA_STATE_FILE)
-        state.update({"installed": True, "service_name": "serverinstaller-ollama", "deploy_mode": "docker",
-                       "host": host, "http_port": port, "http_url": f"http://{display_host}:{port}"})
-        _write_json_file(OLLAMA_STATE_FILE, state)
-        manage_firewall_port("open", port, "tcp")
-        log(f"\nOllama Docker container running on port {port}")
-    return code, "\n".join(output)
+    if code != 0:
+        return code, "\n".join(output)
+
+    # Get Ollama container IP for web UI to connect
+    import time
+    time.sleep(3)
+    try:
+        rc, ollama_ip = run_capture(["docker", "inspect", "-f", "{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}", "serverinstaller-ollama"], timeout=10)
+        ollama_ip = ollama_ip.strip()
+    except Exception:
+        ollama_ip = ""
+    if not ollama_ip:
+        ollama_ip = "serverinstaller-ollama"
+    log(f"Ollama server running at {ollama_ip}:11434")
+
+    # Step 2: Build and run Web UI container
+    log("\nBuilding Ollama Web UI...")
+    ensure_repo_files(OLLAMA_UNIX_FILES if os.name != "nt" else OLLAMA_WINDOWS_FILES, live_cb=live_cb, refresh=True)
+    common_dir = str(ROOT / "Ollama" / "common")
+    webui_build = str(OLLAMA_STATE_DIR / "docker-webui")
+    Path(webui_build).mkdir(parents=True, exist_ok=True)
+
+    # Copy web UI files
+    for item in Path(common_dir).rglob("*"):
+        if item.is_file() and "__pycache__" not in str(item) and "venv" not in str(item):
+            rel = item.relative_to(common_dir)
+            dest = Path(webui_build) / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(item), str(dest))
+
+    # Create Dockerfile for web UI
+    dockerfile = f"""FROM python:3.12-slim
+ENV DEBIAN_FRONTEND=noninteractive
+WORKDIR /app
+COPY . /app/
+RUN pip install --no-cache-dir flask requests
+ENV OLLAMA_API_BASE=http://{ollama_ip}:11434
+ENV OLLAMA_WEBUI_PORT={web_port}
+ENV OLLAMA_AUTH_USERNAME={username}
+ENV OLLAMA_AUTH_PASSWORD={password}
+EXPOSE {web_port}
+CMD ["python", "ollama_web.py"]
+"""
+    Path(webui_build, "Dockerfile").write_text(dockerfile, encoding="utf-8")
+
+    # Build web UI image
+    code2 = _run_install_cmd(["docker", "build", "--no-cache", "-t", "serverinstaller/ollama-webui:latest", webui_build], log, timeout=300)
+    if code2 != 0:
+        log("Web UI build failed. Falling back to raw Ollama API on port.")
+        # Fallback: expose Ollama API directly
+        run_capture(["docker", "stop", "serverinstaller-ollama"], timeout=15)
+        run_capture(["docker", "rm", "serverinstaller-ollama"], timeout=15)
+        cmd_fallback = ["docker", "run", "-d", "--name", "serverinstaller-ollama",
+                        "-p", f"{web_port}:11434", "-v", "ollama-data:/root/.ollama",
+                        "--restart", "unless-stopped", "ollama/ollama:latest"]
+        _run_install_cmd(cmd_fallback, log, timeout=300)
+    else:
+        # Run web UI container linked to Ollama
+        webui_cmd = ["docker", "run", "-d", "--name", "serverinstaller-ollama-webui",
+                     "-p", f"{web_port}:{web_port}",
+                     "--link", "serverinstaller-ollama:ollama",
+                     "-e", f"OLLAMA_API_BASE=http://serverinstaller-ollama:11434",
+                     "-e", f"OLLAMA_WEBUI_PORT={web_port}",
+                     "-e", f"OLLAMA_AUTH_USERNAME={username}",
+                     "-e", f"OLLAMA_AUTH_PASSWORD={password}",
+                     "--restart", "unless-stopped",
+                     "serverinstaller/ollama-webui:latest"]
+        code3 = _run_install_cmd(webui_cmd, log, timeout=60)
+        if code3 != 0:
+            log("Web UI container failed to start.")
+
+    # Save state
+    OLLAMA_STATE_DIR.mkdir(parents=True, exist_ok=True)
+    display_host = host if host not in ("0.0.0.0", "*", "") else choose_service_host()
+    http_url = f"http://{display_host}:{web_port}" if http_port else ""
+    https_url = f"https://{display_host}:{https_port}" if https_port else ""
+    state = _read_json_file(OLLAMA_STATE_FILE)
+    state.update({
+        "installed": True, "service_name": "serverinstaller-ollama",
+        "deploy_mode": "docker", "host": host,
+        "http_port": http_port, "https_port": https_port,
+        "http_url": http_url or f"http://{display_host}:{web_port}",
+        "https_url": https_url,
+        "auth_enabled": bool(username), "auth_username": username,
+        "running": True,
+    })
+    _write_json_file(OLLAMA_STATE_FILE, state)
+    manage_firewall_port("open", web_port, "tcp")
+
+    # Show results
+    log("\n" + "=" * 60)
+    log(" Ollama Docker Deployment Complete!")
+    log("=" * 60)
+    if http_url:
+        log(f" Web UI (HTTP):  {http_url}")
+    else:
+        log(f" Web UI:         http://{display_host}:{web_port}")
+    if https_url:
+        log(f" Web UI (HTTPS): {https_url}")
+    if username:
+        log(f" Auth:           {username} / ****")
+    log(f" Ollama API:     http://{display_host}:{web_port}/api/tags")
+    log("=" * 60)
+    return 0, "\n".join(output)
 
 
 def _run_ai_docker_generic(service_id, image, form, default_port, container_port, display_name, state_file, state_dir, live_cb=None, extra_args=None):
