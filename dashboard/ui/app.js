@@ -2187,6 +2187,9 @@ function App() {
               <Typography variant="caption" sx={{ color: "#93c5fd" }}>{termState}</Typography>
             </Box>
             <Stack direction="row" spacing={1}>
+              <Button size="small" variant="outlined" sx={{ color: "#dbeafe", borderColor: "#334155", minWidth: 60 }} onClick={() => { navigator.clipboard.writeText(termText || ""); setInfoMessage("Terminal logs copied!"); }}>
+                Copy
+              </Button>
               <Button size="small" variant="outlined" sx={{ color: "#dbeafe", borderColor: "#334155", minWidth: 60 }} onClick={() => setTermText("")}>
                 Clear
               </Button>

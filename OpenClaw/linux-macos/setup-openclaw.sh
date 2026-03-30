@@ -121,11 +121,18 @@ fi
 # ── Step 3a: Install OpenClaw ────────────────────────────────────────────────
 log "Step 3a: Installing OpenClaw..."
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    # macOS — install as current user in writable dir
-    mkdir -p "$NPM_GLOBAL" 2>/dev/null || { NPM_GLOBAL="$STATE_DIR/.npm-global"; mkdir -p "$NPM_GLOBAL"; OPENCLAW_BIN="$NPM_GLOBAL/bin/openclaw"; }
-    npm config set prefix "$NPM_GLOBAL" 2>/dev/null || true
+    # macOS — npm needs writable HOME for cache. /var/root is read-only.
+    NPM_GLOBAL="$STATE_DIR/.npm-global"
+    NPM_CACHE="$STATE_DIR/.npm-cache"
+    mkdir -p "$NPM_GLOBAL" "$NPM_CACHE"
+    OPENCLAW_BIN="$NPM_GLOBAL/bin/openclaw"
+    export npm_config_prefix="$NPM_GLOBAL"
+    export npm_config_cache="$NPM_CACHE"
+    export HOME="$STATE_DIR"
     export PATH="$NPM_GLOBAL/bin:$PATH"
-    npm install -g openclaw@latest 2>&1 || { log "npm install failed, trying with --prefix"; npm install --prefix "$NPM_GLOBAL" openclaw@latest 2>&1 || true; }
+    log "npm prefix: $NPM_GLOBAL"
+    log "npm cache: $NPM_CACHE"
+    npm install -g openclaw@latest 2>&1 || { log "npm global install failed, trying local"; npm install --prefix "$NPM_GLOBAL" openclaw@latest 2>&1 || true; }
 else
     # Linux — install as openclaw user
     su - "$OPENCLAW_USER" -c "npm config set prefix ~/.npm-global && npm install -g openclaw@latest" 2>&1
