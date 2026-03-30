@@ -7988,16 +7988,21 @@ def run_ollama_docker(form=None, live_cb=None):
             shutil.copy2(str(item), str(dest))
 
     # Create Dockerfile for web UI
+    expose_ports = web_port
+    if https_port:
+        expose_ports += f" {https_port}"
     dockerfile = f"""FROM python:3.12-slim
 ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY . /app/
 RUN pip install --no-cache-dir flask requests
 ENV OLLAMA_API_BASE=http://{ollama_ip}:11434
 ENV OLLAMA_WEBUI_PORT={web_port}
+ENV OLLAMA_HTTPS_PORT={https_port}
 ENV OLLAMA_AUTH_USERNAME={username}
 ENV OLLAMA_AUTH_PASSWORD={password}
-EXPOSE {web_port}
+EXPOSE {expose_ports}
 CMD ["python", "ollama_web.py"]
 """
     Path(webui_build, "Dockerfile").write_text(dockerfile, encoding="utf-8")
@@ -8020,10 +8025,13 @@ CMD ["python", "ollama_web.py"]
                      "--link", "serverinstaller-ollama:ollama",
                      "-e", f"OLLAMA_API_BASE=http://serverinstaller-ollama:11434",
                      "-e", f"OLLAMA_WEBUI_PORT={web_port}",
+                     "-e", f"OLLAMA_HTTPS_PORT={https_port}",
                      "-e", f"OLLAMA_AUTH_USERNAME={username}",
                      "-e", f"OLLAMA_AUTH_PASSWORD={password}",
-                     "--restart", "unless-stopped",
-                     "serverinstaller/ollama-webui:latest"]
+                     "--restart", "unless-stopped"]
+        if https_port:
+            webui_cmd += ["-p", f"{https_port}:{https_port}"]
+        webui_cmd.append("serverinstaller/ollama-webui:latest")
         code3 = _run_install_cmd(webui_cmd, log, timeout=60)
         if code3 != 0:
             log("Web UI container failed to start.")
@@ -8111,16 +8119,21 @@ def run_lmstudio_docker(form=None, live_cb=None):
 
     # LM Studio runs on the host, not in Docker. Use host.docker.internal to reach it.
     lms_api_base = "http://host.docker.internal:1234"
+    expose_ports = web_port
+    if https_port:
+        expose_ports += f" {https_port}"
     dockerfile = f"""FROM python:3.12-slim
 ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 COPY . /app/
 RUN pip install --no-cache-dir flask requests
 ENV LMSTUDIO_API_BASE={lms_api_base}
 ENV LMSTUDIO_WEB_PORT={web_port}
+ENV LMSTUDIO_HTTPS_PORT={https_port}
 ENV LMSTUDIO_AUTH_USERNAME={username}
 ENV LMSTUDIO_AUTH_PASSWORD={password}
-EXPOSE {web_port}
+EXPOSE {expose_ports}
 CMD ["python", "lmstudio_web.py"]
 """
     Path(webui_build, "Dockerfile").write_text(dockerfile, encoding="utf-8")
@@ -8135,10 +8148,13 @@ CMD ["python", "lmstudio_web.py"]
                  "--add-host", "host.docker.internal:host-gateway",
                  "-e", f"LMSTUDIO_API_BASE={lms_api_base}",
                  "-e", f"LMSTUDIO_WEB_PORT={web_port}",
+                 "-e", f"LMSTUDIO_HTTPS_PORT={https_port}",
                  "-e", f"LMSTUDIO_AUTH_USERNAME={username}",
                  "-e", f"LMSTUDIO_AUTH_PASSWORD={password}",
-                 "--restart", "unless-stopped",
-                 "serverinstaller/lmstudio-webui:latest"]
+                 "--restart", "unless-stopped"]
+    if https_port:
+        webui_cmd += ["-p", f"{https_port}:{https_port}"]
+    webui_cmd.append("serverinstaller/lmstudio-webui:latest")
     code2 = _run_install_cmd(webui_cmd, log, timeout=60)
 
     # Save state

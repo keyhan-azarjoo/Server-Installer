@@ -286,5 +286,41 @@ def proxy_v1_completions():
 
 
 if __name__ == "__main__":
+    import ssl
+    import threading
+    import subprocess as _sp
+
     port = int(os.environ.get("OLLAMA_WEBUI_PORT", 3080))
+    https_port = os.environ.get("OLLAMA_HTTPS_PORT", "").strip()
+    cert_dir = os.environ.get("OLLAMA_CERT_DIR", os.path.join(os.path.dirname(__file__), "certs"))
+    cert_file = os.path.join(cert_dir, "ollama.crt")
+    key_file = os.path.join(cert_dir, "ollama.key")
+
+    if https_port and https_port.isdigit() and int(https_port) > 0:
+        os.makedirs(cert_dir, exist_ok=True)
+        if not os.path.exists(cert_file):
+            try:
+                _sp.run(["openssl", "req", "-x509", "-nodes", "-newkey", "rsa:2048",
+                         "-keyout", key_file, "-out", cert_file, "-days", "3650",
+                         "-subj", "/CN=Ollama/O=ServerInstaller/C=US"],
+                        capture_output=True, timeout=30)
+                print(f"SSL cert created: {cert_file}")
+            except Exception as e:
+                print(f"SSL cert generation failed: {e}")
+                https_port = ""
+        if https_port and os.path.exists(cert_file):
+            def _run_https():
+                try:
+                    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+                    ctx.load_cert_chain(cert_file, key_file)
+                    from werkzeug.serving import make_server
+                    srv = make_server("0.0.0.0", int(https_port), app, ssl_context=ctx, threaded=True)
+                    print(f"HTTPS on port {https_port}")
+                    srv.serve_forever()
+                except Exception as e:
+                    print(f"HTTPS failed: {e}")
+            threading.Thread(target=_run_https, daemon=True).start()
+
+    print(f"HTTP on port {port}")
     app.run(host="0.0.0.0", port=port, debug=False)
