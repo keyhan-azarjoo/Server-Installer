@@ -8085,8 +8085,85 @@ def run_lmstudio_docker(form=None, live_cb=None):
         output.append(m)
         if live_cb: live_cb(m + "\n")
     log("=== Installing LM Studio Web UI via Docker ===")
-    log("Note: LM Studio desktop app must be installed and running on the host.")
-    log("      The web UI connects to LM Studio's local server (port 1234).")
+
+    # Step 1: Ensure LM Studio is installed and server is running on the host
+    log("Checking LM Studio on host...")
+    lms_server_running = False
+    try:
+        import urllib.request
+        req = urllib.request.urlopen("http://127.0.0.1:1234/v1/models", timeout=3)
+        lms_server_running = req.status == 200
+    except Exception:
+        pass
+
+    if lms_server_running:
+        log("LM Studio server is running on port 1234.")
+    else:
+        log("LM Studio server not detected on port 1234. Trying to start it...")
+
+        # Check if LM Studio is installed
+        lms_installed = command_exists("lms") or (sys.platform == "darwin" and Path("/Applications/LM Studio.app").exists())
+        if not lms_installed:
+            log("LM Studio not found. Installing via OS installer...")
+            # Run the OS installer first
+            ensure_repo_files(LMSTUDIO_UNIX_FILES if os.name != "nt" else LMSTUDIO_WINDOWS_FILES, live_cb=live_cb, refresh=True)
+            install_form = dict(form)
+            # Don't pass HTTP/HTTPS ports to OS installer — Docker handles that
+            install_form.pop("LMSTUDIO_HTTP_PORT", None)
+            install_form.pop("LMSTUDIO_HTTPS_PORT", None)
+            code_inst, out_inst = run_lmstudio_os_install(install_form, live_cb=live_cb)
+            if code_inst == 0:
+                log("LM Studio installed on host.")
+            else:
+                log(f"LM Studio OS install returned code {code_inst}")
+
+        # Try lms CLI to start the server
+        lms_started = False
+        if command_exists("lms"):
+            log("Found lms CLI. Starting server...")
+            try:
+                rc, out = run_capture(["lms", "server", "start"], timeout=30)
+                if rc == 0:
+                    import time
+                    time.sleep(5)
+                    try:
+                        req = urllib.request.urlopen("http://127.0.0.1:1234/v1/models", timeout=3)
+                        lms_started = req.status == 200
+                    except Exception:
+                        pass
+                if lms_started:
+                    log("LM Studio server started successfully.")
+                else:
+                    log("lms server start ran but server not responding yet.")
+            except Exception as e:
+                log(f"Failed to start lms server: {e}")
+        # Try opening LM Studio app on macOS
+        if not lms_started and sys.platform == "darwin":
+            log("Trying to open LM Studio app...")
+            try:
+                _run_install_cmd(["open", "-a", "LM Studio"], log, timeout=10)
+                import time
+                for i in range(15):
+                    time.sleep(2)
+                    try:
+                        req = urllib.request.urlopen("http://127.0.0.1:1234/v1/models", timeout=2)
+                        if req.status == 200:
+                            lms_started = True
+                            log("LM Studio server is now running.")
+                            break
+                    except Exception:
+                        pass
+                    log(f"Waiting for LM Studio server... ({i+1}/15)")
+            except Exception:
+                pass
+        if not lms_started and not lms_server_running:
+            log("")
+            log("WARNING: LM Studio server is not running on port 1234.")
+            log("The web UI will deploy but won't connect until you:")
+            log("  1. Open LM Studio app")
+            log("  2. Load a model")
+            log("  3. Go to Developer > Start Server")
+            log("")
 
     if sys.platform == "darwin":
         _docker_add_macos_path()
