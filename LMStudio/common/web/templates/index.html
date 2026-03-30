@@ -252,7 +252,14 @@ function copyMessage(idx){var c=conversations[currentChatId];if(c&&c.messages[id
 function renderMessages(){
   var area=document.getElementById('chatArea');
   if(!currentChatId||!conversations[currentChatId]){
-    area.innerHTML='<div class="empty-state"><h2>LM Studio Chat</h2><p>Load a model in the LM Studio desktop app, start the local server, then chat here.</p>'
+    area.innerHTML='<div class="empty-state"><h2>LM Studio Chat</h2><p>To start chatting, you need to set up LM Studio:</p>'
+      +'<div style="text-align:left;background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:16px;margin:16px 0;font-size:13px;line-height:2;color:var(--text2)">'
+      +'<strong style="color:var(--text)">Setup Steps:</strong><br>'
+      +'1. Open <strong>LM Studio</strong> desktop app on this computer<br>'
+      +'2. Download a model (e.g. Llama 3, Mistral, Qwen)<br>'
+      +'3. Load the model in LM Studio<br>'
+      +'4. Go to <strong>Developer</strong> tab &rarr; Click <strong>Start Server</strong><br>'
+      +'5. The status above will change to <strong style="color:#22c55e">Connected</strong></div><p style="font-size:13px;color:var(--text3)">LM Studio server runs on port 1234. This web UI connects to it automatically.</p>'
       +'<div class="suggestions"><div class="sug-card" onclick="useSug(this)"><strong>Explain</strong>The difference between transformers and RNNs</div>'
       +'<div class="sug-card" onclick="useSug(this)"><strong>Write</strong>A TypeScript function for debouncing</div>'
       +'<div class="sug-card" onclick="useSug(this)"><strong>Analyze</strong>Pros and cons of microservices architecture</div>'
@@ -280,7 +287,8 @@ function checkHealth(){
       loadModels();
       if(j.model_count!==undefined)document.getElementById('modelCount').textContent=j.model_count+' loaded';
     } else {
-      document.getElementById('statusText').textContent='LM Studio server not running';
+      document.getElementById('statusText').textContent='Start LM Studio server (Developer > Start)';
+      document.getElementById('modelCount').textContent='';
     }
   }).catch(function(){document.getElementById('statusDot').className='hdr-dot';document.getElementById('statusText').textContent='Web UI offline';});
 }

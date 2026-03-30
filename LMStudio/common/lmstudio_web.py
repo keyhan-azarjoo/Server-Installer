@@ -97,14 +97,48 @@ def index():
 
 @app.route("/api/health")
 def health():
+    # Try configured URL first, then fallbacks
+    urls_to_try = [LMSTUDIO_BASE]
+    for fallback in ["http://host.docker.internal:1234", "http://127.0.0.1:1234", "http://localhost:1234"]:
+        if fallback not in urls_to_try:
+            urls_to_try.append(fallback)
+    for url in urls_to_try:
+        try:
+            r = requests.get(f"{url}/v1/models", timeout=3)
+            if r.status_code == 200:
+                models = r.json().get("data", [])
+                # Update the base URL if a fallback worked
+                global LMSTUDIO_BASE
+                if url != LMSTUDIO_BASE:
+                    LMSTUDIO_BASE = url
+                return jsonify({"ok": True, "status": "healthy", "lmstudio": url, "model_count": len(models), "lm_server": True})
+        except Exception:
+            continue
+    return jsonify({"ok": True, "status": "web_ui_only", "lmstudio": LMSTUDIO_BASE, "lm_server": False,
+                    "tried_urls": urls_to_try,
+                    "message": "LM Studio local server is not running. Open LM Studio app > Developer > Start Server."})
+
+
+@app.route("/api/diagnostic")
+def diagnostic():
+    """Debug connectivity from inside the container."""
+    import socket
+    results = {}
+    for url in [LMSTUDIO_BASE, "http://host.docker.internal:1234", "http://127.0.0.1:1234"]:
+        try:
+            r = requests.get(f"{url}/v1/models", timeout=3)
+            results[url] = {"status": r.status_code, "ok": True}
+        except requests.exceptions.ConnectionError as e:
+            results[url] = {"status": "connection_refused", "error": str(e)[:200]}
+        except Exception as e:
+            results[url] = {"status": "error", "error": str(e)[:200]}
+    # DNS check
     try:
-        r = requests.get(f"{LMSTUDIO_BASE}/v1/models", timeout=5)
-        models = r.json().get("data", [])
-        return jsonify({"ok": True, "status": "healthy", "lmstudio": LMSTUDIO_BASE, "model_count": len(models), "lm_server": True})
-    except Exception:
-        # Return 200 (web UI is healthy) but indicate LM Studio server is not connected
-        return jsonify({"ok": True, "status": "web_ui_only", "lmstudio": LMSTUDIO_BASE, "lm_server": False,
-                        "message": "Web UI is running. Start the local server in LM Studio desktop app (Developer > Local Server > Start)."})
+        ip = socket.gethostbyname("host.docker.internal")
+        results["dns_host.docker.internal"] = ip
+    except Exception as e:
+        results["dns_host.docker.internal"] = f"failed: {e}"
+    return jsonify(results)
 
 
 # ── Models ──────────────────────────────────────────────────────────────────
