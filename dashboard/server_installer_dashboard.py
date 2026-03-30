@@ -7960,7 +7960,7 @@ ENV OPENCLAW_PORT={http_port}
 EXPOSE {http_port}
 
 # Run the gateway bound to all interfaces so it's accessible from outside
-CMD ["openclaw", "gateway", "--bind", "any", "--port", "{http_port}", "--verbose"]
+CMD ["openclaw", "gateway", "--bind", "lan", "--port", "{http_port}", "--verbose"]
 """
     Path(build_dir, "Dockerfile").write_text(dockerfile, encoding="utf-8")
 

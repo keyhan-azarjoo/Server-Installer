@@ -30,10 +30,11 @@ log() { echo "[OpenClaw] $*"; }
 mkdir -p "$STATE_DIR"
 
 # Determine bind mode
+# Valid --bind: loopback, lan, tailnet, auto, custom
 if [ "$HOST_IP" = "0.0.0.0" ] || [ "$HOST_IP" = "*" ] || [ -z "$HOST_IP" ]; then
-    BIND_ARG="--bind any"
+    BIND_ARG="--bind lan"
 else
-    BIND_ARG="--bind loopback"
+    BIND_ARG="--bind lan"
 fi
 
 # ── Step 1: Create dedicated user ───────────────────────────────────────────
