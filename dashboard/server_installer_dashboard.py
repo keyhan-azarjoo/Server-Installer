@@ -10297,7 +10297,12 @@ CMD ["/app/venv/bin/python", "/app/app.py"]
     docker_cmd += ["-p", f"{http_port}:{http_port}"]
     if gpu_device == "cuda":
         docker_cmd += ["--gpus", "all"]
-    docker_cmd += ["-v", f"{str(SAM3_STATE_DIR / 'models')}:/app/models"]
+    # Mount the model directory — check both possible locations
+    host_model_dir = SAM3_STATE_DIR / "app" / "models"
+    if not host_model_dir.exists():
+        host_model_dir = SAM3_STATE_DIR / "models"
+    host_model_dir.mkdir(parents=True, exist_ok=True)
+    docker_cmd += ["-v", f"{str(host_model_dir)}:/app/models"]
     docker_cmd.append(image_name)
 
     if live_cb:
