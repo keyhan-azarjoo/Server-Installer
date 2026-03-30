@@ -7978,14 +7978,25 @@ openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback t
 openclaw config set gateway.controlUi.allowedOrigins '["*"]' 2>/dev/null || true
 openclaw config set gateway.trustedProxies '["127.0.0.1","::1"]' 2>/dev/null || true
 
+# Generate self-signed SSL cert for HTTPS (required for non-localhost secure context)
+mkdir -p /root/.openclaw/certs
+if [ ! -f /root/.openclaw/certs/server.pem ]; then
+    openssl req -x509 -nodes -newkey rsa:2048 \\
+        -keyout /root/.openclaw/certs/key.pem \\
+        -out /root/.openclaw/certs/cert.pem \\
+        -days 3650 -subj "/CN=openclaw/O=ServerInstaller/C=US" 2>/dev/null
+    cat /root/.openclaw/certs/cert.pem /root/.openclaw/certs/key.pem > /root/.openclaw/certs/server.pem
+    echo "SSL cert generated."
+fi
+
 # Start gateway on loopback
 openclaw gateway --allow-unconfigured --bind loopback --port {gw_internal_port} --verbose &
 GW_PID=$!
 sleep 3
 
-# Forward 0.0.0.0:port -> 127.0.0.1:internal_port using socat
-echo "Starting port forwarder 0.0.0.0:{http_port} -> 127.0.0.1:{gw_internal_port}"
-socat TCP-LISTEN:{http_port},fork,reuseaddr TCP:127.0.0.1:{gw_internal_port} &
+# HTTPS forwarder (primary) — browser requires secure context for device identity
+echo "Starting HTTPS forwarder on 0.0.0.0:{http_port} -> 127.0.0.1:{gw_internal_port}"
+socat OPENSSL-LISTEN:{http_port},fork,reuseaddr,cert=/root/.openclaw/certs/server.pem,cafile=/root/.openclaw/certs/cert.pem,verify=0 TCP:127.0.0.1:{gw_internal_port} &
 
 wait $GW_PID
 """
@@ -7994,7 +8005,7 @@ wait $GW_PID
     dockerfile = f"""FROM node:22-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y curl python3 build-essential socat && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl python3 build-essential socat openssl && rm -rf /var/lib/apt/lists/*
 
 # Install OpenClaw globally
 RUN npm install -g openclaw@latest
