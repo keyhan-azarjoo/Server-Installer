@@ -7972,7 +7972,13 @@ def run_openclaw_docker(form=None, live_cb=None):
 echo "=== OpenClaw Docker Container ==="
 echo "Port: {http_port}"
 
-# Start gateway on loopback (avoids controlUi origin error)
+# Configure gateway to allow external origins (required for non-loopback access)
+mkdir -p /root/.openclaw
+openclaw config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true
+openclaw config set gateway.controlUi.allowedOrigins '["*"]' 2>/dev/null || true
+openclaw config set gateway.trustedProxies '["127.0.0.1","::1"]' 2>/dev/null || true
+
+# Start gateway on loopback
 openclaw gateway --allow-unconfigured --bind loopback --port {gw_internal_port} --verbose &
 GW_PID=$!
 sleep 3
