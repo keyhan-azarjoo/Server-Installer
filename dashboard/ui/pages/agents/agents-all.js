@@ -6,20 +6,26 @@
     "agent-openclaw": {
       title: "OpenClaw",
       color: "#dc2626",
-      defaultPort: "8080",
+      defaultPort: "18789",
       prefix: "OPENCLAW",
-      description: "Open-source AI agent framework for building autonomous agents with tool use, memory, planning, and self-reflection. Modular plugin architecture supports custom tools, multiple LLM backends, and persistent memory stores.",
-      website: "https://github.com/openclaw-ai/openclaw",
-      dockerImage: "openclaw/openclaw:latest",
+      description: "Free, open-source, self-hosted AI agent platform. 20+ messaging channels (WhatsApp, Telegram, Discord, Slack), browser automation, code execution, file management, persistent memory, cron jobs, and voice support. Powered by local LLMs via Ollama.",
+      website: "https://openclaw.ai",
+      dockerImage: "node:22-slim + npm install -g openclaw@latest",
       installCmds: {
-        pip: "pip install openclaw",
-        git: "git clone https://github.com/openclaw-ai/openclaw.git && cd openclaw && pip install -e .",
-        docker: "docker run -d -p 8080:8080 openclaw/openclaw:latest",
+        "1. Create User": "adduser --disabled-password --gecos \"\" openclaw\nusermod -aG sudo openclaw\necho \"openclaw ALL=(ALL) NOPASSWD: ALL\" > /etc/sudoers.d/openclaw\nchmod 440 /etc/sudoers.d/openclaw\npasswd openclaw",
+        "2. Install Packages": "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -\napt-get install -y nodejs build-essential python3",
+        "3a. Install OpenClaw": "su - openclaw -c 'npm config set prefix ~/.npm-global && npm install -g openclaw@latest && echo \"export PATH=\\\"\\$HOME/.npm-global/bin:\\$PATH\\\"\" >> ~/.bashrc'\nls -la /home/openclaw/.npm-global/bin/openclaw",
+        "3b. Systemd Service": "tee /etc/systemd/system/clawdbot-gateway.service > /dev/null << 'EOF'\n[Unit]\nDescription=Clawdbot Gateway (always-on)\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nUser=openclaw\nWorkingDirectory=/home/openclaw\nEnvironment=PATH=/usr/bin:/bin:/home/openclaw/.npm-global/bin\nExecStart=/home/openclaw/.npm-global/bin/openclaw gateway --bind loopback --port 18789 --verbose\nRestart=always\nRestartSec=5\n\n[Install]\nWantedBy=multi-user.target\nEOF",
+        "3c. Configure": "su - openclaw -c '/home/openclaw/.npm-global/bin/openclaw onboard'",
+        "3d. Start Service": "systemctl daemon-reload\nsystemctl enable clawdbot-gateway.service\nsystemctl start clawdbot-gateway.service\nsystemctl status clawdbot-gateway.service",
+        "4a. Ollama + Model": "curl -fsSL https://ollama.com/install.sh | sh\nollama pull llama3.2:3b\nsystemctl stop clawdbot-gateway.service\nmkdir -p /tmp/ollama-backups && chmod 1777 /tmp/ollama-backups\nsu - openclaw -c 'ollama launch openclaw --model llama3.2:3b --config'",
+        "4b. Dashboard URL": "systemctl start clawdbot-gateway.service\nsystemctl status clawdbot-gateway.service\nsu - openclaw -c '/home/openclaw/.npm-global/bin/openclaw dashboard --no-open'",
+        "5. SSH Tunnel": "ssh -N -L 18789:127.0.0.1:18789 openclaw@YOUR_SERVER_IP",
       },
       links: [
-        { label: "GitHub", url: "https://github.com/openclaw-ai/openclaw" },
-        { label: "Documentation", url: "https://openclaw-ai.github.io/openclaw/" },
-        { label: "PyPI", url: "https://pypi.org/project/openclaw/" },
+        { label: "GitHub", url: "https://github.com/openclaw/openclaw" },
+        { label: "Website", url: "https://openclaw.ai" },
+        { label: "Setup Guide", url: "https://mer.vin/2026/02/openclaw-remote-server-setup/" },
       ],
     },
     "agent-openinterpreter": {
@@ -329,7 +335,7 @@
                   return (
                     <Box key={key} sx={{ mb: 1.5 }}>
                       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.3 }}>
-                        <Typography variant="caption" fontWeight={700} sx={{ color: "#475569" }}>Install via {key}:</Typography>
+                        <Typography variant="caption" fontWeight={700} sx={{ color: "#475569" }}>{key.match(/^\d/) ? key + ":" : "Install via " + key + ":"}</Typography>
                         <Tooltip title="Copy command">
                           <Button size="small" variant="text" sx={{ textTransform: "none", minWidth: 0, px: 1, fontSize: 10 }}
                             onClick={function() { if (copyText) copyText(svc.installCmds[key], "install command"); }}>
