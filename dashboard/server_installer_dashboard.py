@@ -8189,8 +8189,12 @@ http {{
         'openclaw config set gateway.controlUi.allowedOrigins \'["*"]\' 2>/dev/null || true',
         'openclaw config set gateway.trustedProxies \'["127.0.0.1","::1"]\' 2>/dev/null || true',
         "",
-        "# Set Ollama env vars — OLLAMA_API_KEY enables the Ollama provider in OpenClaw",
+        "# Set API keys — enables providers in OpenClaw's model list",
+        "# All 3 keys needed so full model catalog appears (not just one provider)",
+        "# Ollama: any value works. OpenAI/Anthropic: placeholder until user sets real key.",
         "export OLLAMA_API_KEY='ollama-local'",
+        "export OPENAI_API_KEY='${OPENAI_API_KEY:-placeholder}'",
+        "export ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY:-placeholder}'",
         f"export OLLAMA_HOST='{ollama_url or 'http://127.0.0.1:11434'}'",
         "",
         "# OpenClaw auto-discovers Ollama at http://127.0.0.1:11434 ONLY.",
@@ -8391,6 +8395,8 @@ RUN mkdir -p /root/.openclaw
 # Gateway port and Ollama provider
 ENV OPENCLAW_PORT={http_port}
 ENV OLLAMA_API_KEY=ollama-local
+ENV OPENAI_API_KEY=placeholder
+ENV ANTHROPIC_API_KEY=placeholder
 EXPOSE {http_port}
 
 COPY entrypoint.sh /entrypoint.sh
@@ -16003,6 +16009,7 @@ class Handler(BaseHTTPRequestHandler):
                     output.append(m)
                     if cb: cb(m + "\n")
                 ollama_key = (form.get("OLLAMA_API_KEY", [""])[0] or "").strip()
+                lmstudio_key = (form.get("LMSTUDIO_API_KEY", [""])[0] or "").strip()
                 openai_key = (form.get("OPENAI_API_KEY", [""])[0] or "").strip()
                 anthropic_key = (form.get("ANTHROPIC_API_KEY", [""])[0] or "").strip()
                 container = "serverinstaller-openclaw"
@@ -16011,13 +16018,16 @@ class Handler(BaseHTTPRequestHandler):
                 env_lines = []
                 if ollama_key:
                     env_lines.append(f"OLLAMA_API_KEY={ollama_key}")
-                    log(f"Ollama API Key: {'*' * len(ollama_key)}")
+                    log(f"Ollama API Key: {ollama_key[:4]}{'*' * max(0, len(ollama_key)-4)}")
+                if lmstudio_key:
+                    env_lines.append(f"LMSTUDIO_API_KEY={lmstudio_key}")
+                    log(f"LM Studio API Key: {lmstudio_key[:4]}{'*' * max(0, len(lmstudio_key)-4)}")
                 if openai_key:
                     env_lines.append(f"OPENAI_API_KEY={openai_key}")
-                    log(f"OpenAI API Key: sk-...{'*' * 8}")
+                    log(f"OpenAI API Key: {openai_key[:6]}{'*' * 8}")
                 if anthropic_key:
                     env_lines.append(f"ANTHROPIC_API_KEY={anthropic_key}")
-                    log(f"Anthropic API Key: sk-ant-...{'*' * 8}")
+                    log(f"Anthropic API Key: {anthropic_key[:8]}{'*' * 8}")
                 if not env_lines:
                     log("No tokens provided.")
                     return 1, "\n".join(output)
@@ -16032,6 +16042,8 @@ class Handler(BaseHTTPRequestHandler):
                 profiles = {}
                 if ollama_key:
                     profiles['"ollama:local"'] = f'{{"type":"token","provider":"ollama","token":"{ollama_key}"}}'
+                if lmstudio_key:
+                    profiles['"lmstudio:local"'] = f'{{"type":"token","provider":"lmstudio","token":"{lmstudio_key}"}}'
                 if openai_key:
                     profiles['"openai:default"'] = f'{{"type":"api_key","provider":"openai","key":"{openai_key}"}}'
                 if anthropic_key:
@@ -16040,6 +16052,8 @@ class Handler(BaseHTTPRequestHandler):
                 last_good_parts = []
                 if ollama_key:
                     last_good_parts.append('"ollama":"ollama:local"')
+                if lmstudio_key:
+                    last_good_parts.append('"lmstudio":"lmstudio:local"')
                 if openai_key:
                     last_good_parts.append('"openai":"openai:default"')
                 if anthropic_key:

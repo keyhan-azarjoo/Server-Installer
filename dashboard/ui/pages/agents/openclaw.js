@@ -242,6 +242,8 @@
         {installed && React.createElement(function ApiTokensPanel() {
           var _ollamaKey = React.useState("ollama-local");
           var ollamaKey = _ollamaKey[0], setOllamaKey = _ollamaKey[1];
+          var _lmstudioKey = React.useState("lmstudio-local");
+          var lmstudioKey = _lmstudioKey[0], setLmstudioKey = _lmstudioKey[1];
           var _openaiKey = React.useState("");
           var openaiKey = _openaiKey[0], setOpenaiKey = _openaiKey[1];
           var _anthropicKey = React.useState("");
@@ -256,6 +258,7 @@
             setSaveMsg("");
             var fd = new FormData();
             fd.append("OLLAMA_API_KEY", ollamaKey);
+            fd.append("LMSTUDIO_API_KEY", lmstudioKey);
             fd.append("OPENAI_API_KEY", openaiKey);
             fd.append("ANTHROPIC_API_KEY", anthropicKey);
             fetch("/run/openclaw_set_tokens", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd })
@@ -278,23 +281,29 @@
                 <CardContent>
                   <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5, color: "#7c3aed" }}>API Tokens</Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Enter API keys to enable LLM providers. OpenClaw uses these to connect to AI models.
-                    For Ollama, any value works (e.g. "ollama-local"). For OpenAI/Anthropic, use your real API key.
+                    Enter API keys to enable LLM providers. For local models (Ollama/LM Studio), any value works.
+                    For cloud providers (OpenAI/Anthropic), enter your real API key.
                   </Typography>
                   <Grid container spacing={2}>
-                    <Grid item xs={12} md={4}>
+                    <Grid item xs={12} md={3}>
                       <TextField size="small" fullWidth label="Ollama API Key" value={ollamaKey}
                         onChange={function(e) { setOllamaKey(e.target.value); }}
-                        placeholder="ollama-local (any value)"
-                        helperText="Enables Ollama provider. Any non-empty value works." />
+                        placeholder="ollama-local"
+                        helperText="Any value enables Ollama models." />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid item xs={12} md={3}>
+                      <TextField size="small" fullWidth label="LM Studio API Key" value={lmstudioKey}
+                        onChange={function(e) { setLmstudioKey(e.target.value); }}
+                        placeholder="lmstudio-local"
+                        helperText="Any value enables LM Studio models." />
+                    </Grid>
+                    <Grid item xs={12} md={3}>
                       <TextField size="small" fullWidth label="OpenAI API Key" value={openaiKey}
                         onChange={function(e) { setOpenaiKey(e.target.value); }}
                         placeholder="sk-..." type="password"
                         helperText="Enables GPT-4o, GPT-4, etc." />
                     </Grid>
-                    <Grid item xs={12} md={4}>
+                    <Grid item xs={12} md={3}>
                       <TextField size="small" fullWidth label="Anthropic API Key" value={anthropicKey}
                         onChange={function(e) { setAnthropicKey(e.target.value); }}
                         placeholder="sk-ant-..." type="password"
