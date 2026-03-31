@@ -99,7 +99,7 @@
 
     var commonFields = [
       { name: "LMSTUDIO_HOST_IP", label: "Host IP", type: "select", options: selectableIps, defaultValue: selectableIps[0] || "", required: true, placeholder: "Select IP" },
-      { name: "LMSTUDIO_HTTP_PORT", label: "Web UI HTTP Port", defaultValue: httpPort || "8080", checkPort: true, placeholder: "Leave empty for no web UI" },
+      { name: "LMSTUDIO_HTTP_PORT", label: "Web UI HTTP Port", defaultValue: httpPort || "", checkPort: true, placeholder: "Default: 1234 (leave empty for HTTPS-only)" },
       { name: "LMSTUDIO_HTTPS_PORT", label: "Web UI HTTPS Port", defaultValue: "", checkPort: true, certSelect: "SSL_CERT_NAME", placeholder: "Leave empty to skip HTTPS" },
       { name: "LMSTUDIO_DOMAIN", label: "Domain (optional)", defaultValue: lmsInfo.domain || "", placeholder: "e.g. lmstudio.example.com" },
       { name: "LMSTUDIO_USERNAME", label: "Username (optional)", defaultValue: "", placeholder: "Leave empty for no auth" },

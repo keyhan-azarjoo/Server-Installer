@@ -147,7 +147,7 @@
 
     var commonFields = [
       { name: "OLLAMA_HOST_IP", label: "Host IP", type: "select", options: selectableIps, defaultValue: selectableIps[0] || "", required: true, placeholder: "Select IP" },
-      { name: "OLLAMA_HTTP_PORT", label: "Web UI HTTP Port", defaultValue: httpPort || "8080", checkPort: true, placeholder: "Leave empty for no web UI" },
+      { name: "OLLAMA_HTTP_PORT", label: "Web UI HTTP Port", defaultValue: httpPort || "", checkPort: true, placeholder: "Default: 11434 (leave empty for HTTPS-only)" },
       { name: "OLLAMA_HTTPS_PORT", label: "Web UI HTTPS Port", defaultValue: "", checkPort: true, certSelect: "SSL_CERT_NAME", placeholder: "Leave empty to skip HTTPS" },
       { name: "OLLAMA_DOMAIN", label: "Domain (optional)", defaultValue: ollamaInfo.domain || "", placeholder: "e.g. ollama.example.com" },
       { name: "OLLAMA_USERNAME", label: "Username (optional)", defaultValue: "", placeholder: "Leave empty for no auth" },

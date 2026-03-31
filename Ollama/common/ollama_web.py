@@ -291,13 +291,18 @@ if __name__ == "__main__":
     import threading
     import subprocess as _sp
 
-    port = int(os.environ.get("OLLAMA_WEBUI_PORT", 3080))
+    http_port_str = os.environ.get("OLLAMA_WEBUI_PORT", "").strip()
     https_port = os.environ.get("OLLAMA_HTTPS_PORT", "").strip()
     cert_dir = os.environ.get("OLLAMA_CERT_DIR", os.path.join(os.path.dirname(__file__), "certs"))
     cert_file = os.path.join(cert_dir, "ollama.crt")
     key_file = os.path.join(cert_dir, "ollama.key")
 
-    if https_port and https_port.isdigit() and int(https_port) > 0:
+    # Determine which ports to serve
+    http_port = int(http_port_str) if http_port_str and http_port_str.isdigit() and int(http_port_str) > 0 else 0
+    has_https = https_port and https_port.isdigit() and int(https_port) > 0
+
+    # Generate SSL cert if HTTPS is requested
+    if has_https:
         os.makedirs(cert_dir, exist_ok=True)
         if not os.path.exists(cert_file):
             try:
@@ -308,20 +313,36 @@ if __name__ == "__main__":
                 print(f"SSL cert created: {cert_file}")
             except Exception as e:
                 print(f"SSL cert generation failed: {e}")
-                https_port = ""
-        if https_port and os.path.exists(cert_file):
-            def _run_https():
-                try:
-                    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-                    ctx.minimum_version = ssl.TLSVersion.TLSv1_2
-                    ctx.load_cert_chain(cert_file, key_file)
-                    from werkzeug.serving import make_server
-                    srv = make_server("0.0.0.0", int(https_port), app, ssl_context=ctx, threaded=True)
-                    print(f"HTTPS on port {https_port}")
-                    srv.serve_forever()
-                except Exception as e:
-                    print(f"HTTPS failed: {e}")
-            threading.Thread(target=_run_https, daemon=True).start()
+                has_https = False
 
-    print(f"HTTP on port {port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+        if has_https and not os.path.exists(cert_file):
+            has_https = False
+
+    if has_https and http_port > 0:
+        # Both HTTP and HTTPS — run HTTPS in background thread, HTTP in main
+        def _run_https():
+            try:
+                ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+                ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+                ctx.load_cert_chain(cert_file, key_file)
+                from werkzeug.serving import make_server
+                srv = make_server("0.0.0.0", int(https_port), app, ssl_context=ctx, threaded=True)
+                print(f"HTTPS on port {https_port}")
+                srv.serve_forever()
+            except Exception as e:
+                print(f"HTTPS failed: {e}")
+        threading.Thread(target=_run_https, daemon=True).start()
+        print(f"HTTP on port {http_port}")
+        app.run(host="0.0.0.0", port=http_port, debug=False)
+    elif has_https:
+        # HTTPS only — run in main thread
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(cert_file, key_file)
+        print(f"HTTPS on port {https_port} (no HTTP)")
+        app.run(host="0.0.0.0", port=int(https_port), ssl_context=ctx, debug=False)
+    else:
+        # HTTP only
+        port = http_port if http_port > 0 else 3080
+        print(f"HTTP on port {port}")
+        app.run(host="0.0.0.0", port=port, debug=False)

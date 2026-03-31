@@ -8253,7 +8253,9 @@ def run_ollama_docker(form=None, live_cb=None):
     host = (form.get("OLLAMA_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
     username = (form.get("OLLAMA_USERNAME", [""])[0] or "").strip()
     password = (form.get("OLLAMA_PASSWORD", [""])[0] or "").strip()
-    web_port = http_port or https_port or "11434"
+    # If neither port specified, default HTTP to 11434
+    if not http_port and not https_port:
+        http_port = "11434"
     output = []
     def log(m):
         output.append(m)
@@ -8321,9 +8323,12 @@ def run_ollama_docker(form=None, live_cb=None):
             shutil.copy2(str(item), str(dest))
 
     # Create Dockerfile for web UI
-    expose_ports = web_port
-    if https_port:
-        expose_ports += f" {https_port}"
+    expose_list = []
+    if http_port:
+        expose_list.append(http_port)
+    if https_port and https_port != http_port:
+        expose_list.append(https_port)
+    expose_ports = " ".join(expose_list) if expose_list else "11434"
     dockerfile = f"""FROM python:3.12-slim
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
@@ -8331,7 +8336,7 @@ WORKDIR /app
 COPY . /app/
 RUN pip install --no-cache-dir flask requests
 ENV OLLAMA_API_BASE=http://{ollama_ip}:11434
-ENV OLLAMA_WEBUI_PORT={web_port}
+ENV OLLAMA_WEBUI_PORT={http_port}
 ENV OLLAMA_HTTPS_PORT={https_port}
 ENV OLLAMA_AUTH_USERNAME={username}
 ENV OLLAMA_AUTH_PASSWORD={password}
@@ -8347,22 +8352,24 @@ CMD ["python", "ollama_web.py"]
         # Fallback: expose Ollama API directly
         run_capture(["docker", "stop", "serverinstaller-ollama"], timeout=15)
         run_capture(["docker", "rm", "serverinstaller-ollama"], timeout=15)
+        fallback_port = http_port or https_port or "11434"
         cmd_fallback = ["docker", "run", "-d", "--name", "serverinstaller-ollama",
-                        "-p", f"{web_port}:11434", "-v", "ollama-data:/root/.ollama",
+                        "-p", f"{fallback_port}:11434", "-v", "ollama-data:/root/.ollama",
                         "--restart", "unless-stopped", "ollama/ollama:latest"]
         _run_install_cmd(cmd_fallback, log, timeout=300)
     else:
         # Run web UI container linked to Ollama
         webui_cmd = ["docker", "run", "-d", "--name", "serverinstaller-ollama-webui",
-                     "-p", f"{web_port}:{web_port}",
                      "--link", "serverinstaller-ollama:ollama",
                      "-e", f"OLLAMA_API_BASE=http://serverinstaller-ollama:11434",
-                     "-e", f"OLLAMA_WEBUI_PORT={web_port}",
+                     "-e", f"OLLAMA_WEBUI_PORT={http_port}",
                      "-e", f"OLLAMA_HTTPS_PORT={https_port}",
                      "-e", f"OLLAMA_AUTH_USERNAME={username}",
                      "-e", f"OLLAMA_AUTH_PASSWORD={password}",
                      "--restart", "unless-stopped"]
-        if https_port:
+        if http_port:
+            webui_cmd += ["-p", f"{http_port}:{http_port}"]
+        if https_port and https_port != http_port:
             webui_cmd += ["-p", f"{https_port}:{https_port}"]
         webui_cmd.append("serverinstaller/ollama-webui:latest")
         code3 = _run_install_cmd(webui_cmd, log, timeout=60)
@@ -8372,20 +8379,24 @@ CMD ["python", "ollama_web.py"]
     # Save state
     OLLAMA_STATE_DIR.mkdir(parents=True, exist_ok=True)
     display_host = host if host not in ("0.0.0.0", "*", "") else choose_service_host()
-    http_url = f"http://{display_host}:{web_port}" if http_port else ""
+    http_url = f"http://{display_host}:{http_port}" if http_port else ""
     https_url = f"https://{display_host}:{https_port}" if https_port else ""
+    primary_port = http_port or https_port
     state = _read_json_file(OLLAMA_STATE_FILE)
     state.update({
         "installed": True, "service_name": "serverinstaller-ollama",
         "deploy_mode": "docker", "host": host,
         "http_port": http_port, "https_port": https_port,
-        "http_url": http_url or f"http://{display_host}:{web_port}",
+        "http_url": http_url,
         "https_url": https_url,
         "auth_enabled": bool(username), "auth_username": username,
         "running": True,
     })
     _write_json_file(OLLAMA_STATE_FILE, state)
-    manage_firewall_port("open", web_port, "tcp")
+    if http_port:
+        manage_firewall_port("open", http_port, "tcp")
+    if https_port and https_port != http_port:
+        manage_firewall_port("open", https_port, "tcp")
 
     # Show results
     log("\n" + "=" * 60)
@@ -8393,13 +8404,15 @@ CMD ["python", "ollama_web.py"]
     log("=" * 60)
     if http_url:
         log(f" Web UI (HTTP):  {http_url}")
-    else:
-        log(f" Web UI:         http://{display_host}:{web_port}")
     if https_url:
         log(f" Web UI (HTTPS): {https_url}")
+    if not http_url and not https_url:
+        log(f" Web UI:         http://{display_host}:{primary_port}")
     if username:
         log(f" Auth:           {username} / ****")
-    log(f" Ollama API:     http://{display_host}:{web_port}/api/tags")
+    api_port = http_port or https_port
+    api_proto = "http" if http_port else "https"
+    log(f" Ollama API:     {api_proto}://{display_host}:{api_port}/api/tags")
     log("=" * 60)
     return 0, "\n".join(output)
 
@@ -8412,7 +8425,9 @@ def run_lmstudio_docker(form=None, live_cb=None):
     host = (form.get("LMSTUDIO_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
     username = (form.get("LMSTUDIO_USERNAME", [""])[0] or "").strip()
     password = (form.get("LMSTUDIO_PASSWORD", [""])[0] or "").strip()
-    web_port = http_port or https_port or "8084"
+    # If neither port specified, default HTTP to 1234 (LM Studio native default)
+    if not http_port and not https_port:
+        http_port = "1234"
     output = []
     def log(m):
         output.append(m)
@@ -8574,9 +8589,12 @@ def run_lmstudio_docker(form=None, live_cb=None):
 
     # LM Studio runs on the host, not in Docker. Use host.docker.internal to reach it.
     lms_api_base = "http://host.docker.internal:1234"
-    expose_ports = web_port
-    if https_port:
-        expose_ports += f" {https_port}"
+    expose_list = []
+    if http_port:
+        expose_list.append(http_port)
+    if https_port and https_port != http_port:
+        expose_list.append(https_port)
+    expose_ports = " ".join(expose_list) if expose_list else "1234"
     dockerfile = f"""FROM python:3.12-slim
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
@@ -8584,7 +8602,7 @@ WORKDIR /app
 COPY . /app/
 RUN pip install --no-cache-dir flask requests
 ENV LMSTUDIO_API_BASE={lms_api_base}
-ENV LMSTUDIO_WEB_PORT={web_port}
+ENV LMSTUDIO_WEB_PORT={http_port}
 ENV LMSTUDIO_HTTPS_PORT={https_port}
 ENV LMSTUDIO_AUTH_USERNAME={username}
 ENV LMSTUDIO_AUTH_PASSWORD={password}
@@ -8599,15 +8617,16 @@ CMD ["python", "lmstudio_web.py"]
 
     # Run web UI container with host networking access
     webui_cmd = ["docker", "run", "-d", "--name", "serverinstaller-lmstudio-webui",
-                 "-p", f"{web_port}:{web_port}",
                  "--add-host", "host.docker.internal:host-gateway",
                  "-e", f"LMSTUDIO_API_BASE={lms_api_base}",
-                 "-e", f"LMSTUDIO_WEB_PORT={web_port}",
+                 "-e", f"LMSTUDIO_WEB_PORT={http_port}",
                  "-e", f"LMSTUDIO_HTTPS_PORT={https_port}",
                  "-e", f"LMSTUDIO_AUTH_USERNAME={username}",
                  "-e", f"LMSTUDIO_AUTH_PASSWORD={password}",
                  "--restart", "unless-stopped"]
-    if https_port:
+    if http_port:
+        webui_cmd += ["-p", f"{http_port}:{http_port}"]
+    if https_port and https_port != http_port:
         webui_cmd += ["-p", f"{https_port}:{https_port}"]
     webui_cmd.append("serverinstaller/lmstudio-webui:latest")
     code2 = _run_install_cmd(webui_cmd, log, timeout=60)
@@ -8615,26 +8634,32 @@ CMD ["python", "lmstudio_web.py"]
     # Save state
     LMSTUDIO_STATE_DIR.mkdir(parents=True, exist_ok=True)
     display_host = host if host not in ("0.0.0.0", "*", "") else choose_service_host()
-    http_url = f"http://{display_host}:{web_port}" if http_port else f"http://{display_host}:{web_port}"
+    http_url = f"http://{display_host}:{http_port}" if http_port else ""
     https_url = f"https://{display_host}:{https_port}" if https_port else ""
     state = _read_json_file(LMSTUDIO_STATE_FILE)
     state.update({
         "installed": True, "service_name": "serverinstaller-lmstudio-webui",
         "deploy_mode": "docker", "host": host,
-        "http_port": http_port or web_port, "https_port": https_port,
+        "http_port": http_port, "https_port": https_port,
         "http_url": http_url, "https_url": https_url,
         "auth_enabled": bool(username), "auth_username": username,
         "running": code2 == 0,
     })
     _write_json_file(LMSTUDIO_STATE_FILE, state)
-    manage_firewall_port("open", web_port, "tcp")
+    if http_port:
+        manage_firewall_port("open", http_port, "tcp")
+    if https_port and https_port != http_port:
+        manage_firewall_port("open", https_port, "tcp")
 
     log("\n" + "=" * 60)
     log(" LM Studio Web UI Docker Deployment Complete!")
     log("=" * 60)
-    log(f" Web UI:         {http_url}")
+    if http_url:
+        log(f" Web UI (HTTP):  {http_url}")
     if https_url:
         log(f" Web UI (HTTPS): {https_url}")
+    if not http_url and not https_url:
+        log(f" Web UI:         http://{display_host}:{http_port or https_port}")
     log(f" LM Studio API:  http://localhost:1234 (on host)")
     if username:
         log(f" Auth:           {username} / ****")
