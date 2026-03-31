@@ -24,7 +24,8 @@
     const installed = !!whisperInfo.installed;
     const running = !!whisperInfo.running;
     const modelSize = String(whisperInfo.model_size || "base").trim();
-    const bestUrl = httpsUrl || httpUrl || (installed ? `http://127.0.0.1:${httpPort}` : "");
+    const httpsPort = String(whisperInfo.https_port || "").trim();
+    const bestUrl = httpsUrl || httpUrl || (installed && httpsPort ? `https://127.0.0.1:${httpsPort}` : installed ? `http://127.0.0.1:${httpPort}` : "");
 
     // Test transcription state
     const [audioFile, setAudioFile] = React.useState(null);

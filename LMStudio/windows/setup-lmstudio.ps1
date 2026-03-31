@@ -125,14 +125,13 @@ if (Test-Path $commonDir) {
 
 # ── Step 6: Startup script ───────────────────────────────────────────────────
 $webPort = $httpPort
-if (-not $webPort) { $webPort = $httpsPort }
 $startScript = Join-Path $installDir "start-lmstudio-webui.py"
 $pyLines = @(
     "#!/usr/bin/env python3",
     "import os, sys, ssl, threading, time",
     "",
     "LMSTUDIO_INTERNAL = 'http://127.0.0.1:${LMSTUDIO_INTERNAL_PORT}'",
-    "WEB_PORT = int(os.environ.get('LMSTUDIO_WEB_PORT', '${webPort}'))",
+    "HTTP_PORT_STR = os.environ.get('LMSTUDIO_WEB_PORT', '${webPort}').strip()",
     "HTTPS_PORT = os.environ.get('LMSTUDIO_HTTPS_PORT', '${httpsPort}').strip()",
     "CERT_FILE = os.environ.get('LMSTUDIO_CERT_FILE', '')",
     "KEY_FILE = os.environ.get('LMSTUDIO_KEY_FILE', '')",
@@ -153,14 +152,24 @@ $pyLines = @(
     "    os.environ['LMSTUDIO_API_BASE'] = LMSTUDIO_INTERNAL",
     "    sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))",
     "    from lmstudio_web import app",
-    "    if HTTPS_PORT and HTTPS_PORT.isdigit() and CERT_FILE and KEY_FILE:",
-    "        cf = os.path.normpath(CERT_FILE)",
-    "        kf = os.path.normpath(KEY_FILE)",
-    "        if os.path.isfile(cf) and os.path.isfile(kf):",
-    "            t = threading.Thread(target=run_https, args=(app, int(HTTPS_PORT), cf, kf), daemon=True)",
-    "            t.start()",
-    "    print(f'LM Studio Web UI on http://0.0.0.0:{WEB_PORT}')",
-    "    app.run(host='0.0.0.0', port=WEB_PORT)"
+    "    http_port = int(HTTP_PORT_STR) if HTTP_PORT_STR and HTTP_PORT_STR.isdigit() and int(HTTP_PORT_STR) > 0 else 0",
+    "    has_https = HTTPS_PORT and HTTPS_PORT.isdigit() and int(HTTPS_PORT) > 0 and CERT_FILE and KEY_FILE and os.path.isfile(os.path.normpath(CERT_FILE)) and os.path.isfile(os.path.normpath(KEY_FILE))",
+    "    if has_https and http_port > 0:",
+    "        t = threading.Thread(target=run_https, args=(app, int(HTTPS_PORT), os.path.normpath(CERT_FILE), os.path.normpath(KEY_FILE)), daemon=True)",
+    "        t.start()",
+    "        print(f'LM Studio Web UI on http://0.0.0.0:{http_port}')",
+    "        app.run(host='0.0.0.0', port=http_port)",
+    "    elif has_https:",
+    "        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)",
+    "        ctx.minimum_version = ssl.TLSVersion.TLSv1_2",
+    "        ctx.load_cert_chain(os.path.normpath(CERT_FILE), os.path.normpath(KEY_FILE))",
+    "        print(f'LM Studio Web UI on https://0.0.0.0:{HTTPS_PORT} (HTTPS only)')",
+    "        app.run(host='0.0.0.0', port=int(HTTPS_PORT), ssl_context=ctx)",
+    "    elif http_port > 0:",
+    "        print(f'LM Studio Web UI on http://0.0.0.0:{http_port}')",
+    "        app.run(host='0.0.0.0', port=http_port)",
+    "    else:",
+    "        print('No HTTP or HTTPS port configured.')"
 )
 $pyLines -join "`n" | Set-Content -Path $startScript -Encoding UTF8
 

@@ -157,14 +157,18 @@
 
                     React.useEffect(function() {
                       // Use Ollama service info from dashboard props
+                      var ollamaHttpsUrl = String(ollamaInfo.https_url || "").trim();
                       var ollamaHttpUrl = String(ollamaInfo.http_url || "").trim();
+                      var ollamaHttpsPort = String(ollamaInfo.https_port || "").trim();
                       var ollamaPort = String(ollamaInfo.http_port || "").trim();
                       var ollamaHost = String(ollamaInfo.host || "").trim();
                       var ollamaInstalled = !!ollamaInfo.installed;
                       var ollamaRunning = !!ollamaInfo.running;
 
-                      // Build detected URL
-                      var detectedUrl = ollamaHttpUrl || (ollamaHost && ollamaPort ? "http://" + ollamaHost + ":" + ollamaPort : "");
+                      // Build detected URL — prefer HTTPS when available
+                      var detectedUrl = ollamaHttpsUrl || ollamaHttpUrl
+                        || (ollamaHost && ollamaHttpsPort ? "https://" + ollamaHost + ":" + ollamaHttpsPort : "")
+                        || (ollamaHost && ollamaPort ? "http://" + ollamaHost + ":" + ollamaPort : "");
 
                       if (ollamaInstalled || ollamaRunning || detectedUrl) {
                         setOllamaUrl(detectedUrl || "http://127.0.0.1:11434");

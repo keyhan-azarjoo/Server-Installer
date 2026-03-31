@@ -25,7 +25,8 @@
     const installed = !!comfyuiInfo.installed;
     const running = !!comfyuiInfo.running;
     const gpuInfo = comfyuiInfo.gpu || "";
-    const bestUrl = httpsUrl || httpUrl || (installed ? `http://127.0.0.1:${httpPort}` : "");
+    const httpsPort = String(comfyuiInfo.https_port || "").trim();
+    const bestUrl = httpsUrl || httpUrl || (installed && httpsPort ? `https://127.0.0.1:${httpsPort}` : installed ? `http://127.0.0.1:${httpPort}` : "");
 
     const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
 

@@ -25,7 +25,8 @@
     const installed = !!tgwuiInfo.installed;
     const running = !!tgwuiInfo.running;
     const deployMode = String(tgwuiInfo.deploy_mode || "").trim();
-    const bestUrl = httpsUrl || httpUrl || (installed ? `http://127.0.0.1:${httpPort}` : "");
+    const httpsPort = String(tgwuiInfo.https_port || "").trim();
+    const bestUrl = httpsUrl || httpUrl || (installed && httpsPort ? `https://127.0.0.1:${httpsPort}` : installed ? `http://127.0.0.1:${httpPort}` : "");
 
     const installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : (cfg.os === "darwin" ? "macOS" : cfg.os_label));
 

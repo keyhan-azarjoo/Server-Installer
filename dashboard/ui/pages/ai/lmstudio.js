@@ -44,13 +44,14 @@
     var _cl = React.useState(false);
     var chatLoading = _cl[0], setChatLoading = _cl[1];
 
-    var _lmsUrl = React.useState(bestUrl || "http://127.0.0.1:1234");
+    var lmsFallback = httpsPort ? "https://127.0.0.1:" + httpsPort : "http://127.0.0.1:" + (httpPort || "1234");
+    var _lmsUrl = React.useState(bestUrl || lmsFallback);
     var lmsUrl = _lmsUrl[0], setLmsUrl = _lmsUrl[1];
     var _lmsConnected = React.useState(false);
     var lmsConnected = _lmsConnected[0], setLmsConnected = _lmsConnected[1];
 
     var refreshModels = function() {
-      var tryUrls = [bestUrl, "http://127.0.0.1:1234", "http://localhost:1234"].filter(function(u) { return u; });
+      var tryUrls = [bestUrl, lmsFallback].filter(function(u) { return u; });
       var tryNext = function(idx) {
         if (idx >= tryUrls.length) return;
         fetch(tryUrls[idx] + "/v1/models").then(function(r) { return r.json(); }).then(function(j) {
@@ -77,7 +78,7 @@
       setChatMessages(newMsgs);
       setChatInput("");
       setChatLoading(true);
-      var url = lmsUrl || bestUrl || "http://127.0.0.1:1234";
+      var url = lmsUrl || bestUrl || lmsFallback;
       fetch(url + "/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

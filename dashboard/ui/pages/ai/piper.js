@@ -24,7 +24,8 @@
     const installed = !!piperInfo.installed;
     const running = !!piperInfo.running;
     const voice = String(piperInfo.voice || "en_US-lessac-medium").trim();
-    const bestUrl = httpsUrl || httpUrl || (installed ? `http://127.0.0.1:${httpPort}` : "");
+    const httpsPort = String(piperInfo.https_port || "").trim();
+    const bestUrl = httpsUrl || httpUrl || (installed && httpsPort ? `https://127.0.0.1:${httpsPort}` : installed ? `http://127.0.0.1:${httpPort}` : "");
 
     // TTS test state
     const [ttsText, setTtsText] = React.useState("Hello! This is a test of the Piper text to speech engine.");

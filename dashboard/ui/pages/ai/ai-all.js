@@ -554,8 +554,10 @@
         const { Grid, Card, CardContent, Typography, Stack, Button, Box, Paper, Chip, Tooltip, Alert, setPage, copyText } = p;
         const info = p[scope + "Service"] || {};
         const host = String(info.host || "").trim() || "{host}";
-        const port = String(info.http_port || svc.defaultPort).trim();
-        const base = svc.apiDocs.baseUrl.replace("{host}", host).replace("{port}", port);
+        const httpsPort = String(info.https_port || "").trim();
+        const port = httpsPort || String(info.http_port || svc.defaultPort).trim();
+        const proto = httpsPort ? "https" : "http";
+        const base = svc.apiDocs.baseUrl.replace("http://", proto + "://").replace("{host}", host).replace("{port}", port).replace(/:\d+/, ":" + port);
 
         const doCopy = function(text) { if (copyText) copyText(text, "cURL"); else if (navigator.clipboard) navigator.clipboard.writeText(text); };
 

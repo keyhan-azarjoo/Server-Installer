@@ -185,13 +185,13 @@ if [ -d "$COMMON_DIR" ]; then
 fi
 
 # ── Step 6: Startup script ───────────────────────────────────────────────────
-WEB_PORT="${HTTP_PORT:-${HTTPS_PORT}}"
+WEB_PORT="${HTTP_PORT}"
 cat > "${INSTALL_DIR}/start-ollama-webui.py" <<PYEOF
 #!/usr/bin/env python3
 import os, sys, ssl, subprocess, threading, time
 
 OLLAMA_INTERNAL = "http://127.0.0.1:${OLLAMA_INTERNAL_PORT}"
-WEB_PORT = int(os.environ.get("OLLAMA_WEB_PORT", "${WEB_PORT}"))
+HTTP_PORT_STR = os.environ.get("OLLAMA_WEB_PORT", "${WEB_PORT}").strip()
 HTTPS_PORT = os.environ.get("OLLAMA_HTTPS_PORT", "${HTTPS_PORT}").strip()
 CERT_FILE = os.environ.get("OLLAMA_CERT_FILE", "${CERT_DIR}/ollama.crt")
 KEY_FILE = os.environ.get("OLLAMA_KEY_FILE", "${CERT_DIR}/ollama.key")
@@ -224,11 +224,24 @@ if __name__ == "__main__":
     os.environ["OLLAMA_API_BASE"] = OLLAMA_INTERNAL
     sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
     from ollama_web import app
-    if HTTPS_PORT and HTTPS_PORT.isdigit() and os.path.isfile(CERT_FILE) and os.path.isfile(KEY_FILE):
+    http_port = int(HTTP_PORT_STR) if HTTP_PORT_STR and HTTP_PORT_STR.isdigit() and int(HTTP_PORT_STR) > 0 else 0
+    has_https = HTTPS_PORT and HTTPS_PORT.isdigit() and int(HTTPS_PORT) > 0 and os.path.isfile(CERT_FILE) and os.path.isfile(KEY_FILE)
+    if has_https and http_port > 0:
         t = threading.Thread(target=run_https, args=(app, int(HTTPS_PORT), CERT_FILE, KEY_FILE), daemon=True)
         t.start()
-    print(f"Ollama Web UI on http://0.0.0.0:{WEB_PORT}")
-    app.run(host="0.0.0.0", port=WEB_PORT)
+        print(f"Ollama Web UI on http://0.0.0.0:{http_port}")
+        app.run(host="0.0.0.0", port=http_port)
+    elif has_https:
+        ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+        ctx.load_cert_chain(CERT_FILE, KEY_FILE)
+        print(f"Ollama Web UI on https://0.0.0.0:{HTTPS_PORT} (HTTPS only)")
+        app.run(host="0.0.0.0", port=int(HTTPS_PORT), ssl_context=ctx)
+    elif http_port > 0:
+        print(f"Ollama Web UI on http://0.0.0.0:{http_port}")
+        app.run(host="0.0.0.0", port=http_port)
+    else:
+        print("No HTTP or HTTPS port configured.")
 PYEOF
 chmod +x "${INSTALL_DIR}/start-ollama-webui.py"
 

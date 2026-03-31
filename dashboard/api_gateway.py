@@ -607,14 +607,18 @@ def _get_sam3_url():
         if p.exists():
             try:
                 state = json.loads(p.read_text(encoding="utf-8", errors="replace"))
-                for key in ("http_url", "https_url"):
+                # Prefer HTTPS URL when available
+                for key in ("https_url", "http_url"):
                     url = str(state.get(key) or "").strip()
                     if url:
                         return url
                 host = str(state.get("host") or "127.0.0.1").strip()
-                port = str(state.get("http_port") or "5000").strip()
-                if port:
-                    return f"http://{host}:{port}"
+                https_port = str(state.get("https_port") or "").strip()
+                http_port = str(state.get("http_port") or "5000").strip()
+                if https_port:
+                    return f"https://{host}:{https_port}"
+                if http_port:
+                    return f"http://{host}:{http_port}"
             except Exception:
                 pass
     return ""
@@ -706,16 +710,23 @@ def _get_ollama_url():
         if p.exists():
             try:
                 state = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+                # Prefer HTTPS URL when available
+                https_url = str(state.get("https_url") or "").strip()
+                if https_url:
+                    return https_url
                 for key in ("http_url", "url", "endpoint"):
                     val = str(state.get(key) or "").strip()
                     if val:
                         return val
                 host = str(state.get("host") or "").strip()
-                port = str(state.get("http_port") or state.get("port") or "11434").strip()
-                if host and host not in ("0.0.0.0", "*"):
-                    return f"http://{host}:{port}"
-                elif port:
-                    return f"http://127.0.0.1:{port}"
+                https_port = str(state.get("https_port") or "").strip()
+                http_port = str(state.get("http_port") or state.get("port") or "").strip()
+                if https_port:
+                    h = host if host and host not in ("0.0.0.0", "*") else "127.0.0.1"
+                    return f"https://{h}:{https_port}"
+                if http_port:
+                    h = host if host and host not in ("0.0.0.0", "*") else "127.0.0.1"
+                    return f"http://{h}:{http_port}"
             except Exception:
                 pass
     return "http://127.0.0.1:11434"
