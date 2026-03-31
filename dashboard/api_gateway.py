@@ -701,15 +701,19 @@ def sam3_health():
 # Ollama Gateway
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _get_ollama_url():
-    """Get Ollama service URL."""
+def _get_ollama_urls():
+    """Get Ollama service URLs — returns (primary_url, internal_url).
+    primary_url = user-facing URL (HTTPS web UI or HTTP)
+    internal_url = direct Ollama API (http://127.0.0.1:11434) if available
+    """
+    internal = ""
     # Check environment variable first
     url = os.environ.get("OLLAMA_HOST", "").strip()
     if url:
         if not url.startswith("http"):
             url = f"http://{url}"
-        return url
-    # Check state files — match the paths used by the installer and get_ollama_info()
+        return url, ""
+    # Check state files
     state_paths = [
         Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "ollama" / "ollama-state.json",
         Path(os.path.expanduser("~")) / ".server-installer" / "ollama" / "ollama-state.json",
@@ -719,26 +723,58 @@ def _get_ollama_url():
         if p.exists():
             try:
                 state = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+                internal = str(state.get("ollama_internal") or "").strip()
                 # Prefer HTTPS URL when available
                 https_url = str(state.get("https_url") or "").strip()
                 if https_url:
-                    return https_url
+                    return https_url, internal
                 for key in ("http_url", "url", "endpoint"):
                     val = str(state.get(key) or "").strip()
                     if val:
-                        return val
+                        return val, internal
                 host = str(state.get("host") or "").strip()
                 https_port = str(state.get("https_port") or "").strip()
                 http_port = str(state.get("http_port") or state.get("port") or "").strip()
                 if https_port:
                     h = host if host and host not in ("0.0.0.0", "*") else "127.0.0.1"
-                    return f"https://{h}:{https_port}"
+                    return f"https://{h}:{https_port}", internal
                 if http_port:
                     h = host if host and host not in ("0.0.0.0", "*") else "127.0.0.1"
-                    return f"http://{h}:{http_port}"
+                    return f"http://{h}:{http_port}", internal
             except Exception:
                 pass
-    return "http://127.0.0.1:11434"
+    return "http://127.0.0.1:11434", ""
+
+
+def _get_ollama_url():
+    """Get primary Ollama service URL."""
+    url, _ = _get_ollama_urls()
+    return url
+
+
+def _ollama_api_request(api_path, method="GET", data=None, timeout=15):
+    """Make Ollama API request, trying primary URL then internal URL with path fallbacks."""
+    primary, internal = _get_ollama_urls()
+    # Try primary URL with standard path
+    result = _json_request(f"{primary}{api_path}", method=method, data=data, timeout=timeout)
+    if "error" not in result:
+        return result
+    err = str(result.get("error", ""))
+    # If 404, try web UI alternative paths (e.g. /api/pull -> /api/models/pull)
+    if "404" in err:
+        alt_map = {"/api/pull": "/api/models/pull", "/api/delete": "/api/models/delete",
+                   "/api/show": "/api/models/info", "/api/copy": "/api/models/copy"}
+        alt = alt_map.get(api_path)
+        if alt:
+            result2 = _json_request(f"{primary}{alt}", method=method, data=data, timeout=timeout)
+            if "error" not in result2:
+                return result2
+    # If primary failed and we have an internal URL, try that
+    if internal:
+        result3 = _json_request(f"{internal}{api_path}", method=method, data=data, timeout=timeout)
+        if "error" not in result3:
+            return result3
+    return result
 
 
 def ollama_list_models():
@@ -754,8 +790,7 @@ def ollama_list_models():
 
 def ollama_pull_model(name, stream=False):
     """Pull/download a model."""
-    url = _get_ollama_url()
-    result = _json_request(f"{url}/api/pull", method="POST", data={"name": name, "stream": False}, timeout=300)
+    result = _ollama_api_request("/api/pull", method="POST", data={"name": name, "stream": False}, timeout=300)
     if "error" in result:
         return {"ok": False, "error": result["error"]}
     return {"ok": True, "status": result.get("status", "success")}
@@ -763,8 +798,7 @@ def ollama_pull_model(name, stream=False):
 
 def ollama_delete_model(name):
     """Delete a model."""
-    url = _get_ollama_url()
-    result = _json_request(f"{url}/api/delete", method="DELETE", data={"name": name}, timeout=30)
+    result = _ollama_api_request("/api/delete", method="DELETE", data={"name": name}, timeout=30)
     if "error" in result:
         return {"ok": False, "error": result["error"]}
     return {"ok": True, "status": "deleted"}
@@ -772,8 +806,7 @@ def ollama_delete_model(name):
 
 def ollama_show_model(name):
     """Show model details."""
-    url = _get_ollama_url()
-    result = _json_request(f"{url}/api/show", method="POST", data={"name": name}, timeout=15)
+    result = _ollama_api_request("/api/show", method="POST", data={"name": name}, timeout=15)
     if "error" in result:
         return {"ok": False, "error": result["error"]}
     return {"ok": True, **result}
@@ -831,12 +864,8 @@ def ollama_running_models():
 
 def ollama_copy_model(source, destination):
     """Copy/alias a model."""
-    url = _get_ollama_url()
-    result = _json_request(
-        f"{url}/api/copy", method="POST",
-        data={"source": source, "destination": destination},
-        timeout=30,
-    )
+    result = _ollama_api_request("/api/copy", method="POST",
+        data={"source": source, "destination": destination}, timeout=30)
     if "error" in result:
         return {"ok": False, "error": result["error"]}
     return {"ok": True, "status": "copied"}

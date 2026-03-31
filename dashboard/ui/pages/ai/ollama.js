@@ -155,15 +155,16 @@
     ];
 
     var popularModels = [
-      { name: "llama3.2", desc: "Meta Llama 3.2 (3B)", size: "2 GB" },
+      { name: "llama3.2:3b", desc: "Meta Llama 3.2 (3B)", size: "2 GB" },
       { name: "llama3.1:8b", desc: "Meta Llama 3.1 (8B)", size: "4.7 GB" },
-      { name: "mistral", desc: "Mistral 7B", size: "4.1 GB" },
+      { name: "mistral:7b", desc: "Mistral 7B", size: "4.1 GB" },
+      { name: "ministral:3b", desc: "Ministral 3B", size: "2 GB" },
       { name: "gemma2:2b", desc: "Google Gemma 2 (2B)", size: "1.6 GB" },
       { name: "phi3:mini", desc: "Microsoft Phi-3 Mini", size: "2.3 GB" },
-      { name: "codellama", desc: "Code Llama", size: "3.8 GB" },
-      { name: "deepseek-coder-v2:lite", desc: "DeepSeek Coder V2", size: "8.9 GB" },
-      { name: "qwen2.5:7b", desc: "Alibaba Qwen 2.5", size: "4.7 GB" },
-      { name: "nomic-embed-text", desc: "Embeddings model", size: "274 MB" },
+      { name: "qwen2.5:7b", desc: "Alibaba Qwen 2.5 (7B)", size: "4.7 GB" },
+      { name: "deepseek-r1:7b", desc: "DeepSeek R1 (7B)", size: "4.7 GB" },
+      { name: "codellama:7b", desc: "Code Llama (7B)", size: "3.8 GB" },
+      { name: "nomic-embed-text:latest", desc: "Embeddings model", size: "274 MB" },
     ];
 
     var formatSize = function(bytes) {
