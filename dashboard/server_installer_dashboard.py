@@ -8189,12 +8189,10 @@ http {{
         'openclaw config set gateway.controlUi.allowedOrigins \'["*"]\' 2>/dev/null || true',
         'openclaw config set gateway.trustedProxies \'["127.0.0.1","::1"]\' 2>/dev/null || true',
         "",
-        "# Set API keys — enables providers in OpenClaw's model list",
-        "# All 3 keys needed so full model catalog appears (not just one provider)",
-        "# Ollama: any value works. OpenAI/Anthropic: placeholder until user sets real key.",
+        "# Set Ollama API key — enables Ollama provider in OpenClaw",
+        "# Only OLLAMA_API_KEY is set by default. OpenAI/Anthropic keys",
+        "# are set by the user via the API Tokens panel (no placeholders).",
         "export OLLAMA_API_KEY='ollama-local'",
-        "export OPENAI_API_KEY='${OPENAI_API_KEY:-placeholder}'",
-        "export ANTHROPIC_API_KEY='${ANTHROPIC_API_KEY:-placeholder}'",
         f"export OLLAMA_HOST='{ollama_url or 'http://127.0.0.1:11434'}'",
         "",
         "# OpenClaw auto-discovers Ollama at http://127.0.0.1:11434 ONLY.",
@@ -8268,12 +8266,13 @@ http {{
         "",
         f"# Start gateway via wrapper script that ensures env vars are inherited",
         f"echo '{gw_internal_port}' > /tmp/gw_port",
-        "cat > /tmp/start-gateway.sh << 'GWEOF'",
+        "cat > /tmp/start-gateway.sh << GWEOF",
         "#!/bin/bash",
         "export OLLAMA_API_KEY=ollama-local",
-        "export OPENAI_API_KEY=${OPENAI_API_KEY:-placeholder}",
-        "export ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-placeholder}",
-        "exec openclaw gateway --allow-unconfigured --bind loopback --port $1 --verbose",
+        "# Only pass real API keys if user provided them (not placeholders)",
+        "[ -n \"\\$OPENAI_API_KEY\" ] && [ \"\\$OPENAI_API_KEY\" != 'placeholder' ] && export OPENAI_API_KEY=\\$OPENAI_API_KEY",
+        "[ -n \"\\$ANTHROPIC_API_KEY\" ] && [ \"\\$ANTHROPIC_API_KEY\" != 'placeholder' ] && export ANTHROPIC_API_KEY=\\$ANTHROPIC_API_KEY",
+        "exec openclaw gateway --allow-unconfigured --bind loopback --port \\$1 --verbose",
         "GWEOF",
         "chmod +x /tmp/start-gateway.sh",
         f"/tmp/start-gateway.sh {gw_internal_port} &",
@@ -8399,8 +8398,6 @@ RUN mkdir -p /root/.openclaw
 # Gateway port and Ollama provider
 ENV OPENCLAW_PORT={http_port}
 ENV OLLAMA_API_KEY=ollama-local
-ENV OPENAI_API_KEY=placeholder
-ENV ANTHROPIC_API_KEY=placeholder
 EXPOSE {http_port}
 
 COPY entrypoint.sh /entrypoint.sh
