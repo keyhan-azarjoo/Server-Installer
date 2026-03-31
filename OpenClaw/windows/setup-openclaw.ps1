@@ -113,13 +113,45 @@ try {
     if (Test-Path $logFile) { Get-Content $logFile -Tail 10 | ForEach-Object { Log "  $_" } }
 }
 
-# ── Step 4: Install Ollama ───────────────────────────────────────────────────
+# ── Step 4: Install Ollama & configure as default AI ─────────────────────────
 Log "Step 4: Checking Ollama..."
 $ollamaExists = $false
 try { $null = & ollama --version 2>$null; $ollamaExists = $true } catch {}
 if (-not $ollamaExists) {
     Log "Ollama not installed. Install it from the AI/ML page for local LLM support."
 }
+
+# Configure OpenClaw to use Ollama as default AI provider
+$agentDir = Join-Path $env:USERPROFILE ".openclaw\agents\main\agent"
+if (-not (Test-Path $agentDir)) { New-Item -ItemType Directory -Path $agentDir -Force | Out-Null }
+
+# Write auth-profiles.json
+$authProfiles = @{
+    ollama = @{
+        provider = "ollama"
+        baseUrl  = "http://127.0.0.1:11434"
+        apiKey   = "ollama"
+    }
+} | ConvertTo-Json -Depth 5
+Set-Content -Path (Join-Path $agentDir "auth-profiles.json") -Value $authProfiles -Encoding UTF8
+Log "Auth profiles written."
+
+# Write agent settings — default to Ollama
+$ollamaModel = "llama3.2:3b"
+if ($ollamaExists) {
+    try {
+        $modelList = & ollama list 2>$null
+        $firstModel = ($modelList -split "`n" | Where-Object { $_ -notmatch "^NAME" } | Select-Object -First 1) -split '\s+' | Select-Object -First 1
+        if ($firstModel) { $ollamaModel = $firstModel }
+    } catch {}
+}
+$agentSettings = @{
+    model              = "ollama/$ollamaModel"
+    provider           = "ollama"
+    customInstructions = ""
+} | ConvertTo-Json -Depth 5
+Set-Content -Path (Join-Path $agentDir "settings.json") -Value $agentSettings -Encoding UTF8
+Log "Agent settings written (model: ollama/$ollamaModel)."
 
 # ── Step 5: Firewall ────────────────────────────────────────────────────────
 foreach ($port in @($httpPort, $httpsPort)) {

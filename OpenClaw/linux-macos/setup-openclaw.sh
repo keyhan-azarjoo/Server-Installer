@@ -265,10 +265,40 @@ if command -v ollama &>/dev/null; then
     OLLAMA_MODEL=$(ollama list 2>/dev/null | grep -v "^NAME" | head -1 | awk '{print $1}')
     if [ -n "$OLLAMA_MODEL" ]; then
         log "Ollama model available: $OLLAMA_MODEL"
-        # Set model config via config CLI
+
+        # Determine agent config dir
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            AGENT_DIR="${STATE_DIR}/.openclaw/agents/main/agent"
+        else
+            AGENT_DIR="${OPENCLAW_HOME}/.openclaw/agents/main/agent"
+        fi
+        mkdir -p "$AGENT_DIR"
+
+        # Write auth-profiles.json so OpenClaw knows about Ollama provider
+        cat > "$AGENT_DIR/auth-profiles.json" <<'APROF'
+{
+  "ollama": {
+    "provider": "ollama",
+    "baseUrl": "http://127.0.0.1:11434",
+    "apiKey": "ollama"
+  }
+}
+APROF
+        log "Auth profiles written: $AGENT_DIR/auth-profiles.json"
+
+        # Write agent settings to make Ollama the default model
+        cat > "$AGENT_DIR/settings.json" <<ASET
+{
+  "model": "ollama/${OLLAMA_MODEL}",
+  "provider": "ollama",
+  "customInstructions": ""
+}
+ASET
+        log "Agent settings written: $AGENT_DIR/settings.json (model: ollama/${OLLAMA_MODEL})"
+
+        # Also set via config CLI as fallback
         "$OPENCLAW_BIN" config set models.default.provider ollama 2>/dev/null || true
         "$OPENCLAW_BIN" config set models.default.model "$OLLAMA_MODEL" 2>/dev/null || true
-        log "Configure the model in the OpenClaw dashboard after install."
     fi
 else
     log "WARNING: Ollama not installed."
