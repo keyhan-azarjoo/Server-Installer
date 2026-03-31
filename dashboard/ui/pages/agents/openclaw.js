@@ -32,15 +32,15 @@
     var installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : "macOS");
     var commonFields = [
       { name: "OPENCLAW_HOST_IP", label: "Host IP", type: "select", options: selectableIps, defaultValue: selectableIps[0] || "", required: true, placeholder: "Select IP" },
-      { name: "OPENCLAW_HTTP_PORT", label: "Gateway Port", defaultValue: httpPort || "18789", checkPort: true, placeholder: "Default: 18789" },
-      { name: "OPENCLAW_HTTPS_PORT", label: "HTTPS Port (optional)", defaultValue: "", checkPort: true, certSelect: "SSL_CERT_NAME", placeholder: "Leave empty to skip" },
+      { name: "OPENCLAW_HTTP_PORT", label: "Gateway Port (HTTP, for OS install)", defaultValue: httpPort || "18789", checkPort: true, placeholder: "Default: 18789" },
+      { name: "OPENCLAW_HTTPS_PORT", label: "HTTPS Port (Docker uses this)", defaultValue: "", checkPort: true, certSelect: "SSL_CERT_NAME", placeholder: "Default: same as Gateway Port" },
       { name: "OPENCLAW_DOMAIN", label: "Domain (optional)", defaultValue: "", placeholder: "e.g. openclaw.example.com" },
       { name: "OPENCLAW_USERNAME", label: "Dashboard Username (optional)", defaultValue: "", placeholder: "Leave empty for no auth" },
       { name: "OPENCLAW_PASSWORD", label: "Dashboard Password (optional)", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
       { name: "OPENCLAW_LLM_PROVIDER", label: "LLM Provider", type: "select", options: ["ollama (local)", "openai", "anthropic"], defaultValue: "ollama (local)", placeholder: "Select LLM" },
       { name: "OPENCLAW_LLM_MODEL", label: "Ollama Model (auto-installed if local)", type: "select", options: ["ministral:3b", "llama3.2:3b", "llama3.2:1b", "mistral:7b", "qwen2.5:3b", "qwen2.5:7b", "gemma2:2b", "phi3:3.8b", "deepseek-r1:1.5b", "deepseek-r1:7b", "codellama:7b", "custom"], defaultValue: "ministral:3b", placeholder: "Select model" },
       { name: "OPENCLAW_LLM_MODEL_CUSTOM", label: "Custom Model Name (if 'custom' selected above)", defaultValue: "", placeholder: "e.g. my-model:latest or any ollama model name" },
-      { name: "OPENCLAW_OLLAMA_URL", label: "Ollama Server URL (auto-detected)", defaultValue: (ollamaInfo.http_url || "").trim() || "", placeholder: "Leave empty for local. Or: http://other-server:11434" },
+      { name: "OPENCLAW_OLLAMA_URL", label: "Ollama Server URL (auto-detected)", defaultValue: (ollamaInfo.https_url || ollamaInfo.http_url || "").trim() || "", placeholder: "Leave empty for local. Or: https://other-server:11436" },
       { name: "OPENCLAW_OPENAI_KEY", label: "OpenAI API Key (if using OpenAI)", type: "password", defaultValue: "", placeholder: "sk-..." },
       { name: "OPENCLAW_ANTHROPIC_KEY", label: "Anthropic API Key (if using Claude)", type: "password", defaultValue: "", placeholder: "sk-ant-..." },
       { name: "OPENCLAW_TELEGRAM_TOKEN", label: "Telegram Bot Token (optional)", defaultValue: "", placeholder: "123456:ABC-DEF... (from @BotFather)" },
@@ -114,7 +114,7 @@
                   {installed && displayHost && <Typography variant="body2">Host: <b>{displayHost}</b></Typography>}
                   {installed && httpPort && <Typography variant="body2">Port: <b>{httpPort}</b></Typography>}
                   <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
-                    {bestUrl && <Button variant="contained" size="small" onClick={function() { window.open(bestUrl, "_blank"); }} sx={{ textTransform: "none", bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" }, fontSize: 12 }}>Open Dashboard</Button>}
+                    {bestUrl && <Button variant="contained" size="small" onClick={function() { var dashUrl = bestUrl.indexOf("#") === -1 ? bestUrl + "/#token=serverinstaller" : bestUrl; window.open(dashUrl, "_blank"); }} sx={{ textTransform: "none", bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" }, fontSize: 12 }}>Open Dashboard</Button>}
                     {installed && <Button variant="outlined" size="small" color="error" disabled={serviceBusy} onClick={function() {
                       if (!window.confirm("Are you sure you want to completely uninstall OpenClaw?\n\nThis will remove:\n- All Docker containers\n- All configuration and data\n- Firewall rules\n\nThis action cannot be undone.")) return;
                       run(null, "/run/openclaw_delete", "Uninstall OpenClaw");
@@ -183,8 +183,11 @@
                         .then(function(r) { return r.json(); })
                         .then(function(j) {
                           var oi = (j.ollama_service || j.software && j.software.ollama_service || {});
-                          if (oi.installed || oi.running || oi.http_url) {
-                            var url = String(oi.http_url || "").trim() || (oi.host && oi.http_port ? "http://" + oi.host + ":" + oi.http_port : "");
+                          if (oi.installed || oi.running || oi.http_url || oi.https_url) {
+                            var url = String(oi.https_url || "").trim()
+                              || String(oi.http_url || "").trim()
+                              || (oi.host && oi.https_port ? "https://" + oi.host + ":" + oi.https_port : "")
+                              || (oi.host && oi.http_port ? "http://" + oi.host + ":" + oi.http_port : "");
                             if (url) setOllamaUrl(url);
                             setOllamaStatus(oi.running ? "ready" : oi.installed ? "no-models" : "offline");
                           }

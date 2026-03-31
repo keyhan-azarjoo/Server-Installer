@@ -8053,8 +8053,16 @@ def run_openclaw_delete(live_cb=None):
 def run_openclaw_docker(form=None, live_cb=None):
     """Deploy real OpenClaw gateway as a Docker container with Node.js."""
     form = form or {}
-    http_port = (form.get("OPENCLAW_HTTP_PORT", ["18789"])[0] or "18789").strip()
-    https_port = (form.get("OPENCLAW_HTTPS_PORT", [""])[0] or "").strip()
+    http_port_raw = (form.get("OPENCLAW_HTTP_PORT", [""])[0] or "").strip()
+    https_port_raw = (form.get("OPENCLAW_HTTPS_PORT", [""])[0] or "").strip()
+    # Use HTTPS port as the exposed port if set; fall back to HTTP port or default
+    if https_port_raw and https_port_raw.isdigit() and int(https_port_raw) > 0:
+        http_port = https_port_raw  # Docker container serves HTTPS on this port via nginx
+    elif http_port_raw and http_port_raw.isdigit() and int(http_port_raw) > 0:
+        http_port = http_port_raw
+    else:
+        http_port = "18789"
+    https_port = ""  # Docker always serves HTTPS on http_port via nginx
     host = (form.get("OPENCLAW_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
     username = (form.get("OPENCLAW_USERNAME", [""])[0] or "").strip()
     password = (form.get("OPENCLAW_PASSWORD", [""])[0] or "").strip()
