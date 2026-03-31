@@ -14351,6 +14351,7 @@ class Handler(BaseHTTPRequestHandler):
             proxy_list_users, proxy_info, proxy_status, proxy_user_config, proxy_health,
             sam3_model_info, sam3_health,
             ollama_list_models, ollama_running_models, ollama_health,
+            lmstudio_list_models, lmstudio_health,
         )
         path = self.path.split("?", 1)[0]
         query = {}
@@ -14404,6 +14405,12 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/ollama/health":
             return ollama_health()
 
+        # LM Studio routes
+        if path == "/api/lmstudio/models":
+            return lmstudio_list_models()
+        if path == "/api/lmstudio/health":
+            return lmstudio_health()
+
         return None  # Not handled
 
     def _handle_api_gateway_post(self):
@@ -14418,6 +14425,7 @@ class Handler(BaseHTTPRequestHandler):
             sam3_detect,
             ollama_chat, ollama_generate, ollama_embeddings, ollama_pull_model,
             ollama_delete_model, ollama_show_model, ollama_copy_model, ollama_create_model,
+            lmstudio_chat,
         )
         path = self.path.split("?", 1)[0]
         ctype = (self.headers.get("Content-Type", "") or "").lower()
@@ -14581,6 +14589,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/ollama/create":
             body = _json_body()
             return ollama_create_model(body.get("name", ""), body.get("modelfile", ""))
+
+        # LM Studio routes
+        if path == "/api/lmstudio/chat":
+            body = _json_body()
+            return lmstudio_chat(body.get("model", ""), body.get("messages", []))
 
         return None  # Not handled
 
@@ -15287,7 +15300,7 @@ class Handler(BaseHTTPRequestHandler):
             self.write_json(payload, status)
             return
         # ── API Gateway GET routes ────────────────────────────────────────────
-        if self.path.startswith("/api/s3/") or self.path.startswith("/api/mongo/") or self.path.startswith("/api/proxy/") or self.path.startswith("/api/sam3/") or self.path.startswith("/api/ollama/"):
+        if self.path.startswith("/api/s3/") or self.path.startswith("/api/mongo/") or self.path.startswith("/api/proxy/") or self.path.startswith("/api/sam3/") or self.path.startswith("/api/ollama/") or self.path.startswith("/api/lmstudio/"):
             if (not self.is_local_client()) and (not self.is_auth()):
                 self.write_json({"ok": False, "error": "Unauthorized"}, HTTPStatus.UNAUTHORIZED)
                 return
@@ -15589,7 +15602,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.write_json({"ok": False, **payload}, status)
             return
         # ── API Gateway POST routes ───────────────────────────────────────────
-        if self.path.startswith("/api/s3/") or self.path.startswith("/api/mongo/") or self.path.startswith("/api/proxy/") or self.path.startswith("/api/sam3/") or self.path.startswith("/api/ollama/"):
+        if self.path.startswith("/api/s3/") or self.path.startswith("/api/mongo/") or self.path.startswith("/api/proxy/") or self.path.startswith("/api/sam3/") or self.path.startswith("/api/ollama/") or self.path.startswith("/api/lmstudio/"):
             try:
                 result = self._handle_api_gateway_post()
                 if result == "__streamed__":

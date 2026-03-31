@@ -935,3 +935,89 @@ def ollama_health():
             return {"ok": True, "status": "healthy"}
     except Exception as e:
         return {"ok": False, "status": "unhealthy", "error": str(e)}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LM Studio Gateway
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _get_lmstudio_url():
+    """Get LM Studio service URL from state files or env."""
+    url = os.environ.get("LMSTUDIO_API_BASE", "").strip()
+    if url:
+        return url
+    state_paths = [
+        Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer" / "lmstudio" / "lmstudio-state.json",
+        Path(os.path.expanduser("~")) / ".server-installer" / "lmstudio" / "lmstudio-state.json",
+        Path("/opt/server-installer/lmstudio/lmstudio-state.json"),
+    ]
+    for p in state_paths:
+        if p.exists():
+            try:
+                state = json.loads(p.read_text(encoding="utf-8", errors="replace"))
+                for key in ("https_url", "http_url", "url", "endpoint"):
+                    val = str(state.get(key) or "").strip()
+                    if val:
+                        return val
+                host = str(state.get("host") or "").strip()
+                https_port = str(state.get("https_port") or "").strip()
+                http_port = str(state.get("http_port") or state.get("port") or "").strip()
+                if https_port:
+                    h = host if host and host not in ("0.0.0.0", "*") else "127.0.0.1"
+                    return f"https://{h}:{https_port}"
+                if http_port:
+                    h = host if host and host not in ("0.0.0.0", "*") else "127.0.0.1"
+                    return f"http://{h}:{http_port}"
+            except Exception:
+                pass
+    return ""
+
+
+def _lmstudio_api_request(api_path, method="GET", data=None, timeout=15):
+    """Make LM Studio API request."""
+    url = _get_lmstudio_url()
+    if not url:
+        return {"error": "LM Studio not configured. Install it from the AI/ML page."}
+    result = _json_request(f"{url}{api_path}", method=method, data=data, timeout=timeout)
+    return result
+
+
+def lmstudio_list_models():
+    """List LM Studio models via OpenAI-compatible /v1/models endpoint."""
+    url = _get_lmstudio_url()
+    if not url:
+        return {"ok": False, "error": "LM Studio not configured"}
+    result = _json_request(f"{url}/v1/models", timeout=10)
+    if "data" in result:
+        return {"ok": True, "models": result["data"]}
+    if "error" in result:
+        return {"ok": False, "error": result["error"]}
+    return {"ok": True, "models": []}
+
+
+def lmstudio_chat(model, messages):
+    """Chat with LM Studio model via OpenAI-compatible endpoint."""
+    result = _lmstudio_api_request("/v1/chat/completions", method="POST",
+        data={"model": model, "messages": messages, "stream": False}, timeout=120)
+    if "error" in result:
+        return {"ok": False, "error": result["error"]}
+    # Extract message from OpenAI format
+    try:
+        msg = result["choices"][0]["message"]
+        return {"ok": True, "message": msg}
+    except (KeyError, IndexError):
+        return {"ok": True, **result}
+
+
+def lmstudio_health():
+    """Health check for LM Studio."""
+    url = _get_lmstudio_url()
+    if not url:
+        return {"ok": False, "status": "not_configured"}
+    try:
+        result = _json_request(f"{url}/v1/models", timeout=5)
+        if "data" in result:
+            return {"ok": True, "status": "healthy", "model_count": len(result["data"])}
+        return {"ok": False, "status": "unhealthy", "error": str(result.get("error", "No data"))}
+    except Exception as e:
+        return {"ok": False, "status": "unhealthy", "error": str(e)}
