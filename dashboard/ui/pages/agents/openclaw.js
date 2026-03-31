@@ -99,21 +99,102 @@
           />
         </Grid>
 
-        {/* Status */}
-        <Grid item xs={12} md={6}>
-          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6", height: "100%" }}>
+        {/* Connection & Status */}
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1.5px solid #dc262644" }}>
             <CardContent>
-              <Typography variant="h6" fontWeight={800} sx={{ mb: 1, color: "#dc2626" }}>Status</Typography>
-              <Typography variant="body2">Installed: <Chip size="small" label={installed ? "Yes" : "No"} color={installed ? "success" : "default"} sx={{ ml: 0.5 }} /></Typography>
-              {installed && <Typography variant="body2">Running: <Chip size="small" label={running ? "Running" : "Stopped"} color={running ? "success" : "warning"} sx={{ ml: 0.5 }} /></Typography>}
-              {installed && displayHost && <Typography variant="body2">Host: <b>{displayHost}</b></Typography>}
-              {installed && httpPort && <Typography variant="body2">Gateway Port: <b>{httpPort}</b></Typography>}
-              {computedHttpUrl && <Typography variant="body2" sx={{ mt: 0.5, wordBreak: "break-all" }}>Dashboard: <a href={computedHttpUrl} target="_blank" rel="noopener">{computedHttpUrl}</a></Typography>}
-              {computedHttpsUrl && <Typography variant="body2" sx={{ wordBreak: "break-all" }}>HTTPS: <a href={computedHttpsUrl} target="_blank" rel="noopener">{computedHttpsUrl}</a></Typography>}
-              <Stack direction="row" spacing={1} sx={{ mt: 2 }} flexWrap="wrap" useFlexGap>
-                {bestUrl && <Button variant="contained" size="small" onClick={function() { window.open(bestUrl, "_blank"); }} sx={{ textTransform: "none", bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" } }}>Open Dashboard</Button>}
-                {installed && <Button variant="outlined" size="small" color="error" disabled={serviceBusy} onClick={function() { if (confirm("Delete OpenClaw and all data?")) onServiceAction("delete", services[0] || { name: "serverinstaller-openclaw", kind: "systemd" }); }} sx={{ textTransform: "none" }}>Delete OpenClaw</Button>}
-              </Stack>
+              <Typography variant="h6" fontWeight={800} sx={{ mb: 2, color: "#dc2626" }}>Connection & Status</Typography>
+              <Grid container spacing={2}>
+                {/* Status Column */}
+                <Grid item xs={12} md={4}>
+                  <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>Service Status</Typography>
+                  <Typography variant="body2">Installed: <Chip size="small" label={installed ? "Yes" : "No"} color={installed ? "success" : "default"} sx={{ ml: 0.5 }} /></Typography>
+                  {installed && <Typography variant="body2">Running: <Chip size="small" label={running ? "Running" : "Stopped"} color={running ? "success" : "warning"} sx={{ ml: 0.5 }} /></Typography>}
+                  {installed && displayHost && <Typography variant="body2">Host: <b>{displayHost}</b></Typography>}
+                  {installed && httpPort && <Typography variant="body2">Port: <b>{httpPort}</b></Typography>}
+                  <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
+                    {bestUrl && <Button variant="contained" size="small" onClick={function() { window.open(bestUrl, "_blank"); }} sx={{ textTransform: "none", bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" }, fontSize: 12 }}>Open Dashboard</Button>}
+                    {installed && <Button variant="outlined" size="small" color="error" disabled={serviceBusy} onClick={function() { if (confirm("Delete OpenClaw?")) onServiceAction("delete", services[0] || { name: "serverinstaller-openclaw", kind: "systemd" }); }} sx={{ textTransform: "none", fontSize: 12 }}>Delete</Button>}
+                  </Stack>
+                </Grid>
+
+                {/* Connection Info Column */}
+                <Grid item xs={12} md={4}>
+                  <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>Gateway Connection</Typography>
+                  {installed && displayHost && httpPort ? (
+                    <Box>
+                      <Typography variant="body2" sx={{ mb: 0.5 }}>WebSocket URL:</Typography>
+                      <Paper elevation={0} sx={{ p: 1, bgcolor: "#f8fafc", borderRadius: 1, fontFamily: "monospace", fontSize: 12, border: "1px solid #e2e8f0", wordBreak: "break-all", mb: 1 }}>
+                        {"wss://" + displayHost + ":" + httpPort}
+                      </Paper>
+                      <Typography variant="body2" sx={{ mb: 0.5 }}>Gateway Token:</Typography>
+                      <Paper elevation={0} sx={{ p: 1, bgcolor: "#f8fafc", borderRadius: 1, fontFamily: "monospace", fontSize: 12, border: "1px solid #e2e8f0", mb: 1 }}>
+                        serverinstaller
+                      </Paper>
+                      <Typography variant="body2" sx={{ mb: 0.5 }}>Dashboard URL (with token):</Typography>
+                      <Paper elevation={0} sx={{ p: 1, bgcolor: "#f0fdf4", borderRadius: 1, fontFamily: "monospace", fontSize: 11, border: "1px solid #dcfce7", wordBreak: "break-all", cursor: "pointer" }}
+                        onClick={function() { if (copyText) copyText("https://" + displayHost + ":" + httpPort + "/#token=serverinstaller", "URL"); }}>
+                        {"https://" + displayHost + ":" + httpPort + "/#token=serverinstaller"}
+                        <Typography variant="caption" sx={{ display: "block", color: "#059669", mt: 0.5 }}>Click to copy</Typography>
+                      </Paper>
+                    </Box>
+                  ) : (
+                    <Typography variant="body2" color="text.secondary">Install OpenClaw first to see connection details.</Typography>
+                  )}
+                </Grid>
+
+                {/* Ollama Column */}
+                <Grid item xs={12} md={4}>
+                  <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>Ollama (LLM Backend)</Typography>
+                  {React.createElement(function OllamaStatus() {
+                    var _os = React.useState("checking");
+                    var ollamaStatus = _os[0], setOllamaStatus = _os[1];
+                    var _om = React.useState([]);
+                    var ollamaModels = _om[0], setOllamaModels = _om[1];
+                    var _ou = React.useState("");
+                    var ollamaUrl = _ou[0], setOllamaUrl = _ou[1];
+
+                    React.useEffect(function() {
+                      var urls = [];
+                      if (ocInfo.ollama_url) urls.push(ocInfo.ollama_url);
+                      urls.push("http://127.0.0.1:11434", "http://localhost:11434");
+                      if (displayHost) urls.push("http://" + displayHost + ":11434");
+                      var tryNext = function(i) {
+                        if (i >= urls.length) { setOllamaStatus("offline"); return; }
+                        fetch(urls[i] + "/api/tags", { signal: AbortSignal.timeout(3000) })
+                          .then(function(r) { return r.json(); })
+                          .then(function(j) {
+                            var models = j.models || [];
+                            setOllamaModels(models);
+                            setOllamaUrl(urls[i]);
+                            setOllamaStatus(models.length > 0 ? "ready" : "no-models");
+                          })
+                          .catch(function() { tryNext(i + 1); });
+                      };
+                      tryNext(0);
+                    }, []);
+
+                    return React.createElement("div", null,
+                      React.createElement(Typography, { variant: "body2" },
+                        "Status: ",
+                        React.createElement(Chip, { size: "small", sx: { ml: 0.5 },
+                          label: ollamaStatus === "ready" ? "Connected" : ollamaStatus === "no-models" ? "No models" : ollamaStatus === "checking" ? "Checking..." : "Not connected",
+                          color: ollamaStatus === "ready" ? "success" : ollamaStatus === "no-models" ? "warning" : "default"
+                        })
+                      ),
+                      ollamaUrl && React.createElement(Typography, { variant: "body2", sx: { mt: 0.5 } }, "URL: ", React.createElement("b", null, ollamaUrl)),
+                      ollamaModels.length > 0 && React.createElement(Typography, { variant: "body2", sx: { mt: 0.5 } },
+                        "Models: ", React.createElement("b", null, ollamaModels.map(function(m) { return m.name || m.model; }).join(", "))
+                      ),
+                      ollamaStatus === "offline" && React.createElement(Alert, { severity: "warning", sx: { mt: 1, borderRadius: 2, fontSize: 12 } },
+                        "Ollama not detected. Install Ollama from the AI/ML page or enter a remote Ollama URL in the install form."
+                      )
+                    );
+                  })}
+                </Grid>
+              </Grid>
+
+              {/* Links */}
               <Stack direction="row" spacing={1} sx={{ mt: 2, pt: 1.5, borderTop: "1px solid #e8edf6" }} flexWrap="wrap" useFlexGap>
                 <Button variant="outlined" size="small" href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: "#dc262644", color: "#dc2626" }}>GitHub</Button>
                 <Button variant="outlined" size="small" href="https://openclaw.ai" target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: "#dc262644", color: "#dc2626" }}>Website</Button>
