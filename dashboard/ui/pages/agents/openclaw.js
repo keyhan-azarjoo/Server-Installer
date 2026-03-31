@@ -16,6 +16,7 @@
 
     var ocInfo = p.openclawService || {};
     var ollamaInfo = p.ollamaService || {};
+    var lmsInfo = p.lmstudioService || {};
     var services = p.openclawPageServices || [];
     var httpUrl = String(ocInfo.http_url || "").trim();
     var httpsUrl = String(ocInfo.https_url || "").trim();
@@ -147,68 +148,53 @@
                   )}
                 </Grid>
 
-                {/* Ollama Column */}
+                {/* LLM Backends Column */}
                 <Grid item xs={12} md={4}>
-                  <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>Ollama (LLM Backend)</Typography>
-                  {React.createElement(function OllamaStatus() {
-                    var _os = React.useState("checking");
-                    var ollamaStatus = _os[0], setOllamaStatus = _os[1];
-                    var _om = React.useState([]);
-                    var ollamaModels = _om[0], setOllamaModels = _om[1];
-                    var _ou = React.useState("");
-                    var ollamaUrl = _ou[0], setOllamaUrl = _ou[1];
+                  <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 1 }}>LLM Backends</Typography>
+                  {/* Ollama */}
+                  {React.createElement(function LLMBackends() {
+                    var ollamaInstalled = !!ollamaInfo.installed;
+                    var ollamaRunning = !!ollamaInfo.running;
+                    var ollamaHost = String(ollamaInfo.host || "").trim();
+                    var ollamaApiPort = String(ollamaInfo.http_port || "11434").trim();
+                    var ollamaApiUrl = ollamaHost ? "http://" + ollamaHost + ":" + ollamaApiPort : "http://127.0.0.1:11434";
+                    var ollamaWebUrl = String(ollamaInfo.https_url || ollamaInfo.http_url || "").trim();
 
-                    React.useEffect(function() {
-                      // Use Ollama service info from dashboard props
-                      var ollamaHttpsUrl = String(ollamaInfo.https_url || "").trim();
-                      var ollamaHttpUrl = String(ollamaInfo.http_url || "").trim();
-                      var ollamaHttpsPort = String(ollamaInfo.https_port || "").trim();
-                      var ollamaPort = String(ollamaInfo.http_port || "").trim();
-                      var ollamaHost = String(ollamaInfo.host || "").trim();
-                      var ollamaInstalled = !!ollamaInfo.installed;
-                      var ollamaRunning = !!ollamaInfo.running;
-
-                      // Build detected URL — prefer HTTPS when available
-                      var detectedUrl = ollamaHttpsUrl || ollamaHttpUrl
-                        || (ollamaHost && ollamaHttpsPort ? "https://" + ollamaHost + ":" + ollamaHttpsPort : "")
-                        || (ollamaHost && ollamaPort ? "http://" + ollamaHost + ":" + ollamaPort : "");
-
-                      if (ollamaInstalled || ollamaRunning || detectedUrl) {
-                        setOllamaUrl(detectedUrl || "http://127.0.0.1:11434");
-                        setOllamaStatus(ollamaRunning ? "ready" : "no-models");
-                      }
-
-                      // Always try to fetch models via dashboard API (works regardless of CORS)
-                      fetch("/run/get_software", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", "X-Requested-With": "fetch" } })
-                        .then(function(r) { return r.json(); })
-                        .then(function(j) {
-                          var oi = (j.ollama_service || j.software && j.software.ollama_service || {});
-                          if (oi.installed || oi.running || oi.http_url || oi.https_url) {
-                            var url = String(oi.https_url || "").trim()
-                              || String(oi.http_url || "").trim()
-                              || (oi.host && oi.https_port ? "https://" + oi.host + ":" + oi.https_port : "")
-                              || (oi.host && oi.http_port ? "http://" + oi.host + ":" + oi.http_port : "");
-                            if (url) setOllamaUrl(url);
-                            setOllamaStatus(oi.running ? "ready" : oi.installed ? "no-models" : "offline");
-                          }
-                        })
-                        .catch(function() {});
-                    }, []);
+                    var lmsInstalled = !!lmsInfo.installed;
+                    var lmsRunning = !!lmsInfo.running;
+                    var lmsHost = String(lmsInfo.host || "").trim();
+                    var lmsPort = String(lmsInfo.http_port || "1234").trim();
+                    var lmsApiUrl = lmsHost ? "http://" + lmsHost + ":" + lmsPort : "";
+                    var lmsWebUrl = String(lmsInfo.https_url || lmsInfo.http_url || "").trim();
 
                     return React.createElement("div", null,
-                      React.createElement(Typography, { variant: "body2" },
-                        "Status: ",
-                        React.createElement(Chip, { size: "small", sx: { ml: 0.5 },
-                          label: ollamaStatus === "ready" ? "Connected" : ollamaStatus === "no-models" ? "No models" : ollamaStatus === "checking" ? "Checking..." : "Not connected",
-                          color: ollamaStatus === "ready" ? "success" : ollamaStatus === "no-models" ? "warning" : "default"
-                        })
+                      /* Ollama */
+                      React.createElement(Paper, { variant: "outlined", sx: { p: 1.5, mb: 1, borderRadius: 2, borderColor: ollamaRunning ? "#16a34a55" : "#e2e8f0" } },
+                        React.createElement(Stack, { direction: "row", alignItems: "center", spacing: 1 },
+                          React.createElement(Typography, { variant: "body2", fontWeight: 700 }, "Ollama"),
+                          React.createElement(Chip, { size: "small", label: ollamaRunning ? "Running" : ollamaInstalled ? "Installed" : "Not installed",
+                            color: ollamaRunning ? "success" : ollamaInstalled ? "warning" : "default", sx: { fontSize: 10, height: 18 } })
+                        ),
+                        ollamaApiUrl && React.createElement(Typography, { variant: "caption", color: "text.secondary", sx: { display: "block", mt: 0.5 } },
+                          "API: ", React.createElement("b", null, ollamaApiUrl)),
+                        ollamaWebUrl && React.createElement(Typography, { variant: "caption", color: "text.secondary", sx: { display: "block" } },
+                          "Web UI: ", React.createElement("a", { href: ollamaWebUrl, target: "_blank", rel: "noopener" }, ollamaWebUrl)),
+                        !ollamaInstalled && React.createElement(Typography, { variant: "caption", color: "text.secondary", sx: { display: "block", mt: 0.5 } },
+                          "Install from AI/ML > Ollama page")
                       ),
-                      ollamaUrl && React.createElement(Typography, { variant: "body2", sx: { mt: 0.5 } }, "URL: ", React.createElement("b", null, ollamaUrl)),
-                      ollamaModels.length > 0 && React.createElement(Typography, { variant: "body2", sx: { mt: 0.5 } },
-                        "Models: ", React.createElement("b", null, ollamaModels.map(function(m) { return m.name || m.model; }).join(", "))
-                      ),
-                      ollamaStatus === "offline" && React.createElement(Alert, { severity: "warning", sx: { mt: 1, borderRadius: 2, fontSize: 12 } },
-                        "Ollama not detected. Install Ollama from the AI/ML page or enter a remote Ollama URL in the install form."
+                      /* LM Studio */
+                      React.createElement(Paper, { variant: "outlined", sx: { p: 1.5, mb: 1, borderRadius: 2, borderColor: lmsRunning ? "#16a34a55" : "#e2e8f0" } },
+                        React.createElement(Stack, { direction: "row", alignItems: "center", spacing: 1 },
+                          React.createElement(Typography, { variant: "body2", fontWeight: 700 }, "LM Studio"),
+                          React.createElement(Chip, { size: "small", label: lmsRunning ? "Running" : lmsInstalled ? "Installed" : "Not installed",
+                            color: lmsRunning ? "success" : lmsInstalled ? "warning" : "default", sx: { fontSize: 10, height: 18 } })
+                        ),
+                        lmsApiUrl && React.createElement(Typography, { variant: "caption", color: "text.secondary", sx: { display: "block", mt: 0.5 } },
+                          "API: ", React.createElement("b", null, lmsApiUrl)),
+                        lmsWebUrl && React.createElement(Typography, { variant: "caption", color: "text.secondary", sx: { display: "block" } },
+                          "Web UI: ", React.createElement("a", { href: lmsWebUrl, target: "_blank", rel: "noopener" }, lmsWebUrl)),
+                        !lmsInstalled && React.createElement(Typography, { variant: "caption", color: "text.secondary", sx: { display: "block", mt: 0.5 } },
+                          "Install from AI/ML > LM Studio page")
                       )
                     );
                   })}
@@ -224,6 +210,32 @@
             </CardContent>
           </Card>
         </Grid>
+
+        {/* How to set model — shown when installed */}
+        {installed && (
+          <Grid item xs={12}>
+            <Alert severity="info" sx={{ borderRadius: 3, border: "1.5px solid #1e40af44" }}>
+              <Typography variant="subtitle2" fontWeight={800} sx={{ mb: 0.5 }}>How to use Ollama / LM Studio with OpenClaw</Typography>
+              <Typography variant="body2" sx={{ lineHeight: 1.8 }}>
+                OpenClaw defaults to <b>Claude (Anthropic)</b> which requires an API key.
+                To use your <b>local Ollama or LM Studio</b> models instead:
+              </Typography>
+              <Typography component="div" variant="body2" sx={{ mt: 0.5, pl: 2, lineHeight: 2 }}>
+                1. Open the <b>OpenClaw Dashboard</b> (button above)<br/>
+                2. Click <b>Settings</b> (gear icon, bottom-left)<br/>
+                3. Go to <b>AI & Agents</b><br/>
+                4. In the <b>Model</b> dropdown, select:<br/>
+                &nbsp;&nbsp;&nbsp;&nbsp;- <b>ollama/ministral:3b</b> (or any Ollama model)<br/>
+                &nbsp;&nbsp;&nbsp;&nbsp;- <b>lmstudio/your-model</b> (for LM Studio)<br/>
+                5. Click <b>Save</b>
+              </Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                The Ollama provider is pre-configured with API URL: <b>http://host.docker.internal:11434</b>.
+                If Ollama models don't appear in the list, check that Ollama is running and accessible.
+              </Typography>
+            </Alert>
+          </Grid>
+        )}
 
         {/* Services */}
         <Grid item xs={12} md={6}>
