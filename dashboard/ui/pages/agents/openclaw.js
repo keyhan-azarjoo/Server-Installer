@@ -213,31 +213,114 @@
           </Card>
         </Grid>
 
-        {/* How to set model — shown when installed */}
-        {installed && (
-          <Grid item xs={12}>
-            <Alert severity="info" sx={{ borderRadius: 3, border: "1.5px solid #1e40af44" }}>
-              <Typography variant="subtitle2" fontWeight={800} sx={{ mb: 0.5 }}>How to use Ollama / LM Studio with OpenClaw</Typography>
-              <Typography variant="body2" sx={{ lineHeight: 1.8 }}>
-                OpenClaw defaults to <b>Claude (Anthropic)</b> which requires an API key.
-                To use your <b>local Ollama or LM Studio</b> models instead:
-              </Typography>
-              <Typography component="div" variant="body2" sx={{ mt: 0.5, pl: 2, lineHeight: 2 }}>
-                1. Open the <b>OpenClaw Dashboard</b> (button above)<br/>
-                2. Click <b>Settings</b> (gear icon, bottom-left)<br/>
-                3. Go to <b>AI & Agents</b><br/>
-                4. In the <b>Model</b> dropdown, select:<br/>
-                &nbsp;&nbsp;&nbsp;&nbsp;- <b>ollama/ministral:3b</b> (or any Ollama model)<br/>
-                &nbsp;&nbsp;&nbsp;&nbsp;- <b>lmstudio/your-model</b> (for LM Studio)<br/>
-                5. Click <b>Save</b>
-              </Typography>
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-                The Ollama provider is pre-configured with API URL: <b>http://host.docker.internal:11434</b>.
-                If Ollama models don't appear in the list, check that Ollama is running and accessible.
-              </Typography>
-            </Alert>
-          </Grid>
-        )}
+        {/* Available Models — fetch from Ollama and LM Studio */}
+        {installed && React.createElement(function AvailableModels() {
+          var _ollamaModels = React.useState([]);
+          var ollamaModels = _ollamaModels[0], setOllamaModels = _ollamaModels[1];
+          var _lmsModels = React.useState([]);
+          var lmsModels = _lmsModels[0], setLmsModels = _lmsModels[1];
+          var _loading = React.useState(true);
+          var loading = _loading[0], setLoading = _loading[1];
+
+          var formatSize = function(bytes) {
+            if (!bytes) return "";
+            var gb = bytes / 1073741824;
+            return gb >= 1 ? gb.toFixed(1) + " GB" : (bytes / 1048576).toFixed(0) + " MB";
+          };
+
+          React.useEffect(function() {
+            var done = 0;
+            var check = function() { done++; if (done >= 2) setLoading(false); };
+            // Fetch Ollama models
+            fetch("/api/ollama/tags", { headers: { "X-Requested-With": "fetch" } })
+              .then(function(r) { return r.json(); })
+              .then(function(j) { if (j.ok && j.models) setOllamaModels(j.models); else if (j.models) setOllamaModels(j.models); })
+              .catch(function() {})
+              .finally(check);
+            // Fetch LM Studio models
+            fetch("/api/lmstudio/models", { headers: { "X-Requested-With": "fetch" } })
+              .then(function(r) { return r.json(); })
+              .then(function(j) { if (j.ok && j.models) setLmsModels(j.models); else if (j.data) setLmsModels(j.data); })
+              .catch(function() {})
+              .finally(check);
+          }, []);
+
+          var totalModels = ollamaModels.length + lmsModels.length;
+
+          return (
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1.5px solid #05966944" }}>
+                <CardContent>
+                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
+                    <Typography variant="h6" fontWeight={800} sx={{ color: "#059669" }}>Available Local Models</Typography>
+                    <Chip label={loading ? "Loading..." : totalModels + " models"} size="small"
+                      sx={{ bgcolor: "#dcfce7", color: "#166534", fontWeight: 700, fontSize: 11 }} />
+                  </Stack>
+                  {totalModels === 0 && !loading && (
+                    <Alert severity="warning" sx={{ borderRadius: 2, mb: 1 }}>
+                      No local models found. Install models from the Ollama or LM Studio pages, or check that the services are running.
+                    </Alert>
+                  )}
+                  {/* Ollama models */}
+                  {ollamaModels.length > 0 && (
+                    <Box sx={{ mb: lmsModels.length > 0 ? 2 : 0 }}>
+                      <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                        Ollama Models ({ollamaModels.length})
+                      </Typography>
+                      {ollamaModels.map(function(m) {
+                        var mName = m.name || m.model || "";
+                        var mSize = m.size ? formatSize(m.size) : "";
+                        var mParams = (m.details && m.details.parameter_size) ? m.details.parameter_size : "";
+                        var mFamily = (m.details && m.details.family) ? m.details.family : "";
+                        return (
+                          <Paper key={"ol-" + mName} variant="outlined" sx={{ p: 1, mb: 0.5, borderRadius: 2 }}>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                                <b>{"ollama/" + mName}</b>
+                              </Typography>
+                              {mFamily && <Chip label={mFamily} size="small" variant="outlined" sx={{ fontSize: 10, height: 18 }} />}
+                              {mParams && <Chip label={mParams} size="small" variant="outlined" sx={{ fontSize: 10, height: 18 }} />}
+                              {mSize && <Chip label={mSize} size="small" variant="outlined" sx={{ fontSize: 10, height: 18 }} />}
+                              <Button size="small" variant="outlined"
+                                onClick={function() { if (copyText) copyText("ollama/" + mName, "Model name"); }}
+                                sx={{ textTransform: "none", fontSize: 10, py: 0.2, minWidth: 0, px: 1 }}>Copy</Button>
+                            </Stack>
+                          </Paper>
+                        );
+                      })}
+                    </Box>
+                  )}
+                  {/* LM Studio models */}
+                  {lmsModels.length > 0 && (
+                    <Box>
+                      <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ mb: 0.5, display: "block" }}>
+                        LM Studio Models ({lmsModels.length})
+                      </Typography>
+                      {lmsModels.map(function(m) {
+                        var mId = m.id || m.name || "";
+                        return (
+                          <Paper key={"lms-" + mId} variant="outlined" sx={{ p: 1, mb: 0.5, borderRadius: 2 }}>
+                            <Stack direction="row" spacing={1} alignItems="center">
+                              <Typography variant="body2" sx={{ flexGrow: 1 }}>
+                                <b>{"lmstudio/" + mId}</b>
+                              </Typography>
+                              <Button size="small" variant="outlined"
+                                onClick={function() { if (copyText) copyText("lmstudio/" + mId, "Model name"); }}
+                                sx={{ textTransform: "none", fontSize: 10, py: 0.2, minWidth: 0, px: 1 }}>Copy</Button>
+                            </Stack>
+                          </Paper>
+                        );
+                      })}
+                    </Box>
+                  )}
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.5 }}>
+                    Use these model names in the OpenClaw chat. Go to <b>Settings &gt; AI & Agents</b> in the OpenClaw dashboard to set your default model.
+                  </Typography>
+                </CardContent>
+              </Card>
+            </Grid>
+          );
+        })}
 
         {/* API Tokens — configure LLM providers */}
         {installed && React.createElement(function ApiTokensPanel() {
