@@ -1097,7 +1097,9 @@ http {{
         "print(json.dumps(dedup, separators=(',', ':')))",
         "PYEOF",
         ")",
+        'echo "allowedOrigins JSON: $ALLOWED_ORIGINS_JSON"',
         'openclaw config set gateway.controlUi.allowedOrigins "$ALLOWED_ORIGINS_JSON" 2>/dev/null || true',
+        'echo "Configured allowedOrigins: $(openclaw config get gateway.controlUi.allowedOrigins 2>/dev/null || echo unavailable)"',
         'openclaw config set gateway.trustedProxies \'["127.0.0.1","::1"]\' 2>/dev/null || true',
         "",
         "# Set Ollama API key — enables Ollama provider in OpenClaw",
@@ -1347,7 +1349,16 @@ http {{
         "",
         "# Test direct gateway access (no proxy) to diagnose 500 errors",
         f'echo "=== Direct gateway test on port {gw_internal_port} (no proxy) ==="',
-        f"curl -s http://127.0.0.1:{gw_internal_port}/ 2>&1 | head -10 || echo 'Direct gateway test failed'",
+        f"GW_HTTP_CODE=$(curl -s -o /tmp/gw-root-body.txt -w '%{{http_code}}' http://127.0.0.1:{gw_internal_port}/ 2>/tmp/gw-root-curl.err || echo '000')",
+        'echo "Direct gateway status: $GW_HTTP_CODE"',
+        'if [ "$GW_HTTP_CODE" != "200" ]; then',
+        "  echo '--- Direct gateway body (first 80 lines) ---'",
+        "  head -80 /tmp/gw-root-body.txt 2>/dev/null || true",
+        "  echo '--- Direct gateway curl stderr ---'",
+        "  head -40 /tmp/gw-root-curl.err 2>/dev/null || true",
+        "  echo '--- Recent OpenClaw gateway log ---'",
+        "  tail -120 /tmp/openclaw/openclaw-$(date +%F).log 2>/dev/null || true",
+        "fi",
         f'echo "=== Direct gateway response headers ==="',
         f"curl -sI http://127.0.0.1:{gw_internal_port}/ 2>&1 | head -15 || echo 'Direct headers test failed'",
         "",
@@ -1373,7 +1384,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y curl python3 build-essential socat openssl nginx zstd && rm -rf /var/lib/apt/lists/*
 
 # Install OpenClaw globally
-RUN npm install -g openclaw@latest
+RUN npm install -g openclaw@latest @aws-sdk/client-bedrock @aws-sdk/client-bedrock-runtime
 
 # Pre-create config dir
 RUN mkdir -p /root/.openclaw
