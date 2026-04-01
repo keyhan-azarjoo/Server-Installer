@@ -1367,7 +1367,7 @@ http {{
         f'echo "=== Direct gateway test on port {gw_internal_port} (no proxy) ==="',
         f"GW_HTTP_CODE=$(curl -s -o /tmp/gw-root-body.txt -w '%{{http_code}}' http://127.0.0.1:{gw_internal_port}/ 2>/tmp/gw-root-curl.err || echo '000')",
         'echo "Direct gateway status: $GW_HTTP_CODE"',
-        f'GW_HOST_TEST_CODE=$(curl -s -o /tmp/gw-host-body.txt -w \'%{{http_code}}\' -H "Host: ${OPENCLAW_HOST_IP:-127.0.0.1}:{http_port}" http://127.0.0.1:{gw_internal_port}/ 2>/tmp/gw-host-curl.err || echo "000")',
+        f'GW_HOST_TEST_CODE=$(curl -s -o /tmp/gw-host-body.txt -w \'%{{http_code}}\' -H "Host: ${{OPENCLAW_HOST_IP:-127.0.0.1}}:{http_port}" http://127.0.0.1:{gw_internal_port}/ 2>/tmp/gw-host-curl.err || echo "000")',
         'echo "Direct gateway status with forwarded Host header: $GW_HOST_TEST_CODE"',
         "if [ -f /tmp/gw-host-body.txt ]; then",
         "  echo '--- Direct gateway (forwarded Host) body (first 40 lines) ---'",
