@@ -924,14 +924,12 @@ def run_openclaw_docker(form=None, live_cb=None):
     form = form or {}
     http_port_raw = (form.get("OPENCLAW_HTTP_PORT", [""])[0] or "").strip()
     https_port_raw = (form.get("OPENCLAW_HTTPS_PORT", [""])[0] or "").strip()
-    # Use HTTPS port as the exposed port if set; fall back to HTTP port or default
-    if https_port_raw and https_port_raw.isdigit() and int(https_port_raw) > 0:
-        http_port = https_port_raw  # Docker container serves HTTPS on this port via nginx
-    elif http_port_raw and http_port_raw.isdigit() and int(http_port_raw) > 0:
-        http_port = http_port_raw
-    else:
-        http_port = "18789"
-    https_port = ""  # Docker always serves HTTPS on http_port via nginx
+    http_port = http_port_raw if (http_port_raw.isdigit() and int(http_port_raw) > 0) else "18789"
+    https_port = https_port_raw if (https_port_raw.isdigit() and int(https_port_raw) > 0) else ""
+    adjusted_https_port = False
+    if https_port and https_port == http_port:
+        https_port = str(int(http_port) + 1)
+        adjusted_https_port = True
     host = (form.get("OPENCLAW_HOST_IP", ["0.0.0.0"])[0] or "0.0.0.0").strip()
     username = (form.get("OPENCLAW_USERNAME", [""])[0] or "").strip()
     password = (form.get("OPENCLAW_PASSWORD", [""])[0] or "").strip()
@@ -954,6 +952,8 @@ def run_openclaw_docker(form=None, live_cb=None):
         output.append(m)
         if live_cb: live_cb(m + "\n")
     log("=== Installing OpenClaw via Docker ===")
+    if adjusted_https_port:
+        log(f"HTTPS port matched HTTP port; adjusted HTTPS to {https_port} to keep protocols separate.")
 
     if sys.platform == "darwin":
         _docker_add_macos_path()
@@ -976,7 +976,7 @@ def run_openclaw_docker(form=None, live_cb=None):
     build_dir = str(OPENCLAW_STATE_DIR / "docker-build")
     Path(build_dir).mkdir(parents=True, exist_ok=True)
 
-    gw_internal_port = str(int(http_port) + 1)
+    gw_internal_port = str(max(int(http_port), int(https_port) if https_port else 0) + 1)
 
     # Write nginx config as a separate file (no shell escaping issues)
     nginx_conf = f"""daemon off;
@@ -1011,7 +1011,7 @@ http {{
     # Simple entrypoint — no escaping issues
     entrypoint_lines = [
         "#!/bin/bash",
-        f'echo "=== OpenClaw Docker Container (port {http_port}) ==="',
+        f'echo "=== OpenClaw Docker Container (http {http_port}{", https " + https_port if https_port else ""}) ==="',
         "",
         "# Install and start Ollama for local LLM",
         f'OLLAMA_REMOTE="{ollama_url}"',
@@ -1081,28 +1081,34 @@ http {{
         'if [ -z "$DOCKER_HOST_IP" ]; then',
         "  DOCKER_HOST_IP='127.0.0.1'",
         "fi",
-        f'echo "Setting allowedOrigins for host IP: $DOCKER_HOST_IP port {http_port}"',
+        f'echo "Setting allowedOrigins for host IP: $DOCKER_HOST_IP http {http_port}{", https " + https_port if https_port else ""}"',
         f"ALLOWED_ORIGINS_JSON=$(python3 - << 'PYEOF'",
         "import json, os",
-        f"external_port = '{http_port}'",
+        f"http_port = '{http_port}'",
+        f"https_port = '{https_port}'",
         f"internal_port = '{gw_internal_port}'",
         "host_ip = (os.environ.get('DOCKER_HOST_IP') or '').strip()",
         "configured_host = (os.environ.get('OPENCLAW_HOST_IP') or '').strip()",
-        "ports = [external_port, internal_port]",
         "origins = []",
-        "for p in ports:",
+        "origins.extend([",
+        "    f'http://127.0.0.1:{http_port}',",
+        "    f'http://localhost:{http_port}',",
+        "    f'http://127.0.0.1:{internal_port}',",
+        "    f'http://localhost:{internal_port}',",
+        "])",
+        "if https_port:",
         "    origins.extend([",
-        "        f'https://127.0.0.1:{p}',",
-        "        f'https://localhost:{p}',",
-        "        f'http://127.0.0.1:{p}',",
-        "        f'http://localhost:{p}',",
+        "        f'https://127.0.0.1:{https_port}',",
+        "        f'https://localhost:{https_port}',",
         "    ])",
         "if host_ip and host_ip != '127.0.0.1':",
-        "    for p in ports:",
-        "        origins.extend([f'https://{host_ip}:{p}', f'http://{host_ip}:{p}'])",
+        "    origins.extend([f'http://{host_ip}:{http_port}', f'http://{host_ip}:{internal_port}'])",
+        "    if https_port:",
+        "        origins.append(f'https://{host_ip}:{https_port}')",
         "if configured_host and configured_host not in ('0.0.0.0', '*', '127.0.0.1', 'localhost'):",
-        "    for p in ports:",
-        "        origins.extend([f'https://{configured_host}:{p}', f'http://{configured_host}:{p}'])",
+        "    origins.extend([f'http://{configured_host}:{http_port}', f'http://{configured_host}:{internal_port}'])",
+        "    if https_port:",
+        "        origins.append(f'https://{configured_host}:{https_port}')",
         "dedup = []",
         "for o in origins:",
         "    if o not in dedup:",
@@ -1355,9 +1361,11 @@ http {{
         "# Get gateway auth token (if any) and print dashboard URL",
         "GATEWAY_TOKEN=$(openclaw config get gateway.auth.token 2>/dev/null || true)",
         f'echo "============================================="',
-        f'echo "DASHBOARD URL: https://YOUR_IP:{http_port}/"',
+        f'echo "DASHBOARD URL (http): http://YOUR_IP:{http_port}/"',
+        f'echo "DASHBOARD URL (https): {"https://YOUR_IP:" + https_port + "/" if https_port else "(disabled)"}"',
         "if [ -n \"$GATEWAY_TOKEN\" ]; then",
-        f'  echo "DASHBOARD URL (token): https://YOUR_IP:{http_port}/#token=$GATEWAY_TOKEN"',
+        f'  echo "DASHBOARD URL (token,http): http://YOUR_IP:{http_port}/#token=$GATEWAY_TOKEN"',
+        f'  echo "DASHBOARD URL (token,https): {"https://YOUR_IP:" + https_port + "/#token=$GATEWAY_TOKEN" if https_port else "(disabled)"}"',
         "fi",
         f'echo "Ollama API: $OLLAMA_API_URL"',
         f'echo "Select your model in OpenClaw dashboard: Settings > AI & Agents"',
@@ -1388,18 +1396,30 @@ http {{
         "# Stop default nginx if running (not used, socat handles SSL)",
         "nginx -s stop 2>/dev/null || true",
         "",
-        "# Use socat for SSL termination (pure TCP proxy, no HTTP header manipulation)",
-        "# This avoids nginx rewriting Host/Origin headers which can break OpenClaw's validation",
-        f'echo "Starting socat SSL proxy on port {http_port} -> 127.0.0.1:{gw_internal_port}..."',
-        f"socat OPENSSL-LISTEN:{http_port},cert=/root/.openclaw/certs/cert.pem,key=/root/.openclaw/certs/key.pem,verify=0,reuseaddr,fork TCP:127.0.0.1:{gw_internal_port} &",
-        "SOCAT_PID=$!",
+        "# HTTP proxy (plain HTTP port)",
+        f'echo "Starting HTTP proxy on port {http_port} -> 127.0.0.1:{gw_internal_port}..."',
+        f"socat TCP-LISTEN:{http_port},reuseaddr,fork TCP:127.0.0.1:{gw_internal_port} &",
+        "HTTP_PROXY_PID=$!",
+        f'if [ -n "{https_port}" ]; then',
+        f'  echo "Starting HTTPS proxy on port {https_port} -> 127.0.0.1:{gw_internal_port}..."',
+        f'  socat OPENSSL-LISTEN:{https_port},cert=/root/.openclaw/certs/cert.pem,key=/root/.openclaw/certs/key.pem,verify=0,reuseaddr,fork TCP:127.0.0.1:{gw_internal_port} &',
+        "  HTTPS_PROXY_PID=$!",
+        "fi",
         "sleep 2",
-        f"echo 'Testing SSL port {http_port}...'",
-        f"curl -sk https://127.0.0.1:{http_port}/ 2>&1 | head -5 || echo 'SSL curl test failed'",
+        f"echo 'Testing HTTP port {http_port}...'",
+        f"curl -sf http://127.0.0.1:{http_port}/ 2>&1 | head -5 || echo 'HTTP curl test failed'",
+        f'if [ -n "{https_port}" ]; then',
+        f"  echo 'Testing HTTPS port {https_port}...'",
+        f"  curl -sk https://127.0.0.1:{https_port}/ 2>&1 | head -5 || echo 'HTTPS curl test failed'",
+        "fi",
         "",
         "wait $GW_PID",
     ]
     Path(build_dir, "entrypoint.sh").write_text("\n".join(entrypoint_lines) + "\n", encoding="utf-8")
+
+    expose_lines = f"EXPOSE {http_port}\n"
+    if https_port:
+        expose_lines += f"EXPOSE {https_port}\n"
 
     dockerfile = f"""FROM node:22-slim
 
@@ -1415,7 +1435,7 @@ RUN mkdir -p /root/.openclaw
 # Gateway port and Ollama provider
 ENV OPENCLAW_PORT={http_port}
 ENV OLLAMA_API_KEY=ollama-local
-EXPOSE {http_port}
+{expose_lines.rstrip()}
 
 COPY entrypoint.sh /entrypoint.sh
 COPY nginx.conf /app/nginx.conf
@@ -1435,6 +1455,8 @@ CMD ["/entrypoint.sh"]
                   "--add-host", "host.docker.internal:host-gateway",
                   "-v", "openclaw-data:/root/.openclaw",
                   "--restart", "unless-stopped"]
+    if https_port:
+        docker_cmd += ["-p", f"{https_port}:{https_port}"]
     # Pass channel tokens, LLM config, and Ollama API key as env vars
     env_map = {
         "OLLAMA_API_KEY": "ollama-local",
@@ -1468,20 +1490,21 @@ CMD ["/entrypoint.sh"]
     OPENCLAW_STATE_DIR.mkdir(parents=True, exist_ok=True)
     display_host = host if host not in ("0.0.0.0", "*", "") else choose_service_host()
     http_url = f"http://{display_host}:{http_port}"
-    # The Docker container serves HTTPS on the http_port (via nginx)
-    https_url = f"https://{display_host}:{http_port}"
+    https_url = f"https://{display_host}:{https_port}" if https_port else ""
     state = _read_json_file(OPENCLAW_STATE_FILE)
     state.update({
         "installed": True, "service_name": container_name,
         "deploy_mode": "docker", "host": host,
-        "http_port": http_port, "https_port": http_port,
-        "http_url": f"https://{display_host}:{http_port}/#token=serverinstaller",
-        "https_url": f"https://{display_host}:{http_port}/#token=serverinstaller",
+        "http_port": http_port, "https_port": https_port,
+        "http_url": http_url,
+        "https_url": https_url,
         "auth_enabled": bool(username), "auth_username": username,
         "running": code2 == 0,
     })
     _write_json_file(OPENCLAW_STATE_FILE, state)
     manage_firewall_port("open", http_port, "tcp")
+    if https_port:
+        manage_firewall_port("open", https_port, "tcp")
 
     # Wait and check container logs
     import time
@@ -1515,8 +1538,10 @@ CMD ["/entrypoint.sh"]
     log("\n" + "=" * 60)
     log(" OpenClaw Docker Deployment Complete!")
     log("=" * 60)
-    log(f" Dashboard:      https://{display_host}:{http_port}/")
-    log(f" NOTE: Use HTTPS (not HTTP)! Accept the self-signed cert warning.")
+    log(f" HTTP Dashboard:  http://{display_host}:{http_port}/")
+    if https_port:
+        log(f" HTTPS Dashboard: https://{display_host}:{https_port}/")
+        log(" NOTE: HTTPS uses a self-signed cert; browser warning is expected.")
     log(f"")
     # Try to get the gateway token from container
     gateway_token = ""
@@ -1530,15 +1555,19 @@ CMD ["/entrypoint.sh"]
         pass
     if gateway_token:
         log(f" Dashboard URL with token:")
-        log(f"   https://{display_host}:{http_port}/#token={gateway_token}")
+        log(f"   http://{display_host}:{http_port}/#token={gateway_token}")
+        if https_port:
+            log(f"   https://{display_host}:{https_port}/#token={gateway_token}")
         log(f"")
         log(f" Gateway Token:  {gateway_token}")
     else:
-        # Use the known token we set
+        # Gateway generated no token yet; print URLs without token hint
         log(f" Dashboard URL:")
-        log(f"   https://{display_host}:{http_port}/#token=serverinstaller")
+        log(f"   http://{display_host}:{http_port}/")
+        if https_port:
+            log(f"   https://{display_host}:{https_port}/")
         log(f"")
-        log(f" Gateway Token:  serverinstaller")
+        log(f" Gateway Token:  (auto-generated by OpenClaw when needed)")
     if username:
         log(f" Auth:           {username} / ****")
     log(f" Container:      {container_name}")
