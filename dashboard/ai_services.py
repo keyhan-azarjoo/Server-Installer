@@ -50,8 +50,8 @@ from constants import (
 from utils import _read_json_file, _write_json_file, command_exists, ensure_repo_files, run_capture, run_process, _sudo_prefix
 from system_info import choose_service_host
 from python_manager import _linux_systemd_unit_status
-from port_manager import is_local_tcp_port_listening
-from website_manager import _docker_add_macos_path
+from port_manager import is_local_tcp_port_listening, manage_firewall_port
+from website_manager import _docker_add_macos_path, _install_engine_docker, _run_install_cmd
 
 def _get_ai_service_info(state_file, state_dir, systemd_service, display_name, default_port="11434"):
     """Generic info builder for AI services (Ollama, TGWUI, ComfyUI, Whisper, Piper)."""
