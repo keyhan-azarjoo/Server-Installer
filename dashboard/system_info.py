@@ -484,6 +484,7 @@ def get_mongo_info():
     preferred_host = choose_service_host()
 
     if os.name == "nt":
+        from mongo_manager import get_windows_native_mongo_info
         native = get_windows_native_mongo_info()
         if native.get("installed"):
             info["installed"] = True
