@@ -442,9 +442,10 @@ function App() {
 
   const RESTART_TITLES = new Set(["Dashboard Update", "Apply Dashboard Certificate"]);
 
-  const poll = async (jobId, title, offset = 0) => {
+  const poll = async (jobId, title, offset = 0, failures = 0) => {
     try {
       const r = await fetch(`/job/${jobId}?offset=${offset}`, { headers: { "X-Requested-With": "fetch" } });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const j = await r.json();
       if (j.output) append(j.output);
       const next = j.next_offset || offset;
@@ -468,13 +469,23 @@ function App() {
         loadSystem.current();
         return;
       }
-      setTimeout(() => poll(jobId, title, next), 300);
+      setTimeout(() => poll(jobId, title, next, 0), 300);
     } catch (err) {
       if (RESTART_TITLES.has(title)) {
         waitForServerAndReload(`[INFO] Dashboard is restarting... (${err})`);
         return;
       }
+      const nextFailures = failures + 1;
+      if (nextFailures <= 20) {
+        if (nextFailures === 1 || nextFailures % 5 === 0) {
+          append(`[${new Date().toLocaleTimeString()}] Web Terminal connection interrupted (${err}). Retrying...`);
+        }
+        const delay = Math.min(1000 + (nextFailures - 1) * 500, 5000);
+        setTimeout(() => poll(jobId, title, offset, nextFailures), delay);
+        return;
+      }
       append(`Polling failed: ${err}`);
+      setRunError(`Lost connection while streaming ${title}. The job may still be running in the background.`);
       setTermState("Error");
     }
   };
