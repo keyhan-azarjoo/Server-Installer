@@ -24,6 +24,9 @@ from constants import (
     PYTHON_JUPYTER_STATE_FILE,
 )
 from utils import _read_json_file, _write_json_file, command_exists, run_capture, run_process, _sudo_prefix
+from system_admin import is_windows_admin, is_windows_local_system
+from port_manager import _get_linux_minio_direct_ports
+from installer_runners import run_sam3_delete
 from system_info import (
     choose_service_host,
     get_cpu_usage_percent,
@@ -40,10 +43,12 @@ from system_info import (
     get_windows_locals3_host,
     _get_docker_container_details,
     _urls_from_windows_locals3_log,
+    _urls_from_nginx_conf,
+    parse_port_from_addr,
 )
-from python_manager import _linux_systemd_unit_status, _python_state_service_item, get_python_info
-from website_manager import get_website_info, _website_state_payload, _website_service_items
-from mongo_manager import get_windows_native_mongo_info
+from python_manager import _linux_systemd_unit_status, _python_state_service_item, get_python_info, _cleanup_managed_jupyter, _cleanup_python_api_state_entry
+from website_manager import get_website_info, _website_state_payload, _website_service_items, _safe_website_runtime_name, start_python_jupyter, stop_python_jupyter, _cleanup_website_artifacts
+from mongo_manager import get_windows_native_mongo_info, _resolve_service_host
 from ai_services import (
     _get_ai_service_info,
     _is_ollama_name,
@@ -58,6 +63,19 @@ from ai_services import (
     get_comfyui_info,
     get_whisper_info,
     get_piper_info,
+    run_ollama_start,
+    run_ollama_stop,
+    run_ollama_delete,
+    run_openclaw_start,
+    run_openclaw_stop,
+    run_openclaw_delete,
+    run_lmstudio_start,
+    run_lmstudio_stop,
+    run_lmstudio_delete,
+    run_tgwui_delete,
+    run_comfyui_delete,
+    run_whisper_delete,
+    run_piper_delete,
 )
 
 def get_service_items():
