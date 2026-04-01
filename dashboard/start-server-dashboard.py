@@ -13,6 +13,8 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -42,6 +44,10 @@ if sys.platform == "darwin":
     ssl._create_default_https_context = ssl._create_unverified_context
 
 REPO = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/main"
+REPO_ARCHIVE = "https://github.com/keyhan-azarjoo/Server-Installer/archive/refs/heads/main.zip"
+DOWNLOAD_USER_AGENT = "ServerInstallerBootstrap/1.0"
+DOWNLOAD_TIMEOUT = 60
+DOWNLOAD_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 DASHBOARD_HTTPS = os.environ.get("DASHBOARD_HTTPS", "").strip().lower() in ("1", "true", "yes", "y", "on")
 DASHBOARD_CERT = os.environ.get("DASHBOARD_CERT", "").strip()
 DASHBOARD_KEY = os.environ.get("DASHBOARD_KEY", "").strip()
@@ -244,26 +250,98 @@ def cache_root() -> Path:
     return Path.home() / ".server-installer"
 
 
+def _retry_delay(attempt: int, ex: Exception) -> float:
+    if isinstance(ex, urllib.error.HTTPError):
+        retry_after = ex.headers.get("Retry-After", "").strip()
+        if retry_after.isdigit():
+            return max(1.0, min(float(retry_after), 30.0))
+    return min(2 ** (attempt - 1), 8)
+
+
+def _download_to_path(url: str, destination: Path, *, attempts: int = 4) -> None:
+    last_error = None
+    for attempt in range(1, attempts + 1):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": DOWNLOAD_USER_AGENT})
+            with urllib.request.urlopen(req, timeout=DOWNLOAD_TIMEOUT) as response, open(destination, "wb") as dst:
+                shutil.copyfileobj(response, dst)
+            return
+        except urllib.error.HTTPError as ex:
+            last_error = ex
+            if ex.code not in DOWNLOAD_RETRY_STATUS_CODES or attempt >= attempts:
+                break
+            delay = _retry_delay(attempt, ex)
+            print(f"Warning: download throttled for {url} (HTTP {ex.code}); retrying in {delay:.0f}s...")
+            time.sleep(delay)
+        except Exception as ex:
+            last_error = ex
+            if attempt >= attempts:
+                break
+            delay = _retry_delay(attempt, ex)
+            print(f"Warning: transient download error for {url} ({ex}); retrying in {delay:.0f}s...")
+            time.sleep(delay)
+    raise last_error if last_error else RuntimeError(f"Failed to download {url}")
+
+
+def _sync_files_from_repo_archive(root: Path, files: list[str]) -> None:
+    print("Downloading Server Installer archive...")
+    with tempfile.TemporaryDirectory(prefix="server-installer-archive-") as tmp_dir:
+        archive_path = Path(tmp_dir) / "server-installer-main.zip"
+        _download_to_path(REPO_ARCHIVE, archive_path)
+        with zipfile.ZipFile(archive_path) as archive:
+            names = set(archive.namelist())
+            prefix = None
+            for name in names:
+                if "/" in name:
+                    prefix = name.split("/", 1)[0]
+                    break
+            if not prefix:
+                raise RuntimeError("Downloaded archive has an unexpected layout.")
+            missing = []
+            for rel in files:
+                member = f"{prefix}/{rel}"
+                if member not in names:
+                    missing.append(rel)
+                    continue
+                target = root / rel
+                target.parent.mkdir(parents=True, exist_ok=True)
+                tmp_target = target.with_suffix(target.suffix + ".download")
+                with archive.open(member) as src, open(tmp_target, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+                os.replace(tmp_target, target)
+            if missing:
+                raise RuntimeError("Archive is missing required files: " + ", ".join(missing))
+
+
 def ensure_files(root: Path) -> None:
     root.mkdir(parents=True, exist_ok=True)
     local_root_str = os.environ.get("SERVER_INSTALLER_LOCAL_ROOT", "").strip()
     local_root = Path(local_root_str) if local_root_str else None
-    for rel in sync_files_for_current_os():
-        target = root / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        # Try local copy first (when running from the repo directory)
-        if local_root:
+    files = sync_files_for_current_os()
+
+    if local_root:
+        for rel in files:
+            target = root / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
             local_src = local_root / rel
             if local_src.exists():
                 if not target.exists() or local_src.stat().st_mtime > target.stat().st_mtime:
-                    import shutil
                     shutil.copy2(str(local_src), str(target))
-                continue
+
+    try:
+        _sync_files_from_repo_archive(root, files)
+        return
+    except Exception as ex:
+        print(f"Warning: archive sync failed; falling back to per-file downloads ({ex})")
+
+    for rel in files:
+        target = root / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
         tmp_target = target.with_suffix(target.suffix + ".download")
         try:
             print(f"Syncing required file: {rel}")
             url = f"{REPO}/{rel}"
-            urllib.request.urlretrieve(url, tmp_target)
+            _download_to_path(url, tmp_target)
             os.replace(tmp_target, target)
         except Exception as ex:
             if tmp_target.exists():
