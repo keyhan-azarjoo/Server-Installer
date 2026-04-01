@@ -1876,7 +1876,7 @@ http {{
         "</body>",
         "</html>",
         "EOF",
-        "cat > /tmp/openclaw-public-nginx.conf << NGINXEOF",
+        "cat > /tmp/openclaw-public-nginx.conf << 'NGINXEOF'",
         "worker_processes 1;",
         "events { worker_connections 1024; }",
         "http {",
