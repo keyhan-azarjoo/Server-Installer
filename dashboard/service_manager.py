@@ -39,12 +39,18 @@ from system_info import (
     get_uptime_seconds,
     get_windows_locals3_host,
     _get_docker_container_details,
+    _urls_from_windows_locals3_log,
 )
 from python_manager import _linux_systemd_unit_status, _python_state_service_item, get_python_info
-from website_manager import get_website_info, _website_state_payload
+from website_manager import get_website_info, _website_state_payload, _website_service_items
 from mongo_manager import get_windows_native_mongo_info
 from ai_services import (
     _get_ai_service_info,
+    _is_ollama_name,
+    _is_tgwui_name,
+    _is_comfyui_name,
+    _is_whisper_name,
+    _is_piper_name,
     get_ollama_info,
     get_openclaw_info,
     get_lmstudio_info,
