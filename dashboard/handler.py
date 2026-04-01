@@ -68,10 +68,6 @@ from cert_manager import (
 from python_manager import (
     get_python_info,
     resolve_windows_python,
-    _authorized,
-    _request_headers,
-    _response_headers,
-    _unauthorized,
     _hide_detected_python,
 )
 from website_manager import (

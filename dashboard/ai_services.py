@@ -2053,3 +2053,4 @@ def run_whisper_delete(live_cb=None):
     return _run_ai_service_delete("whisper", "Whisper STT", WHISPER_STATE_FILE, WHISPER_STATE_DIR, WHISPER_SYSTEMD_SERVICE, live_cb=live_cb)
 
 def run_piper_delete(live_cb=None):
+    return _run_ai_service_delete("piper", "Piper TTS", PIPER_STATE_FILE, PIPER_STATE_DIR, PIPER_SYSTEMD_SERVICE, live_cb=live_cb)
