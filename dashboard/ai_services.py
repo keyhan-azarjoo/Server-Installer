@@ -94,6 +94,68 @@ def _ensure_docker_ready(log):
     return 1, "Docker is installed but the daemon is not running."
 
 
+def _friendly_docker_image_error(image, raw_output):
+    text = str(raw_output or "").strip()
+    low = text.lower()
+    arch = platform.machine().lower()
+    if "no matching manifest" in low and ("arm64" in low or arch in ("arm64", "aarch64")):
+        return (
+            f"The Docker image '{image}' does not publish a Linux ARM64 variant. "
+            f"This host is '{platform.machine()}'. "
+            "Use the OS/native installer for this service on Apple Silicon or ARM, "
+            "or run an amd64 image manually with Docker emulation if you accept slower performance."
+        )
+    if "not found" in low and ("failed to resolve reference" in low or "pull access denied" in low):
+        return (
+            f"The Docker image '{image}' could not be pulled. "
+            "The configured image/tag may no longer exist or may be private."
+        )
+    return text
+
+
+def _docker_image_platform_supported(image):
+    if not image:
+        return True, ""
+    target_os = "linux"
+    target_arch = platform.machine().lower()
+    arch_aliases = {
+        "x86_64": {"x86_64", "amd64"},
+        "amd64": {"x86_64", "amd64"},
+        "arm64": {"arm64", "aarch64"},
+        "aarch64": {"arm64", "aarch64"},
+    }
+    expected_arches = arch_aliases.get(target_arch, {target_arch})
+    rc, out = run_capture(["docker", "manifest", "inspect", image], timeout=120)
+    if rc != 0 or not out:
+        return False, _friendly_docker_image_error(image, out or f"Unable to inspect manifest for {image}.")
+    try:
+        data = json.loads(out)
+    except Exception:
+        return False, _friendly_docker_image_error(image, out)
+    manifests = data.get("manifests")
+    if isinstance(manifests, list) and manifests:
+        for manifest in manifests:
+            platform_info = manifest.get("platform") or {}
+            os_name = str(platform_info.get("os") or "").lower()
+            arch_name = str(platform_info.get("architecture") or "").lower()
+            if os_name == target_os and arch_name in expected_arches:
+                return True, ""
+        return False, (
+            f"The Docker image '{image}' does not publish a {target_os}/{platform.machine()} manifest. "
+            "Choose the OS/native installer or a different image for this host."
+        )
+    os_name = str((data.get("os") or "")).lower()
+    arch_name = str((data.get("architecture") or "")).lower()
+    if os_name == target_os and arch_name in expected_arches:
+        return True, ""
+    if os_name or arch_name:
+        return False, (
+            f"The Docker image '{image}' targets {os_name or 'unknown'}/{arch_name or 'unknown'}, "
+            f"not {target_os}/{platform.machine()}."
+        )
+    return True, ""
+
+
 def _generic_ai_state_paths(service_id):
     sid = str(service_id or "").strip().lower()
     state_dir = SERVER_INSTALLER_DATA / sid
@@ -314,6 +376,9 @@ def _docker_password_hash(password):
     password = str(password or "")
     if not password:
         return ""
+    ok, message = _docker_image_platform_supported("caddy:2-alpine")
+    if not ok:
+        raise RuntimeError(message)
     cmd = ["docker", "run", "--rm", "caddy:2-alpine", "caddy", "hash-password", "--plaintext", password]
     rc, out = run_capture(cmd, timeout=120)
     if rc != 0:
@@ -2073,6 +2138,10 @@ def run_ollama_docker(form=None, live_cb=None):
     if docker_code != 0:
         log(docker_message)
         return docker_code, "\n".join(output)
+    ok, image_error = _docker_image_platform_supported("ollama/ollama:latest")
+    if not ok:
+        log(image_error)
+        return 1, "\n".join(output)
 
     # Stop existing containers
     run_capture(["docker", "stop", "serverinstaller-ollama"], timeout=15)
@@ -2513,6 +2582,10 @@ def _run_ai_docker_generic(
     if docker_code != 0:
         log(docker_message)
         return docker_code, "\n".join(output)
+    ok, image_error = _docker_image_platform_supported(image)
+    if not ok:
+        log(image_error)
+        return 1, "\n".join(output)
 
     state_dir.mkdir(parents=True, exist_ok=True)
     proxy_dir = state_dir / "proxy"
@@ -2552,6 +2625,9 @@ def _run_ai_docker_generic(
     log(f"Running service container: {' '.join(runtime_cmd)}")
     code = _run_install_cmd(runtime_cmd, log, timeout=1800)
     if code != 0:
+        friendly = _friendly_docker_image_error(effective_image, "\n".join(output))
+        if friendly and friendly not in "\n".join(output):
+            log(friendly)
         _remove_ai_docker_artifacts(sid)
         return code, "\n".join(output)
 
