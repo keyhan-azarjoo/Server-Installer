@@ -36,16 +36,6 @@
     else if (displayHost && httpPort) gatewayWsUrl = "ws://" + displayHost + ":" + httpPort + "/gateway";
     var appUrl = bestUrl ? bestUrl.replace(/\/?$/, "/app/") : bestUrl;
     var tokenizedBestUrl = appUrl;
-    if (appUrl && gatewayToken) {
-      try {
-        var tokenUrl = new URL(appUrl);
-        tokenUrl.searchParams.set("token", gatewayToken);
-        if (gatewayWsUrl) tokenUrl.searchParams.set("gatewayUrl", gatewayWsUrl);
-        tokenizedBestUrl = tokenUrl.toString();
-      } catch (e) {
-        tokenizedBestUrl = appUrl + "?token=" + encodeURIComponent(gatewayToken) + (gatewayWsUrl ? ("&gatewayUrl=" + encodeURIComponent(gatewayWsUrl)) : "");
-      }
-    }
 
     var installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : "macOS");
     var commonFields = [
@@ -149,11 +139,11 @@
                       <Paper elevation={0} sx={{ p: 1, bgcolor: "#f8fafc", borderRadius: 1, fontFamily: "monospace", fontSize: 12, border: "1px solid #e2e8f0", mb: 1 }}>
                         {gatewayToken || "Open the tokenized dashboard URL once to initialize session auth."}
                       </Paper>
-                      <Typography variant="body2" sx={{ mb: 0.5 }}>Dashboard URL (with token):</Typography>
+                      <Typography variant="body2" sx={{ mb: 0.5 }}>Dashboard URL:</Typography>
                       <Paper elevation={0} sx={{ p: 1, bgcolor: "#f0fdf4", borderRadius: 1, fontFamily: "monospace", fontSize: 11, border: "1px solid #dcfce7", wordBreak: "break-all", cursor: "pointer" }}
                         onClick={function() { if (tokenizedBestUrl && copyText) copyText(tokenizedBestUrl, "URL"); }}>
                         {tokenizedBestUrl || (bestUrl || "Waiting for installer to save gateway token...")}
-                        <Typography variant="caption" sx={{ display: "block", color: "#059669", mt: 0.5 }}>Click to copy</Typography>
+                        <Typography variant="caption" sx={{ display: "block", color: "#059669", mt: 0.5 }}>Click to copy. This page initializes gateway auth automatically.</Typography>
                       </Paper>
                     </Box>
                   ) : (
