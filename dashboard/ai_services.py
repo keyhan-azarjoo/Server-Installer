@@ -237,7 +237,11 @@ def _get_ai_service_info(state_file, state_dir, systemd_service, display_name, d
 
 
 def get_ollama_info():
-    return _get_ai_service_info(OLLAMA_STATE_FILE, OLLAMA_STATE_DIR, OLLAMA_SYSTEMD_SERVICE, "Ollama LLM Service", "11434")
+    info = _get_ai_service_info(OLLAMA_STATE_FILE, OLLAMA_STATE_DIR, OLLAMA_SYSTEMD_SERVICE, "Ollama LLM Service", "11434")
+    api_base = str(info.get("http_url") or info.get("https_url") or "").strip()
+    info["api_url"] = api_base
+    info["api_tags_url"] = (api_base.rstrip("/") + "/api/tags") if api_base else ""
+    return info
 
 
 def get_openclaw_info():
@@ -255,7 +259,13 @@ def get_openclaw_info():
 
 
 def get_lmstudio_info():
-    return _get_ai_service_info(LMSTUDIO_STATE_FILE, LMSTUDIO_STATE_DIR, LMSTUDIO_SYSTEMD_SERVICE, "LM Studio", "1234")
+    info = _get_ai_service_info(LMSTUDIO_STATE_FILE, LMSTUDIO_STATE_DIR, LMSTUDIO_SYSTEMD_SERVICE, "LM Studio", "1234")
+    api_base = str(info.get("http_url") or info.get("https_url") or "").strip().rstrip("/")
+    if api_base and not api_base.endswith("/v1"):
+        api_base += "/v1"
+    info["api_url"] = api_base
+    info["models_url"] = (api_base + "/models") if api_base else ""
+    return info
 
 
 def get_tgwui_info():
@@ -991,7 +1001,8 @@ def run_openclaw_docker(form=None, live_cb=None):
         try:
             oinfo = get_ollama_info() or {}
             preferred = (
-                str(oinfo.get("http_url") or "").strip()
+                str(oinfo.get("api_url") or "").strip()
+                or str(oinfo.get("http_url") or "").strip()
                 or str(oinfo.get("https_url") or "").strip()
                 or ""
             )
@@ -1006,7 +1017,8 @@ def run_openclaw_docker(form=None, live_cb=None):
         try:
             linfo = get_lmstudio_info() or {}
             preferred = (
-                str(linfo.get("http_url") or "").strip()
+                str(linfo.get("api_url") or "").strip()
+                or str(linfo.get("http_url") or "").strip()
                 or str(linfo.get("https_url") or "").strip()
                 or ""
             )

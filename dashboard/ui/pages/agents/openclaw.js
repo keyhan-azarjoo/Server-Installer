@@ -41,8 +41,8 @@
       { name: "OPENCLAW_DOMAIN", label: "Domain (optional)", defaultValue: "", placeholder: "e.g. openclaw.example.com" },
       { name: "OPENCLAW_USERNAME", label: "Dashboard Username (optional)", defaultValue: "", placeholder: "Leave empty for no auth" },
       { name: "OPENCLAW_PASSWORD", label: "Dashboard Password (optional)", type: "password", defaultValue: "", placeholder: "Leave empty for no auth" },
-      { name: "OPENCLAW_OLLAMA_URL", label: "Ollama Server URL (auto-detected)", defaultValue: (ollamaInfo.https_url || ollamaInfo.http_url || "").trim() || "", placeholder: "Leave empty for local. Or: https://other-server:11436" },
-      { name: "OPENCLAW_LMSTUDIO_URL", label: "LM Studio Server URL", defaultValue: (lmsInfo.https_url || lmsInfo.http_url || "").trim() || "", placeholder: "Leave empty for local. Or: http://other-server:1234" },
+      { name: "OPENCLAW_OLLAMA_URL", label: "Ollama API URL (auto-detected)", defaultValue: (ollamaInfo.api_url || ollamaInfo.https_url || ollamaInfo.http_url || "").trim() || "", placeholder: "Leave empty for local. Or: https://other-server:11436" },
+      { name: "OPENCLAW_LMSTUDIO_URL", label: "LM Studio API URL", defaultValue: (lmsInfo.api_url || lmsInfo.https_url || lmsInfo.http_url || "").trim() || "", placeholder: "Leave empty for local. Or: http://other-server:1234/v1" },
       { name: "OPENCLAW_TELEGRAM_TOKEN", label: "Telegram Bot Token (optional)", defaultValue: "", placeholder: "123456:ABC-DEF... (from @BotFather)" },
       { name: "OPENCLAW_DISCORD_TOKEN", label: "Discord Bot Token (optional)", type: "password", defaultValue: "", placeholder: "From Discord Developer Portal" },
       { name: "OPENCLAW_SLACK_TOKEN", label: "Slack Bot Token (optional)", type: "password", defaultValue: "", placeholder: "xoxb-... (from Slack API)" },
@@ -156,14 +156,14 @@
                     var ollamaRunning = !!ollamaInfo.running;
                     var ollamaHost = String(ollamaInfo.host || "").trim();
                     var ollamaApiPort = String(ollamaInfo.http_port || "11434").trim();
-                    var ollamaApiUrl = ollamaHost ? "http://" + ollamaHost + ":" + ollamaApiPort : "http://127.0.0.1:11434";
+                    var ollamaApiUrl = String(ollamaInfo.api_url || "").trim() || (ollamaHost ? "http://" + ollamaHost + ":" + ollamaApiPort : "http://127.0.0.1:11434");
                     var ollamaWebUrl = String(ollamaInfo.https_url || ollamaInfo.http_url || "").trim();
 
                     var lmsInstalled = !!lmsInfo.installed;
                     var lmsRunning = !!lmsInfo.running;
                     var lmsHost = String(lmsInfo.host || "").trim();
                     var lmsPort = String(lmsInfo.http_port || "1234").trim();
-                    var lmsApiUrl = lmsHost ? "http://" + lmsHost + ":" + lmsPort : "";
+                    var lmsApiUrl = String(lmsInfo.api_url || "").trim() || (lmsHost ? "http://" + lmsHost + ":" + lmsPort + "/v1" : "");
                     var lmsWebUrl = String(lmsInfo.https_url || lmsInfo.http_url || "").trim();
 
                     return React.createElement("div", null,
