@@ -815,7 +815,7 @@ def run_openclaw_os_install(form=None, live_cb=None):
         all_keys = ["OPENCLAW_HOST_IP", "OPENCLAW_HTTP_PORT", "OPENCLAW_HTTPS_PORT", "OPENCLAW_DOMAIN",
                     "OPENCLAW_USERNAME", "OPENCLAW_PASSWORD",
                     "OPENCLAW_TELEGRAM_TOKEN", "OPENCLAW_DISCORD_TOKEN", "OPENCLAW_SLACK_TOKEN", "OPENCLAW_WHATSAPP_PHONE",
-                    "OPENCLAW_LLM_PROVIDER", "OPENCLAW_LLM_MODEL", "OPENCLAW_OPENAI_KEY", "OPENCLAW_ANTHROPIC_KEY"]
+                    "OPENCLAW_LLM_PROVIDER", "OPENCLAW_LLM_MODEL", "OPENCLAW_OLLAMA_URL", "OPENCLAW_OPENAI_KEY", "OPENCLAW_ANTHROPIC_KEY"]
         for key in all_keys:
             val = (form.get(key, [""])[0] or "").strip()
             if val: env[key] = val
@@ -827,7 +827,7 @@ def run_openclaw_os_install(form=None, live_cb=None):
         env_keys = ["OPENCLAW_HOST_IP", "OPENCLAW_HTTP_PORT", "OPENCLAW_HTTPS_PORT", "OPENCLAW_DOMAIN",
                     "OPENCLAW_USERNAME", "OPENCLAW_PASSWORD",
                     "OPENCLAW_TELEGRAM_TOKEN", "OPENCLAW_DISCORD_TOKEN", "OPENCLAW_SLACK_TOKEN", "OPENCLAW_WHATSAPP_PHONE",
-                    "OPENCLAW_LLM_PROVIDER", "OPENCLAW_LLM_MODEL", "OPENCLAW_OPENAI_KEY", "OPENCLAW_ANTHROPIC_KEY"]
+                    "OPENCLAW_LLM_PROVIDER", "OPENCLAW_LLM_MODEL", "OPENCLAW_OLLAMA_URL", "OPENCLAW_OPENAI_KEY", "OPENCLAW_ANTHROPIC_KEY"]
         for key in env_keys:
             val = (form.get(key, [""])[0] or "").strip()
             if val: env[key] = val
@@ -945,6 +945,22 @@ def run_openclaw_docker(form=None, live_cb=None):
     if llm_model == "custom" and llm_model_custom:
         llm_model = llm_model_custom
     ollama_url = (form.get("OPENCLAW_OLLAMA_URL", [""])[0] or "").strip()
+    # If OpenClaw Ollama URL is not explicitly provided, inherit it from the
+    # installed Ollama service info so dashboard pages stay aligned.
+    inherited_ollama_url = ""
+    if not ollama_url:
+        try:
+            oinfo = get_ollama_info() or {}
+            preferred = (
+                str(oinfo.get("http_url") or "").strip()
+                or str(oinfo.get("https_url") or "").strip()
+                or ""
+            )
+            if preferred:
+                ollama_url = preferred
+                inherited_ollama_url = preferred
+        except Exception:
+            pass
     openai_key = (form.get("OPENCLAW_OPENAI_KEY", [""])[0] or "").strip()
     anthropic_key = (form.get("OPENCLAW_ANTHROPIC_KEY", [""])[0] or "").strip()
     output = []
@@ -952,6 +968,10 @@ def run_openclaw_docker(form=None, live_cb=None):
         output.append(m)
         if live_cb: live_cb(m + "\n")
     log("=== Installing OpenClaw via Docker ===")
+    if inherited_ollama_url:
+        log(f"Using Ollama API URL from Ollama service: {inherited_ollama_url}")
+    elif ollama_url:
+        log(f"Using Ollama API URL for OpenClaw: {ollama_url}")
     if adjusted_https_port:
         log(f"HTTPS port matched HTTP port; adjusted HTTPS to {https_port} to keep protocols separate.")
 
