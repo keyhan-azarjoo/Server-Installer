@@ -31,7 +31,7 @@
     var computedHttpsUrl = installed && displayHost && httpsPort ? "https://" + displayHost + ":" + httpsPort : (installed ? httpsUrl : "");
     var bestUrl = computedHttpsUrl || computedHttpUrl;
     var gatewayToken = String(ocInfo.gateway_token || "").trim();
-    var tokenizedBestUrl = gatewayToken && bestUrl ? (bestUrl.replace(/\/?$/, "/") + "#token=" + gatewayToken) : bestUrl;
+    var tokenizedBestUrl = gatewayToken && bestUrl ? (bestUrl.replace(/\/?$/, "/") + "?token=" + encodeURIComponent(gatewayToken)) : bestUrl;
 
     var installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : "macOS");
     var commonFields = [

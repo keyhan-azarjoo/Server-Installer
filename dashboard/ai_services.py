@@ -1581,8 +1581,8 @@ http {{
         f'echo "DASHBOARD URL (http): http://YOUR_IP:{http_port}/"',
         f'echo "DASHBOARD URL (https): {"https://YOUR_IP:" + https_port + "/" if https_port else "(disabled)"}"',
         "if [ -n \"$GATEWAY_TOKEN\" ]; then",
-        f'  echo "DASHBOARD URL (token,http): http://YOUR_IP:{http_port}/#token=$GATEWAY_TOKEN"',
-        f'  echo "DASHBOARD URL (token,https): {"https://YOUR_IP:" + https_port + "/#token=$GATEWAY_TOKEN" if https_port else "(disabled)"}"',
+        f'  echo "DASHBOARD URL (token,http): http://YOUR_IP:{http_port}/?token=$GATEWAY_TOKEN"',
+        f'  echo "DASHBOARD URL (token,https): {"https://YOUR_IP:" + https_port + "/?token=$GATEWAY_TOKEN" if https_port else "(disabled)"}"',
         "fi",
         f'echo "Ollama API: $OLLAMA_API_URL"',
         f'echo "Select your model in OpenClaw dashboard: Settings > AI & Agents"',
@@ -1790,9 +1790,9 @@ CMD ["/entrypoint.sh"]
         state["gateway_token"] = gateway_token
         _write_json_file(OPENCLAW_STATE_FILE, state)
         log(f" Dashboard URL with token:")
-        log(f"   http://{display_host}:{http_port}/#token={gateway_token}")
+        log(f"   http://{display_host}:{http_port}/?token={gateway_token}")
         if https_port:
-            log(f"   https://{display_host}:{https_port}/#token={gateway_token}")
+            log(f"   https://{display_host}:{https_port}/?token={gateway_token}")
         log(f"")
         log(f" Gateway Token:  {gateway_token}")
     else:
