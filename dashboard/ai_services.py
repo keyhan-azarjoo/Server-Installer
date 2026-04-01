@@ -1467,7 +1467,7 @@ http {{
     dockerfile = f"""FROM node:22-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get update && apt-get install -y curl python3 build-essential socat openssl nginx zstd && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y curl python3 build-essential socat openssl nginx zstd git && rm -rf /var/lib/apt/lists/*
 
 # Install OpenClaw globally.
 # Pin to a known-good release because newer builds have regressed Docker control UI startup.
