@@ -1817,14 +1817,15 @@ http {{
         "  openclaw config set gateway.remote.token \"$GATEWAY_TOKEN\" 2>/dev/null || true",
         "fi",
         "",
-        "# Get gateway auth token (if any) and print dashboard URL",
+        "# Get gateway auth token and print dashboard URL with token",
         "GATEWAY_TOKEN=$(openclaw config get gateway.auth.token 2>/dev/null || true)",
         f'echo "============================================="',
-        f'echo "DASHBOARD URL (http): http://YOUR_IP:{http_port}/"',
-        f'echo "DASHBOARD URL (https): {"https://YOUR_IP:" + https_port + "/" if https_port else "(disabled)"}"',
         "if [ -n \"$GATEWAY_TOKEN\" ]; then",
-        f'  echo "DASHBOARD URL (bootstrap,http): http://YOUR_IP:{http_port}/app/"',
-        f'  echo "DASHBOARD URL (bootstrap,https): {"https://YOUR_IP:" + https_port + "/app/" if https_port else "(disabled)"}"',
+        f'  echo "DASHBOARD URL (http):  http://YOUR_IP:{http_port}/?token=$GATEWAY_TOKEN"',
+        f'  echo "DASHBOARD URL (https): {"https://YOUR_IP:" + https_port + "/?token=$GATEWAY_TOKEN" if https_port else "(disabled)"}"',
+        "else",
+        f'  echo "DASHBOARD URL (http):  http://YOUR_IP:{http_port}/"',
+        f'  echo "DASHBOARD URL (https): {"https://YOUR_IP:" + https_port + "/" if https_port else "(disabled)"}"',
         "fi",
         f'echo "Ollama API: $OLLAMA_API_URL"',
         f'echo "Select your model in OpenClaw dashboard: Settings > AI & Agents"',
@@ -1860,11 +1861,9 @@ http {{
         f'echo "=== Direct gateway response headers ==="',
         f"curl -sI http://127.0.0.1:{gw_internal_port}/ 2>&1 | head -15 || echo 'Direct headers test failed'",
         "",
-        "# Public nginx wrapper:",
-        "# - redirects / to /app/",
-        "# - serves /app/ as a bootstrap page that seeds localStorage auth",
-        "# - proxies /ui/ to the OpenClaw control UI",
-        "# - proxies /gateway to the actual WebSocket gateway",
+        "# Public nginx wrapper: proxies all requests to the OpenClaw gateway.",
+        "# The gateway serves its own control UI at / and handles WebSocket at /.",
+        "# Use /?token=<token> to authenticate without pairing.",
         "nginx -s stop 2>/dev/null || true",
         "cat > /tmp/openclaw-bootstrap.html << EOF",
         "<!doctype html>",
@@ -1924,24 +1923,7 @@ http {{
         "  server {",
         f"    listen {http_port};",
         "    server_name _;",
-        "    location = / {",
-        "      return 302 /app/;",
-        "    }",
-        "    location = /app/ {",
-        "      root /tmp;",
-        "      try_files /openclaw-bootstrap.html =404;",
-        "    }",
-        "    location /gateway {",
-        "      proxy_http_version 1.1;",
-        "      proxy_set_header Host $host;",
-        "      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "      proxy_set_header X-Real-IP $remote_addr;",
-        "      proxy_set_header X-Forwarded-Proto $scheme;",
-        "      proxy_set_header Upgrade $http_upgrade;",
-        "      proxy_set_header Connection $connection_upgrade;",
-        f"      proxy_pass http://127.0.0.1:{gw_internal_port};",
-        "    }",
-        "    location /ui/ {",
+        "    location / {",
         "      proxy_http_version 1.1;",
         "      proxy_set_header Host $host;",
         "      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
@@ -1952,7 +1934,7 @@ http {{
         f"      proxy_pass http://127.0.0.1:{gw_internal_port}/;",
         "    }",
         "  }",
-        f'  {"server { listen " + https_port + " ssl; server_name _; ssl_certificate /root/.openclaw/certs/cert.pem; ssl_certificate_key /root/.openclaw/certs/key.pem; location = / { return 302 /app/; } location = /app/ { root /tmp; try_files /openclaw-bootstrap.html =404; } location /gateway { proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_pass http://127.0.0.1:" + gw_internal_port + "; } location /ui/ { proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_pass http://127.0.0.1:" + gw_internal_port + "/; } }" if https_port else ""}',
+        f'  {"server { listen " + https_port + " ssl; server_name _; ssl_certificate /root/.openclaw/certs/cert.pem; ssl_certificate_key /root/.openclaw/certs/key.pem; location / { proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_pass http://127.0.0.1:" + gw_internal_port + "/; } }" if https_port else ""}',
         "}",
         "NGINXEOF",
         'echo "Starting nginx public wrapper..."',
@@ -2117,10 +2099,10 @@ CMD ["/entrypoint.sh"]
         state = _read_json_file(OPENCLAW_STATE_FILE)
         state["gateway_token"] = gateway_token
         _write_json_file(OPENCLAW_STATE_FILE, state)
-        log(f" Dashboard URL:")
-        log(f"   http://{display_host}:{http_port}/app/")
+        log(f" Dashboard URL (open this in your browser):")
+        log(f"   http://{display_host}:{http_port}/?token={gateway_token}")
         if https_port:
-            log(f"   https://{display_host}:{https_port}/app/")
+            log(f"   https://{display_host}:{https_port}/?token={gateway_token}")
         log(f"")
         log(f" Gateway Token:  {gateway_token}")
     else:
