@@ -119,6 +119,7 @@ def _get_ai_service_info(state_file, state_dir, systemd_service, display_name, d
         "deploy_mode": str(state.get("deploy_mode") or "os").strip(),
         "auth_enabled": bool(state.get("auth_enabled")),
         "auth_username": str(state.get("auth_username") or "").strip(),
+        "gateway_token": str(state.get("gateway_token") or "").strip(),
         "running": bool(state.get("running")),
         "device": str(state.get("device") or "cpu").strip(),
         "detected_gpu_name": str(state.get("detected_gpu_name") or "").strip(),
@@ -853,7 +854,7 @@ def run_openclaw_os_install(form=None, live_cb=None):
         all_keys = ["OPENCLAW_HOST_IP", "OPENCLAW_HTTP_PORT", "OPENCLAW_HTTPS_PORT", "OPENCLAW_DOMAIN",
                     "OPENCLAW_USERNAME", "OPENCLAW_PASSWORD",
                     "OPENCLAW_TELEGRAM_TOKEN", "OPENCLAW_DISCORD_TOKEN", "OPENCLAW_SLACK_TOKEN", "OPENCLAW_WHATSAPP_PHONE",
-                    "OPENCLAW_LLM_PROVIDER", "OPENCLAW_LLM_MODEL", "OPENCLAW_OLLAMA_URL", "OPENCLAW_OPENAI_KEY", "OPENCLAW_ANTHROPIC_KEY"]
+                    "OPENCLAW_LLM_PROVIDER", "OPENCLAW_LLM_MODEL", "OPENCLAW_OLLAMA_URL", "OPENCLAW_LMSTUDIO_URL", "OPENCLAW_OPENAI_KEY", "OPENCLAW_ANTHROPIC_KEY"]
         for key in all_keys:
             val = (form.get(key, [""])[0] or "").strip()
             if val: env[key] = val
@@ -865,7 +866,7 @@ def run_openclaw_os_install(form=None, live_cb=None):
         env_keys = ["OPENCLAW_HOST_IP", "OPENCLAW_HTTP_PORT", "OPENCLAW_HTTPS_PORT", "OPENCLAW_DOMAIN",
                     "OPENCLAW_USERNAME", "OPENCLAW_PASSWORD",
                     "OPENCLAW_TELEGRAM_TOKEN", "OPENCLAW_DISCORD_TOKEN", "OPENCLAW_SLACK_TOKEN", "OPENCLAW_WHATSAPP_PHONE",
-                    "OPENCLAW_LLM_PROVIDER", "OPENCLAW_LLM_MODEL", "OPENCLAW_OLLAMA_URL", "OPENCLAW_OPENAI_KEY", "OPENCLAW_ANTHROPIC_KEY"]
+                    "OPENCLAW_LLM_PROVIDER", "OPENCLAW_LLM_MODEL", "OPENCLAW_OLLAMA_URL", "OPENCLAW_LMSTUDIO_URL", "OPENCLAW_OPENAI_KEY", "OPENCLAW_ANTHROPIC_KEY"]
         for key in env_keys:
             val = (form.get(key, [""])[0] or "").strip()
             if val: env[key] = val
@@ -999,6 +1000,21 @@ def run_openclaw_docker(form=None, live_cb=None):
                 inherited_ollama_url = preferred
         except Exception:
             pass
+    lmstudio_url = (form.get("OPENCLAW_LMSTUDIO_URL", [""])[0] or "").strip()
+    inherited_lmstudio_url = ""
+    if not lmstudio_url:
+        try:
+            linfo = get_lmstudio_info() or {}
+            preferred = (
+                str(linfo.get("http_url") or "").strip()
+                or str(linfo.get("https_url") or "").strip()
+                or ""
+            )
+            if preferred:
+                lmstudio_url = preferred
+                inherited_lmstudio_url = preferred
+        except Exception:
+            pass
     openai_key = (form.get("OPENCLAW_OPENAI_KEY", [""])[0] or "").strip()
     anthropic_key = (form.get("OPENCLAW_ANTHROPIC_KEY", [""])[0] or "").strip()
     output = []
@@ -1010,6 +1026,10 @@ def run_openclaw_docker(form=None, live_cb=None):
         log(f"Using Ollama API URL from Ollama service: {inherited_ollama_url}")
     elif ollama_url:
         log(f"Using Ollama API URL for OpenClaw: {ollama_url}")
+    if inherited_lmstudio_url:
+        log(f"Using LM Studio API URL from LM Studio service: {inherited_lmstudio_url}")
+    elif lmstudio_url:
+        log(f"Using LM Studio API URL for OpenClaw: {lmstudio_url}")
     if adjusted_https_port:
         log(f"HTTPS port matched HTTP port; adjusted HTTPS to {https_port} to keep protocols separate.")
 
@@ -1126,11 +1146,14 @@ http {{
         "# Pre-start config (keep this minimal; newer OpenClaw releases reject",
         "# legacy control-ui keys and require gateway.mode to be set explicitly).",
         "echo 'Configuring OpenClaw gateway...'",
+        "mkdir -p /root/.openclaw /root/.openclaw/agents/main/agent /root/.openclaw/agents/main/sessions /root/.openclaw/credentials /root/.openclaw/canvas",
+        "chmod 700 /root/.openclaw /root/.openclaw/agents /root/.openclaw/agents/main /root/.openclaw/agents/main/agent /root/.openclaw/agents/main/sessions /root/.openclaw/credentials /root/.openclaw/canvas 2>/dev/null || true",
         "openclaw config set gateway.mode local 2>/dev/null || true",
         "OPENCLAW_GATEWAY_TOKEN=$(openssl rand -hex 24 2>/dev/null || echo openclaw-local-token)",
         "export OPENCLAW_GATEWAY_TOKEN",
         "openclaw config set gateway.auth.token \"$OPENCLAW_GATEWAY_TOKEN\" 2>/dev/null || true",
         "openclaw config set gateway.remote.token \"$OPENCLAW_GATEWAY_TOKEN\" 2>/dev/null || true",
+        "openclaw config set gateway.trustedProxies '[\"127.0.0.1\",\"::1\"]' 2>/dev/null || true",
         "",
         "# Set Ollama API key — enables Ollama provider in OpenClaw",
         "# Only OLLAMA_API_KEY is set by default. OpenAI/Anthropic keys",
@@ -1196,7 +1219,15 @@ http {{
         "# Force OpenClaw to use the local proxy URL (avoids TLS/self-signed issues with remote Ollama URLs)",
         "export OLLAMA_HOST='http://127.0.0.1:11434'",
         "export OLLAMA_BASE_URL='http://127.0.0.1:11434'",
+        f"export LMSTUDIO_HOST='{lmstudio_url}'",
+        "if [ -n \"$LMSTUDIO_HOST\" ] && ! echo \"$LMSTUDIO_HOST\" | grep -q '/v1'; then",
+        "  export LMSTUDIO_API_BASE=\"${LMSTUDIO_HOST%/}/v1\"",
+        "else",
+        "  export LMSTUDIO_API_BASE=\"$LMSTUDIO_HOST\"",
+        "fi",
+        "export LMSTUDIO_API_KEY='lmstudio-local'",
         f"export DESIRED_OLLAMA_MODEL='{llm_model}'",
+        f"export DESIRED_LLM_PROVIDER='{llm_provider}'",
         "",
         "# Sync OpenClaw model picker with Ollama (/api/tags) and pick a valid default model",
         "python3 - << 'PYEOF'",
@@ -1265,6 +1296,33 @@ http {{
         "print('Ollama chosen model:', chosen)",
         "PYEOF",
         "",
+        "# Discover LM Studio models when a compatible endpoint is configured",
+        "python3 - << 'PYEOF'",
+        "import json, os, sys, urllib.request",
+        "base = (os.environ.get('LMSTUDIO_API_BASE') or '').strip().rstrip('/')",
+        "chosen = ''",
+        "models = []",
+        "if base:",
+        "  try:",
+        "    req = urllib.request.Request(base + '/models', headers={'Authorization': 'Bearer ' + (os.environ.get('LMSTUDIO_API_KEY') or 'lmstudio-local')})",
+        "    with urllib.request.urlopen(req, timeout=5) as r:",
+        "      data = json.load(r)",
+        "    for item in (data.get('data') or []):",
+        "      mid = (item.get('id') or '').strip()",
+        "      if mid:",
+        "        models.append(mid)",
+        "    if models:",
+        "      chosen = models[0]",
+        "  except Exception as e:",
+        "    print('WARN: could not query LM Studio models:', e, file=sys.stderr)",
+        "with open('/tmp/lmstudio-default-model.txt', 'w', encoding='utf-8') as f:",
+        "  f.write(chosen)",
+        "print('LM Studio models discovered:', len(models))",
+        "if models:",
+        "  print('LM Studio available models:', ', '.join(models))",
+        "print('LM Studio chosen model:', chosen)",
+        "PYEOF",
+        "",
         "# Ensure OLLAMA_API_KEY is available everywhere",
         "echo 'OLLAMA_API_KEY='$OLLAMA_API_KEY",
         "# Write .env file in OpenClaw's directory (Node.js dotenv reads this)",
@@ -1290,10 +1348,18 @@ http {{
         "if ollama_key:",
         "  profiles['ollama:local'] = {'type': 'api_key', 'provider': 'ollama', 'key': ollama_key}",
         "  last_good['ollama'] = 'ollama:local'",
+        "lmstudio_key = os.environ.get('LMSTUDIO_API_KEY')",
+        "if lmstudio_key:",
+        "  profiles['lmstudio:local'] = {'type': 'api_key', 'provider': 'lmstudio', 'key': lmstudio_key}",
+        "  last_good['lmstudio'] = 'lmstudio:local'",
         "anthropic_key = os.environ.get('ANTHROPIC_API_KEY')",
         "if anthropic_key:",
         "  profiles['anthropic:default'] = {'type': 'api_key', 'provider': 'anthropic', 'key': anthropic_key}",
         "  last_good['anthropic'] = 'anthropic:default'",
+        "openai_key = os.environ.get('OPENAI_API_KEY')",
+        "if openai_key:",
+        "  profiles['openai:default'] = {'type': 'api_key', 'provider': 'openai', 'key': openai_key}",
+        "  last_good['openai'] = 'openai:default'",
         "data = {'version': 1, 'profiles': profiles, 'lastGood': last_good}",
         "(agent_dir / 'auth-profiles.json').write_text(json.dumps(data, indent=2), encoding='utf-8')",
         "enabled = ', '.join(sorted(profiles.keys())) if profiles else '(none)'",
@@ -1309,25 +1375,75 @@ http {{
         "",
         "# Always enforce a model that exists in Ollama /api/tags",
         "OLLAMA_DEFAULT=$(cat /tmp/ollama-default-model.txt 2>/dev/null || true)",
-        "if [ -n \"$OLLAMA_DEFAULT\" ]; then",
-        "  export OPENCLAW_MODEL=\"$OLLAMA_DEFAULT\"",
-        "  echo \"Using Ollama model from /api/tags: $OLLAMA_DEFAULT\"",
+        "LMSTUDIO_DEFAULT=$(cat /tmp/lmstudio-default-model.txt 2>/dev/null || true)",
+        "SELECTED_PROVIDER=$(printf '%s' \"$DESIRED_LLM_PROVIDER\" | tr '[:upper:]' '[:lower:]')",
+        "if echo \"$SELECTED_PROVIDER\" | grep -q 'lm studio\\|lmstudio'; then",
+        "  if [ -n \"$LMSTUDIO_DEFAULT\" ]; then",
+        "    export OPENCLAW_PROVIDER='lmstudio'",
+        "    export OPENCLAW_MODEL=\"$LMSTUDIO_DEFAULT\"",
+        "    echo \"Using LM Studio model from /v1/models: $LMSTUDIO_DEFAULT\"",
+        "  elif [ -n \"$OLLAMA_DEFAULT\" ]; then",
+        "    export OPENCLAW_PROVIDER='ollama'",
+        "    export OPENCLAW_MODEL=\"$OLLAMA_DEFAULT\"",
+        "    echo \"LM Studio unavailable; falling back to Ollama model: $OLLAMA_DEFAULT\"",
+        "  fi",
         "else",
-        "  echo 'No Ollama model detected from /api/tags; leaving model unchanged'",
+        "  if [ -n \"$OLLAMA_DEFAULT\" ]; then",
+        "    export OPENCLAW_PROVIDER='ollama'",
+        "    export OPENCLAW_MODEL=\"$OLLAMA_DEFAULT\"",
+        "    echo \"Using Ollama model from /api/tags: $OLLAMA_DEFAULT\"",
+        "  elif [ -n \"$LMSTUDIO_DEFAULT\" ]; then",
+        "    export OPENCLAW_PROVIDER='lmstudio'",
+        "    export OPENCLAW_MODEL=\"$LMSTUDIO_DEFAULT\"",
+        "    echo \"Ollama unavailable; falling back to LM Studio model: $LMSTUDIO_DEFAULT\"",
+        "  fi",
         "fi",
-        "# Write the default model to the agent settings file instead of mutating",
-        "# OpenClaw's global config schema at runtime.",
+        "if [ -z \"$OPENCLAW_PROVIDER\" ] && [ -n \"$OPENAI_API_KEY\" ]; then",
+        "  export OPENCLAW_PROVIDER='openai'",
+        "  echo 'Using OpenAI provider (model selected in OpenClaw dashboard).'",
+        "fi",
+        "if [ -z \"$OPENCLAW_PROVIDER\" ] && [ -n \"$ANTHROPIC_API_KEY\" ]; then",
+        "  export OPENCLAW_PROVIDER='anthropic'",
+        "  echo 'Using Anthropic provider (model selected in OpenClaw dashboard).'",
+        "fi",
+        "# Write the default model to the agent settings file and global config.",
         "python3 - << 'PYEOF'",
         "import json, os, pathlib",
+        "cfg_path = pathlib.Path('/root/.openclaw/openclaw.json')",
+        "try:",
+        "  cfg = json.loads(cfg_path.read_text(encoding='utf-8')) if cfg_path.exists() else {}",
+        "except Exception:",
+        "  cfg = {}",
         "agent_dir = pathlib.Path('/root/.openclaw/agents/main/agent')",
         "agent_dir.mkdir(parents=True, exist_ok=True)",
         "model = (os.environ.get('OPENCLAW_MODEL') or '').strip()",
+        "provider = (os.environ.get('OPENCLAW_PROVIDER') or '').strip()",
         "settings = {'customInstructions': ''}",
-        "if model:",
-        "  settings['model'] = f'ollama/{model}'",
-        "  settings['provider'] = 'ollama'",
+        "agents = cfg.setdefault('agents', {})",
+        "defaults = agents.setdefault('defaults', {})",
+        "model_cfg = defaults.setdefault('model', {})",
+        "models_cfg = cfg.setdefault('models', {})",
+        "models_cfg['mode'] = 'merge'",
+        "providers_cfg = models_cfg.setdefault('providers', {})",
+        "providers_cfg['ollama'] = {'baseUrl': 'http://127.0.0.1:11434', 'apiKey': os.environ.get('OLLAMA_API_KEY') or 'ollama-local'}",
+        "lmstudio_base = (os.environ.get('LMSTUDIO_API_BASE') or '').strip()",
+        "if lmstudio_base:",
+        "  providers_cfg['lmstudio'] = {'baseUrl': lmstudio_base, 'apiKey': os.environ.get('LMSTUDIO_API_KEY') or 'lmstudio-local', 'api': 'openai-responses'}",
+        "if model and provider in ('ollama', 'lmstudio'):",
+        "  settings['model'] = f'{provider}/{model}'",
+        "  settings['provider'] = provider",
+        "  model_cfg['primary'] = f'{provider}/{model}'",
+        "elif provider in ('openai', 'anthropic'):",
+        "  settings['provider'] = provider",
+        "  model_cfg['primary'] = defaults.get('model', {}).get('primary') or ''",
+        "  if not model_cfg['primary'] and provider == 'openai':",
+        "    model_cfg['primary'] = 'openai/gpt-4.1-mini'",
+        "  if not model_cfg['primary'] and provider == 'anthropic':",
+        "    model_cfg['primary'] = 'anthropic/claude-sonnet-4-5'",
         "(agent_dir / 'settings.json').write_text(json.dumps(settings, indent=2), encoding='utf-8')",
+        "cfg_path.write_text(json.dumps(cfg, indent=2), encoding='utf-8')",
         "print('Agent settings written:', settings.get('model', '(unchanged)'))",
+        "print('Configured primary model:', model_cfg.get('primary', '(unset)'))",
         "PYEOF",
         "echo '--- OpenClaw config snapshot (before gateway start) ---'",
         "python3 - << 'PYEOF'",
@@ -1542,6 +1658,9 @@ CMD ["/entrypoint.sh"]
     env_map = {
         "OLLAMA_API_KEY": "ollama-local",
         "OPENCLAW_HOST_IP": host,
+        "OPENCLAW_LLM_PROVIDER": llm_provider,
+        "OPENCLAW_OLLAMA_URL": ollama_url,
+        "OPENCLAW_LMSTUDIO_URL": lmstudio_url,
         "TELEGRAM_BOT_TOKEN": telegram_token,
         "DISCORD_TOKEN": discord_token,
         "SLACK_BOT_TOKEN": slack_token,
@@ -1580,6 +1699,7 @@ CMD ["/entrypoint.sh"]
         "http_url": http_url,
         "https_url": https_url,
         "auth_enabled": bool(username), "auth_username": username,
+        "gateway_token": "",
         "running": code2 == 0,
     })
     _write_json_file(OPENCLAW_STATE_FILE, state)
@@ -1635,6 +1755,9 @@ CMD ["/entrypoint.sh"]
     except Exception:
         pass
     if gateway_token:
+        state = _read_json_file(OPENCLAW_STATE_FILE)
+        state["gateway_token"] = gateway_token
+        _write_json_file(OPENCLAW_STATE_FILE, state)
         log(f" Dashboard URL with token:")
         log(f"   http://{display_host}:{http_port}/#token={gateway_token}")
         if https_port:

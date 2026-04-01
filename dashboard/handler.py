@@ -1944,7 +1944,7 @@ class Handler(BaseHTTPRequestHandler):
                 if ollama_key:
                     profiles['"ollama:local"'] = f'{{"type":"api_key","provider":"ollama","key":"{ollama_key}"}}'
                 if lmstudio_key:
-                    profiles['"lmstudio:local"'] = f'{{"type":"token","provider":"lmstudio","token":"{lmstudio_key}"}}'
+                    profiles['"lmstudio:local"'] = f'{{"type":"api_key","provider":"lmstudio","key":"{lmstudio_key}"}}'
                 if openai_key:
                     profiles['"openai:default"'] = f'{{"type":"api_key","provider":"openai","key":"{openai_key}"}}'
                 if anthropic_key:
@@ -1963,17 +1963,13 @@ class Handler(BaseHTTPRequestHandler):
                 auth_json = f'{{"version":1,"profiles":{{{profiles_json}}},"lastGood":{{{last_good_json}}}}}'
                 cmds.append(f"mkdir -p /root/.openclaw/agents/main/agent")
                 cmds.append(f"echo '{auth_json}' > /root/.openclaw/agents/main/agent/auth-profiles.json")
-                # Restart gateway to pick up new tokens
-                cmds.append("kill -TERM $(pgrep -f 'openclaw gateway' | head -1) 2>/dev/null || true")
-                cmds.append("sleep 2")
-                # Start gateway with new env vars
-                env_prefix = " ".join(env_lines)
-                cmds.append(f"nohup sh -c '{env_prefix} openclaw gateway --allow-unconfigured --bind loopback --port $(cat /tmp/gw_port 2>/dev/null || echo 18803) --verbose' > /tmp/gw-restart.log 2>&1 &")
+                # Ask the running gateway to reload using the container's normal startup flow.
+                cmds.append("kill -USR1 $(pgrep -f 'openclaw gateway' | head -1) 2>/dev/null || true")
                 full_cmd = " && ".join(cmds)
                 log("Executing in container...")
                 code = _run_install_cmd(["docker", "exec", container, "bash", "-c", full_cmd], log, timeout=30)
                 if code == 0:
-                    log("\nTokens saved! Gateway restarting with new API keys.")
+                    log("\nTokens saved! Gateway reloading with updated API keys.")
                     log("Wait a few seconds, then refresh the OpenClaw dashboard.")
                 else:
                     log("\nFailed to set tokens. Is the OpenClaw container running?")
@@ -2543,5 +2539,4 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         self.write_html("Not found", HTTPStatus.NOT_FOUND)
-
 

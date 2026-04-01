@@ -30,6 +30,8 @@
     var computedHttpUrl = installed && displayHost && httpPort ? "http://" + displayHost + ":" + httpPort : (installed ? httpUrl : "");
     var computedHttpsUrl = installed && displayHost && httpsPort ? "https://" + displayHost + ":" + httpsPort : (installed ? httpsUrl : "");
     var bestUrl = computedHttpsUrl || computedHttpUrl;
+    var gatewayToken = String(ocInfo.gateway_token || "").trim();
+    var tokenizedBestUrl = gatewayToken && bestUrl ? (bestUrl.replace(/\/?$/, "/") + "#token=" + gatewayToken) : bestUrl;
 
     var installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : "macOS");
     var commonFields = [
@@ -112,7 +114,7 @@
                   {installed && displayHost && <Typography variant="body2">Host: <b>{displayHost}</b></Typography>}
                   {installed && httpPort && <Typography variant="body2">Port: <b>{httpPort}</b></Typography>}
                   <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
-                    {bestUrl && <Button variant="contained" size="small" onClick={function() { var dashUrl = bestUrl.indexOf("#") === -1 ? bestUrl + "/#token=serverinstaller" : bestUrl; window.open(dashUrl, "_blank"); }} sx={{ textTransform: "none", bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" }, fontSize: 12 }}>Open Dashboard</Button>}
+                    {bestUrl && <Button variant="contained" size="small" onClick={function() { window.open(tokenizedBestUrl || bestUrl, "_blank"); }} sx={{ textTransform: "none", bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" }, fontSize: 12 }}>Open Dashboard</Button>}
                     {installed && <Button variant="outlined" size="small" color="error" disabled={serviceBusy} onClick={function() {
                       if (!window.confirm("Are you sure you want to completely uninstall OpenClaw?\n\nThis will remove:\n- All Docker containers\n- All configuration and data\n- Firewall rules\n\nThis action cannot be undone.")) return;
                       run(null, "/run/openclaw_delete", "Uninstall OpenClaw");
@@ -127,16 +129,16 @@
                     <Box>
                       <Typography variant="body2" sx={{ mb: 0.5 }}>WebSocket URL:</Typography>
                       <Paper elevation={0} sx={{ p: 1, bgcolor: "#f8fafc", borderRadius: 1, fontFamily: "monospace", fontSize: 12, border: "1px solid #e2e8f0", wordBreak: "break-all", mb: 1 }}>
-                        {"wss://" + displayHost + ":" + httpPort}
+                        {(httpsPort ? "wss://" + displayHost + ":" + httpsPort : "ws://" + displayHost + ":" + httpPort)}
                       </Paper>
                       <Typography variant="body2" sx={{ mb: 0.5 }}>Gateway Token:</Typography>
                       <Paper elevation={0} sx={{ p: 1, bgcolor: "#f8fafc", borderRadius: 1, fontFamily: "monospace", fontSize: 12, border: "1px solid #e2e8f0", mb: 1 }}>
-                        serverinstaller
+                        {gatewayToken || "Open the tokenized dashboard URL once to initialize session auth."}
                       </Paper>
                       <Typography variant="body2" sx={{ mb: 0.5 }}>Dashboard URL (with token):</Typography>
                       <Paper elevation={0} sx={{ p: 1, bgcolor: "#f0fdf4", borderRadius: 1, fontFamily: "monospace", fontSize: 11, border: "1px solid #dcfce7", wordBreak: "break-all", cursor: "pointer" }}
-                        onClick={function() { if (copyText) copyText("https://" + displayHost + ":" + httpPort + "/#token=serverinstaller", "URL"); }}>
-                        {"https://" + displayHost + ":" + httpPort + "/#token=serverinstaller"}
+                        onClick={function() { if (tokenizedBestUrl && copyText) copyText(tokenizedBestUrl, "URL"); }}>
+                        {tokenizedBestUrl || (bestUrl || "Waiting for installer to save gateway token...")}
                         <Typography variant="caption" sx={{ display: "block", color: "#059669", mt: 0.5 }}>Click to copy</Typography>
                       </Paper>
                     </Box>
