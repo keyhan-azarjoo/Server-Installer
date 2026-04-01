@@ -32,10 +32,12 @@
     var bestUrl = computedHttpsUrl || computedHttpUrl;
     var gatewayToken = String(ocInfo.gateway_token || "").trim();
     var gatewayWsUrl = "";
-    if (displayHost && httpsPort) gatewayWsUrl = "wss://" + displayHost + ":" + httpsPort + "/gateway";
-    else if (displayHost && httpPort) gatewayWsUrl = "ws://" + displayHost + ":" + httpPort + "/gateway";
-    var appUrl = bestUrl ? bestUrl.replace(/\/?$/, "/app/") : bestUrl;
-    var tokenizedBestUrl = appUrl;
+    if (displayHost && httpsPort) gatewayWsUrl = "wss://" + displayHost + ":" + httpsPort;
+    else if (displayHost && httpPort) gatewayWsUrl = "ws://" + displayHost + ":" + httpPort;
+    var tokenizedBestUrl = bestUrl;
+    if (bestUrl && gatewayToken) {
+      tokenizedBestUrl = bestUrl + (bestUrl.indexOf("?") >= 0 ? "&" : "?") + "token=" + encodeURIComponent(gatewayToken);
+    }
 
     var installOsLabel = cfg.os === "windows" ? "Windows" : (cfg.os === "linux" ? "Linux" : "macOS");
     var commonFields = [
@@ -133,7 +135,7 @@
                     <Box>
                       <Typography variant="body2" sx={{ mb: 0.5 }}>WebSocket URL:</Typography>
                       <Paper elevation={0} sx={{ p: 1, bgcolor: "#f8fafc", borderRadius: 1, fontFamily: "monospace", fontSize: 12, border: "1px solid #e2e8f0", wordBreak: "break-all", mb: 1 }}>
-                        {(httpsPort ? "wss://" + displayHost + ":" + httpsPort : "ws://" + displayHost + ":" + httpPort)}
+                        {gatewayWsUrl || "Waiting for gateway URL..."}
                       </Paper>
                       <Typography variant="body2" sx={{ mb: 0.5 }}>Gateway Token:</Typography>
                       <Paper elevation={0} sx={{ p: 1, bgcolor: "#f8fafc", borderRadius: 1, fontFamily: "monospace", fontSize: 12, border: "1px solid #e2e8f0", mb: 1 }}>
@@ -143,7 +145,7 @@
                       <Paper elevation={0} sx={{ p: 1, bgcolor: "#f0fdf4", borderRadius: 1, fontFamily: "monospace", fontSize: 11, border: "1px solid #dcfce7", wordBreak: "break-all", cursor: "pointer" }}
                         onClick={function() { if (tokenizedBestUrl && copyText) copyText(tokenizedBestUrl, "URL"); }}>
                         {tokenizedBestUrl || (bestUrl || "Waiting for installer to save gateway token...")}
-                        <Typography variant="caption" sx={{ display: "block", color: "#059669", mt: 0.5 }}>Click to copy. This page initializes gateway auth automatically.</Typography>
+                        <Typography variant="caption" sx={{ display: "block", color: "#059669", mt: 0.5 }}>Click to copy. Open this exact URL once so the dashboard can initialize gateway auth.</Typography>
                       </Paper>
                     </Box>
                   ) : (

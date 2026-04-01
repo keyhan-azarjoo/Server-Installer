@@ -1827,12 +1827,25 @@ http {{
         "GATEWAY_TOKEN=$(openclaw config get gateway.auth.token 2>/dev/null || true)",
         f'echo "============================================="',
         "if [ -n \"$GATEWAY_TOKEN\" ]; then",
+        (
+            f'  echo "DASHBOARD URL (https): https://YOUR_IP:{https_port}/?token=$GATEWAY_TOKEN"'
+            if https_port else
+            '  echo "DASHBOARD URL (https): (disabled)"'
+        ),
         f'  echo "DASHBOARD URL (http):  http://YOUR_IP:{http_port}/?token=$GATEWAY_TOKEN"',
-        f'  echo "DASHBOARD URL (https): {"https://YOUR_IP:" + https_port + "/?token=$GATEWAY_TOKEN" if https_port else "(disabled)"}"',
         "else",
+        (
+            f'  echo "DASHBOARD URL (https): https://YOUR_IP:{https_port}/"'
+            if https_port else
+            '  echo "DASHBOARD URL (https): (disabled)"'
+        ),
         f'  echo "DASHBOARD URL (http):  http://YOUR_IP:{http_port}/"',
-        f'  echo "DASHBOARD URL (https): {"https://YOUR_IP:" + https_port + "/" if https_port else "(disabled)"}"',
         "fi",
+        (
+            'echo "NOTE: For remote browsers, use the HTTPS dashboard URL. HTTP only works reliably on localhost because OpenClaw requires a secure browser context."'
+            if https_port else
+            'echo "NOTE: Remote HTTP dashboard access can be blocked by browser secure-context rules. Prefer localhost or enable HTTPS."'
+        ),
         f'echo "Ollama API: $OLLAMA_API_URL"',
         f'echo "Select your model in OpenClaw dashboard: Settings > AI & Agents"',
         f'echo "============================================="',
@@ -2086,10 +2099,13 @@ CMD ["/entrypoint.sh"]
     log("\n" + "=" * 60)
     log(" OpenClaw Docker Deployment Complete!")
     log("=" * 60)
-    log(f" HTTP Dashboard:  http://{display_host}:{http_port}/")
     if https_port:
         log(f" HTTPS Dashboard: https://{display_host}:{https_port}/")
+        log(f" HTTP Dashboard:  http://{display_host}:{http_port}/")
+        log(" NOTE: Use HTTPS for remote browser access. HTTP is only reliable on localhost because OpenClaw requires a secure browser context.")
         log(" NOTE: HTTPS uses a self-signed cert; browser warning is expected.")
+    else:
+        log(f" HTTP Dashboard:  http://{display_host}:{http_port}/")
     log(f"")
     # Try to get the gateway token from container
     gateway_token = ""
@@ -2105,10 +2121,14 @@ CMD ["/entrypoint.sh"]
         state = _read_json_file(OPENCLAW_STATE_FILE)
         state["gateway_token"] = gateway_token
         _write_json_file(OPENCLAW_STATE_FILE, state)
-        log(f" Dashboard URL (open this in your browser):")
-        log(f"   http://{display_host}:{http_port}/?token={gateway_token}")
         if https_port:
+            log(f" Dashboard URL (open this in your browser):")
             log(f"   https://{display_host}:{https_port}/?token={gateway_token}")
+            log(f"   http://{display_host}:{http_port}/?token={gateway_token}")
+            log(" Use the HTTPS URL from another machine. HTTP will fail OpenClaw's secure-context check.")
+        else:
+            log(f" Dashboard URL (open this in your browser):")
+            log(f"   http://{display_host}:{http_port}/?token={gateway_token}")
         log(f"")
         log(f" Gateway Token:  {gateway_token}")
     else:
