@@ -1,9 +1,12 @@
 import ctypes
 import getpass
+import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
+import sys
 import tarfile
 import time
 import zipfile
