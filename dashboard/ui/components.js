@@ -42,9 +42,11 @@ function Field({ field, value, onChange, error, helperText, formHelperTextProps 
           {((field.required && !field.defaultValue) || !(field.options || []).length) && (
             <MenuItem value="" disabled>{field.placeholder || `Select ${field.label}`}</MenuItem>
           )}
-          {(field.options || []).map((opt) => (
-            <MenuItem key={opt} value={opt}>{opt}</MenuItem>
-          ))}
+          {(field.options || []).map((opt) => {
+            const optValue = (opt !== null && typeof opt === "object") ? opt.value : opt;
+            const optLabel = (opt !== null && typeof opt === "object") ? (opt.label ?? opt.value) : opt;
+            return <MenuItem key={optValue} value={optValue}>{optLabel}</MenuItem>;
+          })}
         </Select>
       </FormControl>
     );
