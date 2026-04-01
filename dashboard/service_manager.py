@@ -26,6 +26,7 @@ from constants import (
 from utils import _read_json_file, _write_json_file, command_exists, run_capture, run_process, _sudo_prefix
 from system_info import (
     choose_service_host,
+    get_cpu_usage_percent,
     get_docker_info,
     get_dotnet_info,
     get_iis_info,
