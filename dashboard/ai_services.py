@@ -1759,6 +1759,8 @@ WORKDIR /app
 COPY . /app/
 RUN pip install --no-cache-dir flask requests
 ENV OLLAMA_API_BASE=http://{ollama_ip}:11434
+ENV OLLAMA_DEPLOY_MODE=docker
+ENV OLLAMA_HOST_OS={sys.platform}
 ENV OLLAMA_WEBUI_PORT={http_port}
 ENV OLLAMA_HTTPS_PORT={https_port}
 ENV OLLAMA_AUTH_USERNAME={username}
@@ -1785,6 +1787,8 @@ CMD ["python", "ollama_web.py"]
         webui_cmd = ["docker", "run", "-d", "--name", "serverinstaller-ollama-webui",
                      "--link", "serverinstaller-ollama:ollama",
                      "-e", f"OLLAMA_API_BASE=http://serverinstaller-ollama:11434",
+                     "-e", "OLLAMA_DEPLOY_MODE=docker",
+                     "-e", f"OLLAMA_HOST_OS={sys.platform}",
                      "-e", f"OLLAMA_WEBUI_PORT={http_port}",
                      "-e", f"OLLAMA_HTTPS_PORT={https_port}",
                      "-e", f"OLLAMA_AUTH_USERNAME={username}",

@@ -49,6 +49,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;b
 .hdr-status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text2)}
 .hdr-dot{width:8px;height:8px;border-radius:50%;background:var(--danger);flex-shrink:0}
 .hdr-dot.ok{background:var(--success)}
+.hdr-note{margin-left:4px;color:#fbbf24;font-size:12px;max-width:420px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .hdr-spacer{flex:1}
 .hdr-btn{background:var(--border);color:var(--text2);border:1px solid var(--border2);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;transition:all .15s;white-space:nowrap}
 .hdr-btn:hover{background:var(--border2);color:var(--text)}
@@ -199,6 +200,7 @@ pre:hover .copy-btn{opacity:1}
     <button class="toggle-sb" onclick="toggleSidebar()">&#9776;</button>
     <div class="hdr-model"><select id="modelSelect"><option value="">Loading...</option></select></div>
     <div class="hdr-status"><div class="hdr-dot" id="statusDot"></div><span id="statusText">Connecting...</span></div>
+    <div class="hdr-note" id="runtimeNote" style="display:none"></div>
     <div class="hdr-spacer"></div>
     <button class="hdr-btn" id="settingsBtn" onclick="toggleSettings()">Settings</button>
     <button class="hdr-btn" onclick="toggleModels()">Models</button>
@@ -222,7 +224,7 @@ pre:hover .copy-btn{opacity:1}
       </div>
       <div class="stg-grp">
         <label>Context Length</label>
-        <input type="number" id="contextLen" value="4096" min="256" max="131072" step="256">
+        <input type="number" id="contextLen" value="2048" min="256" max="131072" step="256">
       </div>
       <div class="stg-grp">
         <label>Max Tokens (0 = unlimited)</label>
@@ -292,6 +294,7 @@ var currentChatId = null;
 var streaming = false;
 var abortController = null;
 var savedModel = '';
+var runtimeInfo = null;
 
 // ── Storage ──────────────────────────────────────────────
 function saveConvs() { try { localStorage.setItem('ollama_chats', JSON.stringify(conversations)); } catch(e) {} }
@@ -475,11 +478,48 @@ function useSug(el) {
   document.getElementById('msgInput').focus();
 }
 
+function showRuntimeNote(text) {
+  var note = document.getElementById('runtimeNote');
+  if (!text) { note.style.display = 'none'; note.textContent = ''; return; }
+  note.style.display = '';
+  note.textContent = text;
+  note.title = text;
+}
+
+function formatGiB(v) {
+  return (typeof v === 'number' && !isNaN(v)) ? v.toFixed(1) + ' GiB' : '';
+}
+
+function runtimeMemoryHint() {
+  if (!runtimeInfo) return '';
+  if (runtimeInfo.deploy_mode !== 'docker') return '';
+  var available = formatGiB(runtimeInfo.memory_available_gib);
+  var limit = formatGiB(runtimeInfo.memory_limit_gib || runtimeInfo.memory_total_gib);
+  if (runtimeInfo.host_os === 'darwin' || runtimeInfo.host_os === 'windows' || runtimeInfo.host_os === 'win32') {
+    return 'Docker Desktop memory available to Ollama: ' + (available || 'unknown') + (limit ? ' of ' + limit : '') + '. Increase Docker Desktop RAM or use OS install.';
+  }
+  if (available) return 'Docker runtime memory available to Ollama: ' + available + '.';
+  return '';
+}
+
+function enhanceMemoryError(text) {
+  if (!text || text.indexOf('requires more system memory') === -1) return text;
+  var extra = [];
+  var runtimeHint = runtimeMemoryHint();
+  if (runtimeHint) extra.push(runtimeHint);
+  var ctxLen = parseInt(document.getElementById('contextLen').value, 10) || 2048;
+  if (ctxLen > 2048) extra.push('Try lowering Context Length to 2048 or 1024.');
+  extra.push('If this is Docker mode, Ollama is using Docker-visible memory, not full host RAM.');
+  return extra.length ? text + '\n\n' + extra.join(' ') : text;
+}
+
 // ── Health & Models ──────────────────────────────────────
 function checkHealth() {
   fetch(BASE + '/api/health').then(function(r) { return r.json(); }).then(function(j) {
+    runtimeInfo = j.runtime || runtimeInfo;
     var serverOk = j.ollama_server !== false && j.status !== 'web_ui_only';
     document.getElementById('statusDot').className = 'hdr-dot' + (serverOk ? ' ok' : '');
+    showRuntimeNote(runtimeMemoryHint());
     if (serverOk) {
       document.getElementById('statusText').textContent = 'Connected';
       loadModels();
@@ -566,7 +606,7 @@ function sendMessage() {
   var sysPr = document.getElementById('systemPrompt').value.trim();
   var temp = parseFloat(document.getElementById('temperature').value);
   var topP = parseFloat(document.getElementById('topP').value);
-  var ctxLen = parseInt(document.getElementById('contextLen').value) || 4096;
+  var ctxLen = parseInt(document.getElementById('contextLen').value) || 2048;
   var maxTok = parseInt(document.getElementById('maxTokens').value) || 0;
   var rp = parseFloat(document.getElementById('repeatPenalty').value);
   var seedVal = parseInt(document.getElementById('seed').value);
@@ -621,7 +661,7 @@ function sendMessage() {
   var options = {};
   if (temp !== 0.7) options.temperature = temp;
   if (topP !== 0.9) options.top_p = topP;
-  if (ctxLen !== 4096) options.num_ctx = ctxLen;
+  if (ctxLen !== 2048) options.num_ctx = ctxLen;
   if (maxTok > 0) options.num_predict = maxTok;
   if (rp !== 1.1) options.repeat_penalty = rp;
   if (seedVal >= 0) options.seed = seedVal;
@@ -649,7 +689,7 @@ function sendMessage() {
           try { var d = JSON.parse(lines[j].slice(6));
             if (d.message && d.message.content) { fullText += d.message.content; bubble.innerHTML = md(fullText); area.scrollTop = area.scrollHeight; }
             if (d.done) { finish(fullText, model, metaEl, bubble); return; }
-            if (d.error) { fullText += '\n\nError: ' + d.error; bubble.innerHTML = md(fullText); finish(fullText, model, metaEl, bubble); return; }
+            if (d.error) { fullText += '\n\nError: ' + enhanceMemoryError(d.error); bubble.innerHTML = md(fullText); finish(fullText, model, metaEl, bubble); return; }
           } catch(e) {}
         }
         read();
@@ -695,7 +735,7 @@ function pullModel() {
         try { var d = JSON.parse(lines[j].slice(6));
           if (d.status) { var pct = (d.completed && d.total) ? ' ' + Math.round(d.completed/d.total*100) + '%' : ''; status.textContent = d.status + pct; }
           if (d.status === 'success') { status.textContent = name + ' pulled successfully!'; loadModels(); input.value = ''; }
-          if (d.error) status.textContent = 'Error: ' + d.error;
+          if (d.error) status.textContent = 'Error: ' + enhanceMemoryError(d.error);
         } catch(e) {}
       } read();
     }); } read();

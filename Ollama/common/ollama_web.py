@@ -21,6 +21,77 @@ app.secret_key = os.environ.get("OLLAMA_SECRET_KEY", secrets.token_hex(32))
 OLLAMA_BASE = os.environ.get("OLLAMA_API_BASE", "http://127.0.0.1:11434")
 AUTH_USERNAME = os.environ.get("OLLAMA_AUTH_USERNAME", "")
 AUTH_PASSWORD = os.environ.get("OLLAMA_AUTH_PASSWORD", "")
+DEPLOY_MODE = os.environ.get("OLLAMA_DEPLOY_MODE", "").strip().lower()
+HOST_OS = os.environ.get("OLLAMA_HOST_OS", "").strip().lower()
+
+
+def _parse_meminfo():
+    info = {}
+    try:
+        with open("/proc/meminfo", "r", encoding="utf-8") as fh:
+            for line in fh:
+                if ":" not in line:
+                    continue
+                key, value = line.split(":", 1)
+                parts = value.strip().split()
+                if not parts:
+                    continue
+                try:
+                    info[key] = int(parts[0]) * 1024
+                except ValueError:
+                    continue
+    except Exception:
+        pass
+    return info
+
+
+def _read_memory_limit_bytes():
+    candidates = [
+        "/sys/fs/cgroup/memory.max",
+        "/sys/fs/cgroup/memory/memory.limit_in_bytes",
+    ]
+    for path in candidates:
+        try:
+            raw = open(path, "r", encoding="utf-8").read().strip()
+        except Exception:
+            continue
+        if not raw or raw == "max":
+            continue
+        try:
+            value = int(raw)
+        except ValueError:
+            continue
+        # Ignore obviously unbounded/sentinel values.
+        if value <= 0 or value >= (1 << 60):
+            continue
+        return value
+    return 0
+
+
+def _gib(value):
+    if not value:
+        return 0.0
+    return round(float(value) / (1024 ** 3), 1)
+
+
+def _runtime_info():
+    meminfo = _parse_meminfo()
+    total_bytes = int(meminfo.get("MemTotal", 0) or 0)
+    available_bytes = int(meminfo.get("MemAvailable", 0) or 0)
+    limit_bytes = int(_read_memory_limit_bytes() or 0)
+    effective_total = min(total_bytes, limit_bytes) if total_bytes and limit_bytes else (limit_bytes or total_bytes)
+    in_docker = os.path.exists("/.dockerenv")
+    return {
+        "deploy_mode": DEPLOY_MODE or ("docker" if in_docker else "os"),
+        "host_os": HOST_OS,
+        "in_docker": in_docker,
+        "memory_total_bytes": effective_total or total_bytes,
+        "memory_available_bytes": available_bytes,
+        "memory_limit_bytes": limit_bytes,
+        "memory_total_gib": _gib(effective_total or total_bytes),
+        "memory_available_gib": _gib(available_bytes),
+        "memory_limit_gib": _gib(limit_bytes),
+    }
 
 
 def _check_auth():
@@ -108,16 +179,24 @@ def index():
 
 @app.route("/api/health")
 def health():
+    runtime = _runtime_info()
     try:
         r = requests.get(f"{OLLAMA_BASE}/api/tags", timeout=5)
         models = r.json().get("models", [])
         return jsonify({
             "ok": True, "status": "healthy", "ollama": OLLAMA_BASE,
             "model_count": len(models),
+            "runtime": runtime,
         })
     except Exception:
         return jsonify({"ok": True, "status": "web_ui_only", "ollama": OLLAMA_BASE, "ollama_server": False,
-                        "message": "Web UI is running. Ollama server is not responding at " + OLLAMA_BASE})
+                        "message": "Web UI is running. Ollama server is not responding at " + OLLAMA_BASE,
+                        "runtime": runtime})
+
+
+@app.route("/api/runtime-info")
+def runtime_info():
+    return jsonify({"ok": True, "runtime": _runtime_info()})
 
 
 # ── Model Management ────────────────────────────────────────────────────────
