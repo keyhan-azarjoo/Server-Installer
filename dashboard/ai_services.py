@@ -1258,8 +1258,6 @@ def run_openclaw_docker(form=None, live_cb=None):
     container_name = "serverinstaller-openclaw"
     run_capture(["docker", "stop", container_name], timeout=15)
     run_capture(["docker", "rm", container_name], timeout=15)
-    # Remove old volume to clear stale config (e.g. anthropic defaults)
-    run_capture(["docker", "volume", "rm", "openclaw-data"], timeout=15)
 
     # Build real OpenClaw container with Node.js
     log("Building OpenClaw container (Node.js + real OpenClaw gateway)...")
@@ -1828,11 +1826,11 @@ http {{
         f'echo "============================================="',
         "if [ -n \"$GATEWAY_TOKEN\" ]; then",
         (
-            f'  echo "DASHBOARD URL (https): https://YOUR_IP:{https_port}/app/?token=$GATEWAY_TOKEN&gatewayUrl=wss://YOUR_IP:{https_port}/gateway"'
+            f'  echo "DASHBOARD URL (https): https://YOUR_IP:{https_port}/?gatewayUrl=wss://YOUR_IP:{https_port}#token=$GATEWAY_TOKEN"'
             if https_port else
             '  echo "DASHBOARD URL (https): (disabled)"'
         ),
-        f'  echo "DASHBOARD URL (http):  http://YOUR_IP:{http_port}/app/?token=$GATEWAY_TOKEN&gatewayUrl=ws://YOUR_IP:{http_port}/gateway"',
+        f'  echo "DASHBOARD URL (http):  http://YOUR_IP:{http_port}/?gatewayUrl=ws://YOUR_IP:{http_port}#token=$GATEWAY_TOKEN"',
         "else",
         (
             f'  echo "DASHBOARD URL (https): https://YOUR_IP:{https_port}/"'
@@ -1880,10 +1878,9 @@ http {{
         f'echo "=== Direct gateway response headers ==="',
         f"curl -sI http://127.0.0.1:{gw_internal_port}/ 2>&1 | head -15 || echo 'Direct headers test failed'",
         "",
-        "# Public nginx wrapper:",
-        "# - redirects / to a tokenized /app/ URL",
-        "# - proxies /app/ to the OpenClaw control UI",
-        "# - proxies /gateway to the actual WebSocket gateway",
+        "# Public nginx wrapper: proxy the Control UI + WebSocket directly.",
+        "# The browser gets gatewayUrl in the query string and token in #fragment,",
+        "# matching the current OpenClaw Control UI docs.",
         "nginx -s stop 2>/dev/null || true",
         "cat > /tmp/openclaw-public-nginx.conf << 'NGINXEOF'",
         "worker_processes 1;",
@@ -1896,27 +1893,7 @@ http {{
         "  server {",
         f"    listen {http_port};",
         "    server_name _;",
-        "    location = / {",
-        "      if ($request_method = GET) {",
-        f"        return 302 /app/?token=__OPENCLAW_GATEWAY_TOKEN__&gatewayUrl=ws://$host:{http_port}/gateway;",
-        "      }",
-        "      proxy_http_version 1.1;",
-        "      proxy_set_header Host $host;",
-        "      proxy_set_header Upgrade $http_upgrade;",
-        "      proxy_set_header Connection $connection_upgrade;",
-        f"      proxy_pass http://127.0.0.1:{gw_internal_port};",
-        "    }",
-        "    location /gateway {",
-        "      proxy_http_version 1.1;",
-        "      proxy_set_header Host $host;",
-        "      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
-        "      proxy_set_header X-Real-IP $remote_addr;",
-        "      proxy_set_header X-Forwarded-Proto $scheme;",
-        "      proxy_set_header Upgrade $http_upgrade;",
-        "      proxy_set_header Connection $connection_upgrade;",
-        f"      proxy_pass http://127.0.0.1:{gw_internal_port};",
-        "    }",
-        "    location /app/ {",
+        "    location / {",
         "      proxy_http_version 1.1;",
         "      proxy_set_header Host $host;",
         "      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;",
@@ -1927,10 +1904,9 @@ http {{
         f"      proxy_pass http://127.0.0.1:{gw_internal_port}/;",
         "    }",
         "  }",
-        f'  {"server { listen " + https_port + " ssl; server_name _; ssl_certificate /root/.openclaw/certs/cert.pem; ssl_certificate_key /root/.openclaw/certs/key.pem; location = / { if ($request_method = GET) { return 302 /app/?token=__OPENCLAW_GATEWAY_TOKEN__&gatewayUrl=wss://$host:" + https_port + "/gateway; } proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_pass http://127.0.0.1:" + gw_internal_port + "; } location /gateway { proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_pass http://127.0.0.1:" + gw_internal_port + "; } location /app/ { proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_pass http://127.0.0.1:" + gw_internal_port + "/; } }" if https_port else ""}',
+        f'  {"server { listen " + https_port + " ssl; server_name _; ssl_certificate /root/.openclaw/certs/cert.pem; ssl_certificate_key /root/.openclaw/certs/key.pem; location / { proxy_http_version 1.1; proxy_set_header Host $host; proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; proxy_set_header X-Real-IP $remote_addr; proxy_set_header X-Forwarded-Proto $scheme; proxy_set_header Upgrade $http_upgrade; proxy_set_header Connection $connection_upgrade; proxy_pass http://127.0.0.1:" + gw_internal_port + "/; } }" if https_port else ""}',
         "}",
         "NGINXEOF",
-        "sed -i \"s|__OPENCLAW_GATEWAY_TOKEN__|$GATEWAY_TOKEN|g\" /tmp/openclaw-public-nginx.conf",
         'echo "Starting nginx public wrapper..."',
         "nginx -c /tmp/openclaw-public-nginx.conf &",
         "PUBLIC_NGINX_PID=$!",
@@ -1952,7 +1928,7 @@ http {{
     if https_port:
         expose_lines += f"EXPOSE {https_port}\n"
 
-    dockerfile = f"""FROM node:22-slim
+    dockerfile = f"""FROM node:24-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y curl python3 build-essential socat openssl nginx zstd git && rm -rf /var/lib/apt/lists/*
@@ -2098,12 +2074,13 @@ CMD ["/entrypoint.sh"]
         _write_json_file(OPENCLAW_STATE_FILE, state)
         if https_port:
             log(f" Dashboard URL (open this in your browser):")
-            log(f"   https://{display_host}:{https_port}/app/?token={gateway_token}&gatewayUrl=wss://{display_host}:{https_port}/gateway")
-            log(f"   http://{display_host}:{http_port}/app/?token={gateway_token}&gatewayUrl=ws://{display_host}:{http_port}/gateway")
+            log(f"   https://{display_host}:{https_port}/?gatewayUrl=wss://{display_host}:{https_port}#token={gateway_token}")
+            log(f"   http://{display_host}:{http_port}/?gatewayUrl=ws://{display_host}:{http_port}#token={gateway_token}")
             log(" Use the HTTPS URL from another machine. HTTP will fail OpenClaw's secure-context check.")
+            log(" Remote browsers may require one-time pairing approval: openclaw devices list && openclaw devices approve --latest")
         else:
             log(f" Dashboard URL (open this in your browser):")
-            log(f"   http://{display_host}:{http_port}/app/?token={gateway_token}&gatewayUrl=ws://{display_host}:{http_port}/gateway")
+            log(f"   http://{display_host}:{http_port}/?gatewayUrl=ws://{display_host}:{http_port}#token={gateway_token}")
         log(f"")
         log(f" Gateway Token:  {gateway_token}")
     else:
