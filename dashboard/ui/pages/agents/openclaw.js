@@ -122,6 +122,9 @@
                   {installed && httpPort && <Typography variant="body2">Port: <b>{httpPort}</b></Typography>}
                   <Stack direction="row" spacing={1} sx={{ mt: 1.5 }} flexWrap="wrap" useFlexGap>
                     {bestUrl && <Button variant="contained" size="small" onClick={function() { window.open(tokenizedBestUrl || bestUrl, "_blank"); }} sx={{ textTransform: "none", bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" }, fontSize: 12 }}>Open Dashboard</Button>}
+                    {installed && <Button variant="outlined" size="small" disabled={serviceBusy} onClick={function() {
+                      run(null, "/run/openclaw_refresh_models", "Refresh OpenClaw Model List");
+                    }} sx={{ textTransform: "none", fontSize: 12 }}>Refresh Models</Button>}
                     {installed && <Button variant="outlined" size="small" color="error" disabled={serviceBusy} onClick={function() {
                       if (!window.confirm("Are you sure you want to completely uninstall OpenClaw?\n\nThis will remove:\n- All Docker containers\n- All configuration and data\n- Firewall rules\n\nThis action cannot be undone.")) return;
                       run(null, "/run/openclaw_delete", "Uninstall OpenClaw");
@@ -148,6 +151,9 @@
                         {tokenizedBestUrl || (bestUrl || "Waiting for installer to save gateway token...")}
                         <Typography variant="caption" sx={{ display: "block", color: "#059669", mt: 0.5 }}>Click to copy. Open this exact URL once so the dashboard can initialize gateway auth.</Typography>
                       </Paper>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                        After pulling a new Ollama model, click <b>Refresh Models</b> to restart OpenClaw and reload the model list.
+                      </Typography>
                     </Box>
                   ) : (
                     <Typography variant="body2" color="text.secondary">Install OpenClaw first to see connection details.</Typography>

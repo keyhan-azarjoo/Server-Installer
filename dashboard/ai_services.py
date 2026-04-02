@@ -1173,6 +1173,53 @@ def run_openclaw_delete(live_cb=None):
     return 0, "\n".join(output)
 
 
+def run_openclaw_refresh_models(live_cb=None):
+    """Refresh OpenClaw model discovery by restarting the active service/container."""
+    output = []
+    def log(m):
+        output.append(m)
+        if live_cb:
+            live_cb(m + "\n")
+
+    state = _read_json_file(OPENCLAW_STATE_FILE)
+    if not state.get("installed"):
+        return 1, "OpenClaw is not installed."
+
+    deploy_mode = str(state.get("deploy_mode") or "").strip().lower()
+    log("=== Refreshing OpenClaw model list ===")
+    log("OpenClaw reloads Ollama models on startup, so this refresh restarts the service.")
+
+    if deploy_mode == "docker" and command_exists("docker"):
+        container_name = str(state.get("service_name") or "serverinstaller-openclaw").strip() or "serverinstaller-openclaw"
+        rc, out = run_capture(["docker", "restart", container_name], timeout=120)
+        if out:
+            log(out.strip())
+        if rc != 0:
+            return rc or 1, "\n".join(output)
+        time.sleep(5)
+        rc, logs = run_capture(["docker", "logs", "--tail", "60", container_name], timeout=20)
+        if logs:
+            log(logs.strip())
+        state["running"] = True
+        _write_json_file(OPENCLAW_STATE_FILE, state)
+        log("Refresh complete. Re-open OpenClaw Settings > AI & Agents in a few seconds.")
+        return 0, "\n".join(output)
+
+    code, stop_out = run_openclaw_stop(live_cb=None)
+    if stop_out:
+        log(stop_out.strip())
+    if code != 0:
+        return code or 1, "\n".join(output)
+    time.sleep(2)
+    code, start_out = run_openclaw_start(live_cb=None)
+    if start_out:
+        log(start_out.strip())
+    if code != 0:
+        return code or 1, "\n".join(output)
+    log("Refresh complete. Re-open OpenClaw Settings > AI & Agents in a few seconds.")
+    return 0, "\n".join(output)
+
+
 def run_openclaw_docker(form=None, live_cb=None):
     """Deploy real OpenClaw gateway as a Docker container with Node.js."""
     form = form or {}
