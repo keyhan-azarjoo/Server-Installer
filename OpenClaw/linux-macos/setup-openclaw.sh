@@ -211,6 +211,11 @@ log "Step 3c: Configuring OpenClaw (non-interactive)..."
 "$OPENCLAW_BIN" config set gateway.mode local 2>/dev/null || true
 "$OPENCLAW_BIN" config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true
 "$OPENCLAW_BIN" config set gateway.controlUi.dangerouslyDisableDeviceAuth true 2>/dev/null || true
+# Enable full computer access: native commands, code execution, filesystem
+"$OPENCLAW_BIN" config set commands.native auto 2>/dev/null || true
+"$OPENCLAW_BIN" config set commands.nativeSkills auto 2>/dev/null || true
+"$OPENCLAW_BIN" config set agents.defaults.maxConcurrent 4 2>/dev/null || true
+"$OPENCLAW_BIN" config set agents.defaults.subagents.maxConcurrent 8 2>/dev/null || true
 log "Config set. User can configure channels via the dashboard after install."
 
 # ── Step 3d: Enable & start service ──────────────────────────────────────────

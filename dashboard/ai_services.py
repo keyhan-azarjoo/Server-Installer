@@ -1102,10 +1102,36 @@ def run_openclaw_os_install(form=None, live_cb=None):
         if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
             cmd = ["sudo", "env"] + [f"{k}={env.get(k, '')}" for k in env_keys + ["SERVER_INSTALLER_DATA_DIR"] if env.get(k)] + ["bash", str(OPENCLAW_LINUX_INSTALLER)]
         code, out = run_process(cmd, env=env, live_cb=live_cb)
-        # After OS install, ensure HTTPS proxy is running
+        # After OS install, ensure full-access config and HTTPS proxy
         if code == 0:
+            _ensure_openclaw_os_config(live_cb)
             _ensure_openclaw_https_proxy(form, live_cb)
         return code, out
+
+
+def _ensure_openclaw_os_config(live_cb=None):
+    """Apply full-access config settings for OS-mode OpenClaw installs."""
+    state = _read_json_file(OPENCLAW_STATE_FILE)
+    if str(state.get("deploy_mode") or "").strip().lower() == "docker":
+        return
+    oc_bin = str(state.get("openclaw_bin") or "").strip()
+    if not oc_bin or not os.path.isfile(oc_bin):
+        return
+    def _log(m):
+        if live_cb:
+            live_cb(m + "\n")
+    config_cmds = [
+        [oc_bin, "config", "set", "commands.native", "auto"],
+        [oc_bin, "config", "set", "commands.nativeSkills", "auto"],
+        [oc_bin, "config", "set", "agents.defaults.maxConcurrent", "4"],
+        [oc_bin, "config", "set", "agents.defaults.subagents.maxConcurrent", "8"],
+    ]
+    for cmd in config_cmds:
+        try:
+            run_capture(cmd, timeout=10)
+        except Exception:
+            pass
+    _log("[OpenClaw] Full computer access configured (native commands, filesystem).")
 
 
 def _ensure_openclaw_https_proxy(form=None, live_cb=None):
