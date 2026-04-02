@@ -151,6 +151,11 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     log "npm prefix: $NPM_GLOBAL"
     log "npm cache: $NPM_CACHE"
     npm install -g openclaw@latest 2>&1 || { log "npm global install failed, trying local"; npm install --prefix "$NPM_GLOBAL" openclaw@latest 2>&1 || true; }
+    # Install optional peer dependencies for channels (Telegram, Discord, Slack, etc.)
+    OC_PKG_DIR="$NPM_GLOBAL/lib/node_modules/openclaw"
+    if [ -d "$OC_PKG_DIR" ]; then
+        (cd "$OC_PKG_DIR" && npm install grammy discord.js @slack/bolt 2>&1) || true
+    fi
 else
     # Linux — install as openclaw user
     su - "$OPENCLAW_USER" -c "npm config set prefix ~/.npm-global && npm install -g openclaw@latest" 2>&1

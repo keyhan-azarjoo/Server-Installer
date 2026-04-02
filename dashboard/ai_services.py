@@ -1147,11 +1147,58 @@ def run_openclaw_os_install(form=None, live_cb=None):
         if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
             cmd = ["sudo", "env"] + [f"{k}={env.get(k, '')}" for k in env_keys + ["SERVER_INSTALLER_DATA_DIR"] if env.get(k)] + ["bash", str(OPENCLAW_LINUX_INSTALLER)]
         code, out = run_process(cmd, env=env, live_cb=live_cb)
-        # After OS install, ensure full-access config and HTTPS proxy
+        # After OS install, ensure deps, config and HTTPS proxy
         if code == 0:
+            _ensure_openclaw_channel_deps(live_cb)
             _ensure_openclaw_os_config(form, live_cb)
             _ensure_openclaw_https_proxy(form, live_cb)
         return code, out
+
+
+def _ensure_openclaw_channel_deps(live_cb=None):
+    """Install optional peer dependencies for OpenClaw channels (Telegram, Discord, Slack)."""
+    state = _read_json_file(OPENCLAW_STATE_FILE)
+    if str(state.get("deploy_mode") or "").strip().lower() == "docker":
+        return
+    oc_bin = str(state.get("openclaw_bin") or "").strip()
+    if not oc_bin:
+        return
+    pkg_dir = str(Path(oc_bin).resolve().parent.parent / "lib" / "node_modules" / "openclaw")
+    if not os.path.isdir(pkg_dir):
+        # Try common location
+        for try_dir in [
+            str(OPENCLAW_STATE_DIR / ".npm-global" / "lib" / "node_modules" / "openclaw"),
+            "/usr/local/lib/node_modules/openclaw",
+        ]:
+            if os.path.isdir(try_dir):
+                pkg_dir = try_dir
+                break
+    if not os.path.isdir(pkg_dir):
+        return
+    def _log(m):
+        if live_cb:
+            live_cb(m + "\n")
+    # Check if grammy is already installed
+    if os.path.isdir(os.path.join(pkg_dir, "node_modules", "grammy")):
+        return
+    _log("[OpenClaw] Installing channel dependencies (grammy, discord.js, @slack/bolt)...")
+    npm_bin = "npm"
+    for try_npm in [str(Path(oc_bin).parent / "npm"), "/usr/local/bin/npm", str(OPENCLAW_STATE_DIR / "node" / "bin" / "npm")]:
+        if os.path.isfile(try_npm):
+            npm_bin = try_npm
+            break
+    try:
+        proc = subprocess.run(
+            [npm_bin, "install", "grammy", "discord.js", "@slack/bolt"],
+            cwd=pkg_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            text=True, timeout=120,
+        )
+        if proc.returncode == 0:
+            _log("[OpenClaw] Channel dependencies installed.")
+        else:
+            _log(f"[OpenClaw] WARNING: npm install failed: {(proc.stdout or '')[:200]}")
+    except Exception as e:
+        _log(f"[OpenClaw] WARNING: Could not install channel deps: {e}")
 
 
 def _ensure_openclaw_os_config(form=None, live_cb=None):
