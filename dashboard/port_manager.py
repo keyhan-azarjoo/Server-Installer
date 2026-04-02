@@ -425,6 +425,50 @@ foreach($conn in $conns) {{
         return False
 
 
+def _windows_managed_python_owns_port(port, listeners=None):
+    if os.name != "nt":
+        return False
+    try:
+        target = int(str(port).strip())
+    except Exception:
+        return False
+    state = _read_json_file(PYTHON_JUPYTER_STATE_FILE)
+    if not isinstance(state, dict) or not state:
+        return False
+    state_port = str(state.get("port") or "").strip()
+    if state_port.isdigit() and int(state_port) != target:
+        return False
+    pid = state.get("pid")
+    try:
+        pid_num = int(pid)
+    except Exception:
+        pid_num = 0
+    active_listeners = listeners if isinstance(listeners, list) else []
+    if not active_listeners:
+        for item in get_listening_ports(limit=5000):
+            proto = str(item.get("proto", "")).lower()
+            if proto.startswith("tcp") and int(item.get("port", 0)) == target:
+                active_listeners.append(item)
+    from python_manager import _python_process_running, _windows_process_matches_managed_jupyter
+    if pid_num > 0 and _python_process_running(pid_num):
+        for item in active_listeners:
+            try:
+                if int(str(item.get("pid") or "0")) == pid_num:
+                    return True
+            except Exception:
+                continue
+    for item in active_listeners:
+        try:
+            listener_pid = int(str(item.get("pid") or "0"))
+        except Exception:
+            continue
+        if listener_pid <= 0:
+            continue
+        if _windows_process_matches_managed_jupyter(listener_pid, target):
+                return True
+    return False
+
+
 def _windows_locals3_owns_port(port):
     return (
         _windows_locals3_iis_owns_port(port)

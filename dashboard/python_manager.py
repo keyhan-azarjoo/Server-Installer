@@ -1050,6 +1050,7 @@ def get_python_info():
                         proto = str(item.get("proto", "")).lower()
                         if proto.startswith("tcp") and int(item.get("port", 0)) == int(port):
                             listeners.append(item)
+                from port_manager import _windows_managed_python_owns_port
                 if port.isdigit() and _windows_managed_python_owns_port(port, listeners):
                     info["jupyter_running"] = True
                     info["jupyter_port"] = port
