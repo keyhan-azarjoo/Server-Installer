@@ -10,7 +10,7 @@ export HOME
 SERVICE_NAME="serverinstaller-openclaw"
 GATEWAY_SERVICE="clawdbot-gateway"
 HTTP_PORT="${OPENCLAW_HTTP_PORT:-18789}"
-HTTPS_PORT="${OPENCLAW_HTTPS_PORT:-}"
+HTTPS_PORT="${OPENCLAW_HTTPS_PORT:-18801}"
 HOST_IP="${OPENCLAW_HOST_IP:-0.0.0.0}"
 DOMAIN="${OPENCLAW_DOMAIN:-}"
 USERNAME="${OPENCLAW_USERNAME:-}"
@@ -210,6 +210,7 @@ log "Step 3c: Configuring OpenClaw (non-interactive)..."
 # The gateway will start with --allow-unconfigured and user can configure via dashboard.
 "$OPENCLAW_BIN" config set gateway.mode local 2>/dev/null || true
 "$OPENCLAW_BIN" config set gateway.controlUi.dangerouslyAllowHostHeaderOriginFallback true 2>/dev/null || true
+"$OPENCLAW_BIN" config set gateway.controlUi.dangerouslyDisableDeviceAuth true 2>/dev/null || true
 log "Config set. User can configure channels via the dashboard after install."
 
 # ── Step 3d: Enable & start service ──────────────────────────────────────────
@@ -342,6 +343,98 @@ if echo "$DASHBOARD_OUTPUT" | grep -qoE 'https?://'; then
 else
     DASHBOARD_URL="http://127.0.0.1:${HTTP_PORT}"
     log "Dashboard: $DASHBOARD_URL (default)"
+fi
+
+# ── Step 4c: Set up HTTPS reverse proxy ────────────────────────────────────
+if [ -n "$HTTPS_PORT" ] && command -v openssl &>/dev/null; then
+    log "Step 4c: Setting up HTTPS proxy on port $HTTPS_PORT..."
+    CERT_DIR="${STATE_DIR}/certs"
+    mkdir -p "$CERT_DIR"
+    CERT_HOST_IP="$HOST_IP"
+    [ "$CERT_HOST_IP" = "0.0.0.0" ] || [ -z "$CERT_HOST_IP" ] && CERT_HOST_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
+    # Generate self-signed cert with SANs
+    cat > /tmp/openclaw-cert.cnf <<CERTCNF
+[req]
+distinguished_name = req_distinguished_name
+x509_extensions = v3_req
+prompt = no
+[req_distinguished_name]
+CN = openclaw
+O = ServerInstaller
+[v3_req]
+subjectAltName = @alt_names
+[alt_names]
+DNS.1 = localhost
+DNS.2 = openclaw
+IP.1 = 127.0.0.1
+IP.2 = ${CERT_HOST_IP}
+CERTCNF
+    if [ ! -f "$CERT_DIR/cert.pem" ] || [ ! -f "$CERT_DIR/key.pem" ]; then
+        openssl req -x509 -nodes -newkey rsa:2048 \
+            -keyout "$CERT_DIR/key.pem" -out "$CERT_DIR/cert.pem" \
+            -days 3650 -config /tmp/openclaw-cert.cnf -extensions v3_req 2>/dev/null
+        log "SSL certificate generated."
+    else
+        log "SSL certificate already exists."
+    fi
+    rm -f /tmp/openclaw-cert.cnf
+
+    # Start a Python HTTPS reverse proxy
+    HTTPS_PROXY_SCRIPT="${STATE_DIR}/https-proxy.py"
+    cat > "$HTTPS_PROXY_SCRIPT" <<'PYPROXY'
+import http.server, ssl, urllib.request, sys, os, signal, threading
+
+BACKEND = f"http://127.0.0.1:{os.environ['OC_HTTP_PORT']}"
+CERT = os.environ["OC_CERT"]
+KEY = os.environ["OC_KEY"]
+PORT = int(os.environ["OC_HTTPS_PORT"])
+
+class ProxyHandler(http.server.BaseHTTPRequestHandler):
+    def do_request(self):
+        url = BACKEND + self.path
+        headers = {k: v for k, v in self.headers.items() if k.lower() not in ("host",)}
+        headers["Host"] = f"127.0.0.1:{os.environ['OC_HTTP_PORT']}"
+        body = None
+        if "Content-Length" in self.headers:
+            body = self.rfile.read(int(self.headers["Content-Length"]))
+        try:
+            req = urllib.request.Request(url, data=body, headers=headers, method=self.command)
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                self.send_response(resp.status)
+                for k, v in resp.getheaders():
+                    if k.lower() not in ("transfer-encoding", "connection"):
+                        self.send_header(k, v)
+                self.end_headers()
+                self.wfile.write(resp.read())
+        except Exception as e:
+            self.send_error(502, str(e))
+    do_GET = do_POST = do_PUT = do_DELETE = do_PATCH = do_HEAD = do_OPTIONS = do_request
+    def log_message(self, *a): pass
+
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ctx.load_cert_chain(CERT, KEY)
+srv = http.server.HTTPServer(("0.0.0.0", PORT), ProxyHandler)
+srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
+signal.signal(signal.SIGTERM, lambda *a: (srv.shutdown(), sys.exit(0)))
+print(f"HTTPS proxy listening on port {PORT} -> {BACKEND}", flush=True)
+srv.serve_forever()
+PYPROXY
+    # Kill any existing HTTPS proxy
+    pkill -f "https-proxy.py" 2>/dev/null || true
+    sleep 1
+    # Start HTTPS proxy in background
+    OC_HTTP_PORT="$HTTP_PORT" OC_HTTPS_PORT="$HTTPS_PORT" \
+        OC_CERT="$CERT_DIR/cert.pem" OC_KEY="$CERT_DIR/key.pem" \
+        python3 "$HTTPS_PROXY_SCRIPT" >> "$LOG_FILE" 2>&1 &
+    HTTPS_PID=$!
+    sleep 2
+    if kill -0 "$HTTPS_PID" 2>/dev/null; then
+        log "HTTPS proxy running on port $HTTPS_PORT (PID $HTTPS_PID)."
+    else
+        log "WARNING: HTTPS proxy failed to start on port $HTTPS_PORT."
+    fi
+elif [ -n "$HTTPS_PORT" ]; then
+    log "WARNING: openssl not found, skipping HTTPS setup."
 fi
 
 # ── Step 5: Firewall ────────────────────────────────────────────────────────
