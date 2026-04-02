@@ -38,6 +38,7 @@ from utils import (
     find_app_dll_dir,
 )
 from system_info import choose_service_host, get_listening_ports
+from system_admin import is_windows_admin
 from python_manager import _linux_systemd_unit_status, _python_process_running, _windows_process_matches_managed_jupyter
 from port_manager import get_port_usage, is_local_tcp_port_listening
 

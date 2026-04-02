@@ -13,6 +13,7 @@ from constants import (
 )
 from utils import command_exists, run_capture, run_process, _read_json_file, _sudo_prefix
 from system_info import get_listening_ports
+from system_admin import is_windows_admin
 
 
 def _website_state_payload(site_name):
