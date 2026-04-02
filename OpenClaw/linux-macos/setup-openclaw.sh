@@ -472,8 +472,26 @@ DISPLAY_HOST="$HOST_IP"
 HTTP_URL="http://${DISPLAY_HOST}:${HTTP_PORT}"
 HTTPS_URL=""
 [ -n "$HTTPS_PORT" ] && HTTPS_URL="https://${DISPLAY_HOST}:${HTTPS_PORT}"
-GATEWAY_TOKEN=$("$OPENCLAW_BIN" config get gateway.auth.token 2>/dev/null || echo "")
-GATEWAY_TOKEN=$(echo "$GATEWAY_TOKEN" | tr -d '[:space:]')
+# Read token directly from config JSON (CLI redacts sensitive values)
+GATEWAY_TOKEN=""
+OC_CONFIG_JSON="${HOME}/.openclaw/openclaw.json"
+if [ -f "$OC_CONFIG_JSON" ] && command -v python3 &>/dev/null; then
+    GATEWAY_TOKEN=$(python3 -c "
+import json, sys
+try:
+    c = json.load(open('$OC_CONFIG_JSON'))
+    print(c.get('gateway',{}).get('auth',{}).get('token',''))
+except: pass
+" 2>/dev/null || echo "")
+fi
+# Fallback: try CLI
+if [ -z "$GATEWAY_TOKEN" ] || echo "$GATEWAY_TOKEN" | grep -qi "REDACTED"; then
+    CLI_TOKEN=$("$OPENCLAW_BIN" config get gateway.auth.token 2>/dev/null || echo "")
+    CLI_TOKEN=$(echo "$CLI_TOKEN" | tr -d '[:space:]')
+    if [ -n "$CLI_TOKEN" ] && ! echo "$CLI_TOKEN" | grep -qi "REDACTED"; then
+        GATEWAY_TOKEN="$CLI_TOKEN"
+    fi
+fi
 
 cat > "$STATE_FILE" <<STEOF
 {

@@ -1146,9 +1146,21 @@ def _ensure_openclaw_os_config(live_cb=None):
         except Exception:
             pass
 
-    # Retrieve and save the gateway token to state so the dashboard can use it
-    rc, token_out = run_capture([oc_bin, "config", "get", "gateway.auth.token"], timeout=10)
-    gateway_token = token_out.strip() if rc == 0 else ""
+    # Retrieve gateway token directly from openclaw.json (CLI redacts it)
+    gateway_token = ""
+    oc_config_path = Path(home_dir) / ".openclaw" / "openclaw.json"
+    try:
+        import json as _json
+        oc_cfg = _json.loads(oc_config_path.read_text(encoding="utf-8"))
+        gateway_token = str(oc_cfg.get("gateway", {}).get("auth", {}).get("token", "")).strip()
+    except Exception:
+        pass
+    # Fallback: try CLI (may return redacted)
+    if not gateway_token or "REDACTED" in gateway_token.upper():
+        rc, token_out = run_capture([oc_bin, "config", "get", "gateway.auth.token"], timeout=10)
+        tok = token_out.strip() if rc == 0 else ""
+        if tok and "REDACTED" not in tok.upper():
+            gateway_token = tok
     if gateway_token:
         state["gateway_token"] = gateway_token
         # Build dashboard URL with token
@@ -2554,16 +2566,26 @@ CMD ["/entrypoint.sh"]
     else:
         log(f" HTTP Dashboard:  http://{display_host}:{http_port}/")
     log(f"")
-    # Try to get the gateway token from container
+    # Try to get the gateway token from container (read JSON directly since CLI redacts)
     gateway_token = ""
     try:
         import time as _t
         _t.sleep(2)
-        rc, tok = run_capture(["docker", "exec", container_name, "openclaw", "config", "get", "gateway.auth.token"], timeout=10)
-        if rc == 0 and tok.strip():
+        rc, tok = run_capture([
+            "docker", "exec", container_name, "python3", "-c",
+            "import json; c=json.load(open('/root/.openclaw/openclaw.json')); print(c.get('gateway',{}).get('auth',{}).get('token',''))"
+        ], timeout=10)
+        if rc == 0 and tok.strip() and "REDACTED" not in tok.upper():
             gateway_token = tok.strip()
     except Exception:
         pass
+    if not gateway_token:
+        try:
+            rc, tok = run_capture(["docker", "exec", container_name, "openclaw", "config", "get", "gateway.auth.token"], timeout=10)
+            if rc == 0 and tok.strip() and "REDACTED" not in tok.upper():
+                gateway_token = tok.strip()
+        except Exception:
+            pass
     if gateway_token:
         state = _read_json_file(OPENCLAW_STATE_FILE)
         state["gateway_token"] = gateway_token
