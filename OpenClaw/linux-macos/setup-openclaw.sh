@@ -64,6 +64,13 @@ fi
 
 # ── Step 2: Install required packages ────────────────────────────────────────
 log "Step 2: Installing Node.js & build tools..."
+# Check common Node.js install locations (may exist from a previous install)
+for _np in "${STATE_DIR}/node/bin" /usr/local/bin /opt/homebrew/bin /opt/homebrew/opt/node@22/bin; do
+    if [ -x "$_np/node" ] && [ "$("$_np/node" --version 2>/dev/null | sed 's/v//' | cut -d. -f1)" -ge 22 ] 2>/dev/null; then
+        export PATH="$_np:$PATH"
+        break
+    fi
+done
 if [[ "$OSTYPE" == "darwin"* ]]; then
     # macOS — find brew or install node directly
     if ! command -v node &>/dev/null || [ "$(node --version | sed 's/v//' | cut -d. -f1)" -lt 22 ] 2>/dev/null; then

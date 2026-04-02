@@ -1086,6 +1086,18 @@ def run_openclaw_os_install(form=None, live_cb=None):
             val = (form.get(key, [""])[0] or "").strip()
             if val: env[key] = val
         env["SERVER_INSTALLER_DATA_DIR"] = str(SERVER_INSTALLER_DATA)
+        # Ensure common Node.js install locations are in PATH (may exist from previous installs)
+        extra_paths = [
+            str(OPENCLAW_STATE_DIR / "node" / "bin"),
+            "/usr/local/bin",
+            "/opt/homebrew/bin",
+            "/opt/homebrew/opt/node@22/bin",
+        ]
+        current_path = env.get("PATH", os.environ.get("PATH", ""))
+        for ep in extra_paths:
+            if ep not in current_path:
+                current_path = ep + os.pathsep + current_path
+        env["PATH"] = current_path
         cmd = ["bash", str(OPENCLAW_LINUX_INSTALLER)]
         if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
             cmd = ["sudo", "env"] + [f"{k}={env.get(k, '')}" for k in env_keys + ["SERVER_INSTALLER_DATA_DIR"] if env.get(k)] + ["bash", str(OPENCLAW_LINUX_INSTALLER)]
