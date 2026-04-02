@@ -1216,15 +1216,23 @@ def _ensure_openclaw_https_proxy(form=None, live_cb=None):
             import traceback
             traceback.print_exc()
 
-    # Check if the port is already in use
+    # Kill any existing process holding the HTTPS port
     try:
-        test_sock = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-        test_sock.setsockopt(_socket.SOL_SOCKET, _socket.SO_REUSEADDR, 1)
-        test_sock.bind(("0.0.0.0", _https_port))
-        test_sock.close()
-    except OSError as e:
-        _log(f"[OpenClaw] HTTPS port {_https_port} already in use, proxy may already be running.")
-        return
+        run_capture(["pkill", "-f", "https-proxy"], timeout=5)
+    except Exception:
+        pass
+    # Also kill by port using lsof (macOS/Linux)
+    try:
+        rc, lsof_out = run_capture(["lsof", "-ti", f":{_https_port}"], timeout=5)
+        if rc == 0 and lsof_out.strip():
+            for pid in lsof_out.strip().split():
+                try:
+                    os.kill(int(pid), 9)
+                except Exception:
+                    pass
+            time.sleep(1)
+    except Exception:
+        pass
 
     proxy_thread = _threading.Thread(
         target=_run_tls_proxy,
