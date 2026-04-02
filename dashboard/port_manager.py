@@ -15,8 +15,6 @@ from constants import (
 from utils import command_exists, run_capture, run_process, _read_json_file, _sudo_prefix
 from system_info import _get_docker_container_details, _urls_from_nginx_conf, get_listening_ports, parse_port_from_addr
 from system_admin import is_windows_admin
-from mongo_manager import _safe_service_name
-from service_manager import _is_locals3_name
 
 
 def _website_state_payload(site_name):
@@ -67,6 +65,7 @@ echo "nginx HTTP redirect configured: port {http_port} -> HTTPS {https_port}"
 def _lookup_service_ports(name, kind):
     """Return list of {port, protocol} dicts for a service, looked up from state files and OS.
     Called before deletion so ports can be closed in the firewall afterwards."""
+    from mongo_manager import _safe_service_name
     svc_name = _safe_service_name(name)
     ports = []
 
@@ -371,6 +370,7 @@ def _windows_locals3_docker_owns_port(port):
     for name in ("minio", "nginx", "console"):
         details = _get_docker_container_details(name)
         labels = details.get("labels", {}) or {}
+        from service_manager import _is_locals3_name
         if labels.get("com.locals3.installer") != "true" and not _is_locals3_name(name):
             continue
         for item in details.get("ports", []):
