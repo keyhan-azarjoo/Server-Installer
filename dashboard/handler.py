@@ -2167,16 +2167,17 @@ print("Gateway reload requested via SIGUSR1.")
                     cmd += [container, "python3", "-"]
                     log("Executing in container...")
                 else:
-                    # OS-native install: find the openclaw home dir
-                    os_home = install_dir or ""
-                    if not os_home:
-                        # Fallback: try common paths
-                        for try_path in ["/home/openclaw", os.path.expanduser("~")]:
-                            if os.path.isdir(os.path.join(try_path, ".openclaw")):
+                    # OS-native install: OpenClaw reads config from $HOME/.openclaw/
+                    os_home = os.path.expanduser("~")
+                    # Verify .openclaw dir exists
+                    if not os.path.isdir(os.path.join(os_home, ".openclaw")):
+                        # Try install_dir or common paths
+                        for try_path in [install_dir, "/home/openclaw", "/root", "/var/root"]:
+                            if try_path and os.path.isdir(os.path.join(try_path, ".openclaw")):
                                 os_home = try_path
                                 break
-                    if not os_home:
-                        log("ERROR: Cannot determine OpenClaw install directory. Is OpenClaw installed?")
+                    if not os.path.isdir(os.path.join(os_home, ".openclaw")):
+                        log("ERROR: Cannot find OpenClaw config directory (.openclaw). Is OpenClaw installed?")
                         return 1, "\n".join(output)
                     script_env["SI_HOME_DIR"] = os_home
                     run_env = dict(os.environ)

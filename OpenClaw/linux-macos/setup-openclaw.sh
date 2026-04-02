@@ -216,7 +216,37 @@ log "Step 3c: Configuring OpenClaw (non-interactive)..."
 "$OPENCLAW_BIN" config set commands.nativeSkills auto 2>/dev/null || true
 "$OPENCLAW_BIN" config set agents.defaults.maxConcurrent 4 2>/dev/null || true
 "$OPENCLAW_BIN" config set agents.defaults.subagents.maxConcurrent 8 2>/dev/null || true
-log "Config set. User can configure channels via the dashboard after install."
+# Write channel tokens and API keys to .env file for the gateway
+OC_ENV_FILE="${HOME}/.openclaw/.env"
+mkdir -p "$(dirname "$OC_ENV_FILE")"
+# Preserve existing env entries
+declare -A ENV_DATA
+if [ -f "$OC_ENV_FILE" ]; then
+    while IFS='=' read -r key val; do
+        [ -n "$key" ] && [[ ! "$key" =~ ^# ]] && ENV_DATA["$key"]="$val"
+    done < "$OC_ENV_FILE"
+fi
+# Add channel tokens from installer form
+[ -n "$OPENCLAW_TELEGRAM_TOKEN" ] && ENV_DATA["TELEGRAM_BOT_TOKEN"]="$OPENCLAW_TELEGRAM_TOKEN"
+[ -n "$OPENCLAW_DISCORD_TOKEN" ] && ENV_DATA["DISCORD_TOKEN"]="$OPENCLAW_DISCORD_TOKEN"
+[ -n "$OPENCLAW_SLACK_TOKEN" ] && ENV_DATA["SLACK_BOT_TOKEN"]="$OPENCLAW_SLACK_TOKEN"
+[ -n "$OPENCLAW_WHATSAPP_PHONE" ] && ENV_DATA["WHATSAPP_PHONE"]="$OPENCLAW_WHATSAPP_PHONE"
+[ -n "$OPENCLAW_OPENAI_KEY" ] && ENV_DATA["OPENAI_API_KEY"]="$OPENCLAW_OPENAI_KEY"
+[ -n "$OPENCLAW_ANTHROPIC_KEY" ] && ENV_DATA["ANTHROPIC_API_KEY"]="$OPENCLAW_ANTHROPIC_KEY"
+ENV_DATA["OLLAMA_API_KEY"]="ollama-local"
+# Write env file
+> "$OC_ENV_FILE"
+for key in $(echo "${!ENV_DATA[@]}" | tr ' ' '\n' | sort); do
+    echo "${key}=${ENV_DATA[$key]}" >> "$OC_ENV_FILE"
+done
+# Source env so gateway picks them up
+set -a; . "$OC_ENV_FILE"; set +a
+[ -n "$OPENCLAW_TELEGRAM_TOKEN" ] && log "Telegram bot token configured."
+[ -n "$OPENCLAW_DISCORD_TOKEN" ] && log "Discord bot token configured."
+[ -n "$OPENCLAW_SLACK_TOKEN" ] && log "Slack bot token configured."
+[ -n "$OPENCLAW_OPENAI_KEY" ] && log "OpenAI API key configured."
+[ -n "$OPENCLAW_ANTHROPIC_KEY" ] && log "Anthropic API key configured."
+log "Config set. Channels and API keys written to $OC_ENV_FILE."
 
 # ── Step 3d: Enable & start service ──────────────────────────────────────────
 log "Step 3d: Enabling & starting gateway service..."

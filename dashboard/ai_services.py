@@ -1104,13 +1104,14 @@ def run_openclaw_os_install(form=None, live_cb=None):
         code, out = run_process(cmd, env=env, live_cb=live_cb)
         # After OS install, ensure full-access config and HTTPS proxy
         if code == 0:
-            _ensure_openclaw_os_config(live_cb)
+            _ensure_openclaw_os_config(form, live_cb)
             _ensure_openclaw_https_proxy(form, live_cb)
         return code, out
 
 
-def _ensure_openclaw_os_config(live_cb=None):
+def _ensure_openclaw_os_config(form=None, live_cb=None):
     """Apply full-access config settings for OS-mode OpenClaw installs."""
+    form = form or {}
     state = _read_json_file(OPENCLAW_STATE_FILE)
     if str(state.get("deploy_mode") or "").strip().lower() == "docker":
         return
@@ -1134,9 +1135,35 @@ def _ensure_openclaw_os_config(live_cb=None):
         except Exception:
             pass
 
-    # Also write agent settings directly to ensure they're in the right location
-    install_dir = str(state.get("install_dir") or "").strip()
+    # Write channel tokens and API keys to .env file
     home_dir = os.path.expanduser("~")
+    oc_env_file = Path(home_dir) / ".openclaw" / ".env"
+    oc_env_file.parent.mkdir(parents=True, exist_ok=True)
+    env_data = {}
+    if oc_env_file.exists():
+        for line in oc_env_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                env_data[k.strip()] = v.strip()
+    token_map = {
+        "OPENCLAW_TELEGRAM_TOKEN": "TELEGRAM_BOT_TOKEN",
+        "OPENCLAW_DISCORD_TOKEN": "DISCORD_TOKEN",
+        "OPENCLAW_SLACK_TOKEN": "SLACK_BOT_TOKEN",
+        "OPENCLAW_WHATSAPP_PHONE": "WHATSAPP_PHONE",
+        "OPENCLAW_OPENAI_KEY": "OPENAI_API_KEY",
+        "OPENCLAW_ANTHROPIC_KEY": "ANTHROPIC_API_KEY",
+    }
+    for form_key, env_key in token_map.items():
+        val = (form.get(form_key, [""])[0] or "").strip()
+        if val:
+            env_data[env_key] = val
+    env_data.setdefault("OLLAMA_API_KEY", "ollama-local")
+    oc_env_file.write_text(
+        "\n".join(f"{k}={v}" for k, v in sorted(env_data.items())) + "\n",
+        encoding="utf-8",
+    )
+
+    # Also write agent settings directly to ensure they're in the right location
     agent_dir = Path(home_dir) / ".openclaw" / "agents" / "main" / "agent"
     agent_dir.mkdir(parents=True, exist_ok=True)
     settings_file = agent_dir / "settings.json"
