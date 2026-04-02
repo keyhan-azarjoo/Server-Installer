@@ -240,6 +240,8 @@
           var saving = _saving[0], setSaving = _saving[1];
           var _saveMsg = React.useState("");
           var saveMsg = _saveMsg[0], setSaveMsg = _saveMsg[1];
+          var _activeProvider = React.useState("");
+          var activeProvider = _activeProvider[0], setActiveProvider = _activeProvider[1];
 
           var pollJob = function(jobId) {
             fetch("/job/" + jobId + "?offset=0", { headers: { "X-Requested-With": "fetch" } })
@@ -247,8 +249,9 @@
               .then(function(j) {
                 if (j.done) {
                   setSaving(false);
+                  setActiveProvider("");
                   if (Number(j.exit_code) === 0) {
-                    setSaveMsg("Tokens saved! Gateway restarting... refresh OpenClaw dashboard in a few seconds.");
+                    setSaveMsg("Token updated. Gateway restarting... refresh OpenClaw dashboard in a few seconds.");
                   } else {
                     setSaveMsg("Failed (exit " + j.exit_code + "). " + (j.output || "").slice(0, 200));
                   }
@@ -257,31 +260,62 @@
                   setTimeout(function() { pollJob(jobId); }, 500);
                 }
               })
-              .catch(function(e) { setSaving(false); setSaveMsg("Error: " + e); });
+              .catch(function(e) { setSaving(false); setActiveProvider(""); setSaveMsg("Error: " + e); });
           };
 
-          var handleSave = function() {
+          var handleProviderAction = function(provider, action, value) {
             setSaving(true);
-            setSaveMsg("Saving...");
+            setActiveProvider(provider);
+            setSaveMsg((action === "delete" ? "Deleting " : "Saving ") + provider + " token...");
             var fd = new FormData();
-            fd.append("OLLAMA_API_KEY", ollamaKey);
-            fd.append("LMSTUDIO_API_KEY", lmstudioKey);
-            fd.append("OPENAI_API_KEY", openaiKey);
-            fd.append("ANTHROPIC_API_KEY", anthropicKey);
-            fetch("/run/openclaw_set_tokens", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd })
+            fd.append("provider", provider);
+            fd.append("action", action);
+            if (action !== "delete") fd.append("key", value || "");
+            fetch("/run/openclaw_set_provider_token", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd })
               .then(function(r) { return r.json(); })
               .then(function(j) {
                 if (j.job_id) {
                   pollJob(j.job_id);
                 } else if (j.output) {
                   setSaving(false);
+                  setActiveProvider("");
                   setSaveMsg("Done! " + (j.output || "").split("\n").filter(Boolean).pop() || "");
                 } else {
                   setSaving(false);
+                  setActiveProvider("");
                   setSaveMsg("Error: " + (j.error || "Unknown response"));
                 }
               })
-              .catch(function(e) { setSaving(false); setSaveMsg("Error: " + e); });
+              .catch(function(e) { setSaving(false); setActiveProvider(""); setSaveMsg("Error: " + e); });
+          };
+
+          var renderProviderCard = function(provider, label, value, setValue, placeholder, helperText, isPassword) {
+            var isBusy = saving && activeProvider === provider;
+            return (
+              <Grid item xs={12} md={6} lg={3}>
+                <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, height: "100%" }}>
+                  <TextField size="small" fullWidth label={label} value={value}
+                    onChange={function(e) { setValue(e.target.value); }}
+                    placeholder={placeholder}
+                    type={isPassword ? "password" : "text"}
+                    helperText={helperText} />
+                  <Stack direction="row" spacing={1} sx={{ mt: 1.5 }}>
+                    <Button variant="contained" size="small"
+                      disabled={isBusy || !String(value || "").trim()}
+                      onClick={function() { handleProviderAction(provider, "set", value); }}
+                      sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, fontWeight: 700 }}>
+                      {isBusy ? "Applying..." : "Apply"}
+                    </Button>
+                    <Button variant="outlined" color="error" size="small"
+                      disabled={isBusy}
+                      onClick={function() { handleProviderAction(provider, "delete", ""); }}
+                      sx={{ textTransform: "none" }}>
+                      Delete
+                    </Button>
+                  </Stack>
+                </Paper>
+              </Grid>
+            );
           };
 
           return (
@@ -290,42 +324,16 @@
                 <CardContent>
                   <Typography variant="h6" fontWeight={800} sx={{ mb: 0.5, color: "#7c3aed" }}>API Tokens</Typography>
                   <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Enter API keys to enable LLM providers. For local models (Ollama/LM Studio), any value works.
+                    Each provider now has its own Apply/Delete buttons. For local models (Ollama/LM Studio), any non-empty key works.
                     For cloud providers (OpenAI/Anthropic), enter your real API key.
                   </Typography>
                   <Grid container spacing={2}>
-                    <Grid item xs={12} md={3}>
-                      <TextField size="small" fullWidth label="Ollama API Key" value={ollamaKey}
-                        onChange={function(e) { setOllamaKey(e.target.value); }}
-                        placeholder="ollama-local"
-                        helperText="Any value enables Ollama models." />
-                    </Grid>
-                    <Grid item xs={12} md={3}>
-                      <TextField size="small" fullWidth label="LM Studio API Key" value={lmstudioKey}
-                        onChange={function(e) { setLmstudioKey(e.target.value); }}
-                        placeholder="lmstudio-local"
-                        helperText="Any value enables LM Studio models." />
-                    </Grid>
-                    <Grid item xs={12} md={3}>
-                      <TextField size="small" fullWidth label="OpenAI API Key" value={openaiKey}
-                        onChange={function(e) { setOpenaiKey(e.target.value); }}
-                        placeholder="sk-..." type="password"
-                        helperText="Enables GPT-4o, GPT-4, etc." />
-                    </Grid>
-                    <Grid item xs={12} md={3}>
-                      <TextField size="small" fullWidth label="Anthropic API Key" value={anthropicKey}
-                        onChange={function(e) { setAnthropicKey(e.target.value); }}
-                        placeholder="sk-ant-..." type="password"
-                        helperText="Enables Claude models." />
-                    </Grid>
+                    {renderProviderCard("ollama", "Ollama API Key", ollamaKey, setOllamaKey, "ollama-local", "Any value enables Ollama models.", false)}
+                    {renderProviderCard("lmstudio", "LM Studio API Key", lmstudioKey, setLmstudioKey, "lmstudio-local", "Any value enables LM Studio models.", false)}
+                    {renderProviderCard("openai", "OpenAI API Key", openaiKey, setOpenaiKey, "sk-...", "Enables OpenAI GPT models.", true)}
+                    {renderProviderCard("anthropic", "Anthropic API Key", anthropicKey, setAnthropicKey, "sk-ant-...", "Enables Claude models.", true)}
                   </Grid>
-                  <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 2 }}>
-                    <Button variant="contained" disabled={saving} onClick={handleSave}
-                      sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, fontWeight: 700 }}>
-                      {saving ? "Saving..." : "Save & Apply Tokens"}
-                    </Button>
-                    {saveMsg && <Typography variant="caption" color="text.secondary">{saveMsg}</Typography>}
-                  </Stack>
+                  {saveMsg && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2 }}>{saveMsg}</Typography>}
                   <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
                     <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>If models don't appear, run this in your server terminal (SSH):</Typography>
                     <Paper elevation={0} sx={{ p: 1, bgcolor: "#0f172a", borderRadius: 1, mt: 0.5, position: "relative" }}>

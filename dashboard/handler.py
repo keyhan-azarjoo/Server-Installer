@@ -1957,83 +1957,142 @@ class Handler(BaseHTTPRequestHandler):
                 code, output = run_lmstudio_delete()
                 self.respond_run_result(title, code, output)
             return
-        if self.path == "/run/openclaw_set_tokens":
-            title = "OpenClaw: Set API Tokens"
-            def _set_tokens(cb):
+        if self.path == "/run/openclaw_set_provider_token":
+            provider = ((form.get("provider", [""])[0] or "").strip()).lower()
+            key = (form.get("key", [""])[0] or "").strip()
+            action = ((form.get("action", ["set"])[0] or "").strip()).lower()
+            provider_specs = {
+                "ollama": {"env": "OLLAMA_API_KEY", "profile": "ollama:local", "last_good": "ollama"},
+                "lmstudio": {"env": "LMSTUDIO_API_KEY", "profile": "lmstudio:local", "last_good": "lmstudio"},
+                "openai": {"env": "OPENAI_API_KEY", "profile": "openai:default", "last_good": "openai"},
+                "anthropic": {"env": "ANTHROPIC_API_KEY", "profile": "anthropic:default", "last_good": "anthropic"},
+            }
+            spec = provider_specs.get(provider)
+            if not spec:
+                self.write_json({"ok": False, "error": "Unsupported provider"})
+                return
+            title = f"OpenClaw: {'Delete' if action == 'delete' else 'Set'} {provider.title()} Token"
+            def _set_provider_token(cb):
                 output = []
                 def log(m):
                     output.append(m)
-                    if cb: cb(m + "\n")
-                ollama_key = (form.get("OLLAMA_API_KEY", [""])[0] or "").strip()
-                lmstudio_key = (form.get("LMSTUDIO_API_KEY", [""])[0] or "").strip()
-                openai_key = (form.get("OPENAI_API_KEY", [""])[0] or "").strip()
-                anthropic_key = (form.get("ANTHROPIC_API_KEY", [""])[0] or "").strip()
-                container = "serverinstaller-openclaw"
-                log("=== Setting API tokens in OpenClaw container ===")
-                # Build env lines and .env content
-                env_lines = []
-                if ollama_key:
-                    env_lines.append(f"OLLAMA_API_KEY={ollama_key}")
-                    log(f"Ollama API Key: {ollama_key[:4]}{'*' * max(0, len(ollama_key)-4)}")
-                if lmstudio_key:
-                    env_lines.append(f"LMSTUDIO_API_KEY={lmstudio_key}")
-                    log(f"LM Studio API Key: {lmstudio_key[:4]}{'*' * max(0, len(lmstudio_key)-4)}")
-                if openai_key:
-                    env_lines.append(f"OPENAI_API_KEY={openai_key}")
-                    log(f"OpenAI API Key: {openai_key[:6]}{'*' * 8}")
-                if anthropic_key:
-                    env_lines.append(f"ANTHROPIC_API_KEY={anthropic_key}")
-                    log(f"Anthropic API Key: {anthropic_key[:8]}{'*' * 8}")
-                if not env_lines:
-                    log("No tokens provided.")
+                    if cb:
+                        cb(m + "\n")
+                if action != "delete" and not key:
+                    log("No token provided.")
                     return 1, "\n".join(output)
-                env_content = "\\n".join(env_lines)
-                # Write .env files inside the container
-                cmds = [
-                    f"printf '{env_content}\\n' > /root/.openclaw/.env",
-                    f"printf '{env_content}\\n' > /root/.env",
-                    f"printf '{env_content}\\n' >> /etc/environment",
+                container = "serverinstaller-openclaw"
+                env_name = spec["env"]
+                profile_name = spec["profile"]
+                last_good_key = spec["last_good"]
+                masked = ""
+                if key:
+                    visible = 6 if provider == "openai" else 4
+                    masked = key[:visible] + ("*" * max(0, len(key) - visible))
+                log(f"=== {'Deleting' if action == 'delete' else 'Setting'} {provider.title()} token in OpenClaw container ===")
+                if masked:
+                    log(f"{provider.title()} API Key: {masked}")
+                script = r"""
+import json, os, pathlib, signal, subprocess, sys
+
+env_name = os.environ["SI_ENV_NAME"]
+provider = os.environ["SI_PROVIDER"]
+profile_name = os.environ["SI_PROFILE_NAME"]
+last_good_key = os.environ["SI_LAST_GOOD_KEY"]
+action = os.environ["SI_ACTION"]
+key = os.environ.get("SI_KEY", "")
+
+root_env_path = pathlib.Path("/root/.env")
+openclaw_env_path = pathlib.Path("/root/.openclaw/.env")
+auth_path = pathlib.Path("/root/.openclaw/agents/main/agent/auth-profiles.json")
+auth_path.parent.mkdir(parents=True, exist_ok=True)
+
+def parse_env(path):
+    data = {}
+    if path.exists():
+        for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if "=" not in line or line.lstrip().startswith("#"):
+                continue
+            k, v = line.split("=", 1)
+            data[k.strip()] = v
+    return data
+
+def write_env(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = [f"{k}={v}" for k, v in sorted(data.items())]
+    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+env_data = parse_env(root_env_path)
+env_data.update(parse_env(openclaw_env_path))
+if action == "delete":
+    env_data.pop(env_name, None)
+else:
+    env_data[env_name] = key
+write_env(root_env_path, env_data)
+write_env(openclaw_env_path, env_data)
+
+try:
+    auth = json.loads(auth_path.read_text(encoding="utf-8")) if auth_path.exists() else {}
+except Exception:
+    auth = {}
+
+profiles = auth.get("profiles")
+if not isinstance(profiles, dict):
+    profiles = {}
+last_good = auth.get("lastGood")
+if not isinstance(last_good, dict):
+    last_good = {}
+
+if action == "delete":
+    profiles.pop(profile_name, None)
+    last_good.pop(last_good_key, None)
+else:
+    profiles[profile_name] = {"type": "api_key", "provider": provider, "key": key}
+    last_good[last_good_key] = profile_name
+
+auth["version"] = 1
+auth["profiles"] = profiles
+auth["lastGood"] = last_good
+auth_path.write_text(json.dumps(auth, indent=2), encoding="utf-8")
+
+try:
+    pids = subprocess.check_output(["pgrep", "-f", "openclaw-gateway"], text=True).split()
+except Exception:
+    pids = []
+for pid in pids:
+    try:
+        os.kill(int(pid), signal.SIGUSR1)
+    except Exception:
+        pass
+
+print("Updated env file:", openclaw_env_path)
+print("Updated auth profiles:", auth_path)
+print("Gateway reload requested.")
+"""
+                cmd = [
+                    "docker", "exec",
+                    "-e", f"SI_ENV_NAME={env_name}",
+                    "-e", f"SI_PROVIDER={provider}",
+                    "-e", f"SI_PROFILE_NAME={profile_name}",
+                    "-e", f"SI_LAST_GOOD_KEY={last_good_key}",
+                    "-e", f"SI_ACTION={action}",
+                    "-e", f"SI_KEY={key}",
+                    container,
+                    "python3", "-c", script,
                 ]
-                # Write auth-profiles.json with versioned format
-                profiles = {}
-                if ollama_key:
-                    profiles['"ollama:local"'] = f'{{"type":"api_key","provider":"ollama","key":"{ollama_key}"}}'
-                if lmstudio_key:
-                    profiles['"lmstudio:local"'] = f'{{"type":"api_key","provider":"lmstudio","key":"{lmstudio_key}"}}'
-                if openai_key:
-                    profiles['"openai:default"'] = f'{{"type":"api_key","provider":"openai","key":"{openai_key}"}}'
-                if anthropic_key:
-                    profiles['"anthropic:default"'] = f'{{"type":"api_key","provider":"anthropic","key":"{anthropic_key}"}}'
-                profiles_json = ",".join(f"{k}:{v}" for k, v in profiles.items())
-                last_good_parts = []
-                if ollama_key:
-                    last_good_parts.append('"ollama":"ollama:local"')
-                if lmstudio_key:
-                    last_good_parts.append('"lmstudio":"lmstudio:local"')
-                if openai_key:
-                    last_good_parts.append('"openai":"openai:default"')
-                if anthropic_key:
-                    last_good_parts.append('"anthropic":"anthropic:default"')
-                last_good_json = ",".join(last_good_parts)
-                auth_json = f'{{"version":1,"profiles":{{{profiles_json}}},"lastGood":{{{last_good_json}}}}}'
-                cmds.append(f"mkdir -p /root/.openclaw/agents/main/agent")
-                cmds.append(f"echo '{auth_json}' > /root/.openclaw/agents/main/agent/auth-profiles.json")
-                # Ask the running gateway to reload using the container's normal startup flow.
-                cmds.append("kill -USR1 $(pgrep -f 'openclaw gateway' | head -1) 2>/dev/null || true")
-                full_cmd = " && ".join(cmds)
                 log("Executing in container...")
-                code = _run_install_cmd(["docker", "exec", container, "bash", "-c", full_cmd], log, timeout=30)
+                code = _run_install_cmd(cmd, log, timeout=30)
                 if code == 0:
-                    log("\nTokens saved! Gateway reloading with updated API keys.")
+                    log(f"\n{provider.title()} token {'deleted' if action == 'delete' else 'saved'}. Gateway reloading.")
                     log("Wait a few seconds, then refresh the OpenClaw dashboard.")
                 else:
-                    log("\nFailed to set tokens. Is the OpenClaw container running?")
+                    log(f"\nFailed to update {provider.title()} token.")
                 return code, "\n".join(output)
             if self.is_fetch():
-                job_id = start_live_job(title, _set_tokens)
+                job_id = start_live_job(title, _set_provider_token)
                 self.write_json({"job_id": job_id, "title": title})
             else:
-                code, output = _set_tokens(None)
+                code, output = _set_provider_token(None)
                 self.respond_run_result(title, code, output)
             return
         if self.path == "/run/openclaw_refresh_models":
