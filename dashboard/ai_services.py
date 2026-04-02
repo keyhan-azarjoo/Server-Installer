@@ -1131,6 +1131,29 @@ def _ensure_openclaw_os_config(live_cb=None):
             run_capture(cmd, timeout=10)
         except Exception:
             pass
+    # Retrieve and save the gateway token to state so the dashboard can use it
+    rc, token_out = run_capture([oc_bin, "config", "get", "gateway.auth.token"], timeout=10)
+    gateway_token = token_out.strip() if rc == 0 else ""
+    if gateway_token:
+        state["gateway_token"] = gateway_token
+        # Build dashboard URL with token
+        host = str(state.get("host") or "0.0.0.0").strip()
+        if host in ("0.0.0.0", "", "*"):
+            try:
+                import socket as _s
+                host = _s.gethostbyname(_s.gethostname())
+            except Exception:
+                host = "127.0.0.1"
+        https_port = str(state.get("https_port") or "18801").strip()
+        http_port = str(state.get("http_port") or "18800").strip()
+        if https_port:
+            state["dashboard_url"] = f"https://{host}:{https_port}/#token={gateway_token}"
+            state["https_url"] = f"https://{host}:{https_port}"
+        else:
+            state["dashboard_url"] = f"http://{host}:{http_port}/#token={gateway_token}"
+        state["http_url"] = f"http://{host}:{http_port}"
+        _write_json_file(OPENCLAW_STATE_FILE, state)
+        _log(f"[OpenClaw] Gateway token saved. Dashboard URL includes token.")
     _log("[OpenClaw] Full computer access configured (native commands, filesystem).")
 
 
