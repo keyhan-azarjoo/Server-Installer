@@ -2103,8 +2103,13 @@ if provider in CLOUD_PROVIDER_MODELS:
                 "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
                 "contextWindow": cw, "maxTokens": mt,
             }
+        CLOUD_PROVIDER_BASE_URLS = {
+            "openai": "https://api.openai.com/v1",
+            "anthropic": "https://api.anthropic.com/v1",
+        }
         model_list = CLOUD_PROVIDER_MODELS[provider]
         providers_cfg[provider] = {
+            "baseUrl": CLOUD_PROVIDER_BASE_URLS.get(provider, ""),
             "apiKey": key,
             "models": [_make_model_entry(m) for m in model_list],
         }
