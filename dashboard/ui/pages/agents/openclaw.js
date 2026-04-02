@@ -211,6 +211,7 @@
               <Stack direction="row" spacing={1} sx={{ mt: 2, pt: 1.5, borderTop: "1px solid #e8edf6" }} flexWrap="wrap" useFlexGap>
                 <Button variant="outlined" size="small" href="https://github.com/openclaw/openclaw" target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: "#dc262644", color: "#dc2626" }}>GitHub</Button>
                 <Button variant="outlined" size="small" href="https://openclaw.ai" target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: "#dc262644", color: "#dc2626" }}>Website</Button>
+                <Button variant="outlined" size="small" href="https://docs.openclaw.ai/install/render" target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: "#dc262644", color: "#dc2626" }}>Render Docs</Button>
                 <Button variant="outlined" size="small" href="https://mer.vin/2026/02/openclaw-remote-server-setup/" target="_blank" rel="noopener" sx={{ textTransform: "none", borderRadius: 2, fontWeight: 600, borderColor: "#dc262644", color: "#dc2626" }}>Setup Guide</Button>
               </Stack>
             </CardContent>
