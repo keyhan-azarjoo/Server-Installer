@@ -14,6 +14,7 @@ from utils import command_exists, run_capture
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 
 
+
 def _seconds_to_timestamp(value):
     value = max(0.0, float(value or 0.0))
     hours = int(value // 3600)
