@@ -1182,15 +1182,21 @@ def _ensure_openclaw_channel_deps(live_cb=None):
         return
     _log("[OpenClaw] Installing channel dependencies (grammy, discord.js, @slack/bolt)...")
     npm_bin = "npm"
-    for try_npm in [str(Path(oc_bin).parent / "npm"), "/usr/local/bin/npm", str(OPENCLAW_STATE_DIR / "node" / "bin" / "npm")]:
+    for try_npm in [str(Path(oc_bin).parent / "npm"), str(OPENCLAW_STATE_DIR / "node" / "bin" / "npm"), "/usr/local/bin/npm"]:
         if os.path.isfile(try_npm):
             npm_bin = try_npm
             break
+    npm_env = dict(os.environ)
+    # Ensure node is in PATH for npm to work
+    for extra in [str(Path(oc_bin).parent), str(OPENCLAW_STATE_DIR / "node" / "bin"), "/usr/local/bin"]:
+        if extra not in npm_env.get("PATH", ""):
+            npm_env["PATH"] = extra + os.pathsep + npm_env.get("PATH", "")
+    _log(f"[OpenClaw] Using npm: {npm_bin}, pkg_dir: {pkg_dir}")
     try:
         proc = subprocess.run(
             [npm_bin, "install", "grammy", "discord.js", "@slack/bolt"],
             cwd=pkg_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, timeout=120,
+            text=True, timeout=120, env=npm_env,
         )
         if proc.returncode == 0:
             _log("[OpenClaw] Channel dependencies installed.")
@@ -1266,9 +1272,7 @@ def _ensure_openclaw_os_config(form=None, live_cb=None):
                 settings = _json2.loads(settings_file.read_text(encoding="utf-8"))
             except Exception:
                 settings = {}
-        settings.setdefault("customInstructions", "")
-        # Allow all tools without requiring approval
-        settings["autoApprove"] = True
+        settings.setdefault("customInstructions", "You have full access to the entire filesystem. You can read, write, and execute files anywhere on this computer.")
         settings_file.write_text(_json2.dumps(settings, indent=2), encoding="utf-8")
     except Exception:
         pass
@@ -1283,10 +1287,8 @@ def _ensure_openclaw_os_config(form=None, live_cb=None):
                 oc_cfg = _json3.loads(oc_config_path.read_text(encoding="utf-8"))
             except Exception:
                 oc_cfg = {}
-        # Enable auto-approve for all tool types
         agents = oc_cfg.setdefault("agents", {})
         defaults = agents.setdefault("defaults", {})
-        defaults["autoApprove"] = True
         defaults.setdefault("compaction", {})["mode"] = "safeguard"
         oc_config_path.write_text(_json3.dumps(oc_cfg, indent=2), encoding="utf-8")
     except Exception:
