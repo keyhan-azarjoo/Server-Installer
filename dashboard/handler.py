@@ -60,6 +60,7 @@ from constants import (
     ROOT,
     SESSIONS,
     SERVER_INSTALLER_DATA,
+    OPENCLAW_STATE_FILE,
     _interactive_sessions,
     _interactive_sessions_lock,
 )
@@ -1981,7 +1982,11 @@ class Handler(BaseHTTPRequestHandler):
                 if action != "delete" and not key:
                     log("No token provided.")
                     return 1, "\n".join(output)
-                container = "serverinstaller-openclaw"
+                # Detect deploy mode (docker vs OS)
+                oc_state = _read_json_file(OPENCLAW_STATE_FILE)
+                deploy_mode = str(oc_state.get("deploy_mode") or "").strip().lower()
+                install_dir = str(oc_state.get("install_dir") or "").strip()
+                container = str(oc_state.get("service_name") or "serverinstaller-openclaw").strip() or "serverinstaller-openclaw"
                 env_name = spec["env"]
                 profile_name = spec["profile"]
                 last_good_key = spec["last_good"]
@@ -1989,7 +1994,7 @@ class Handler(BaseHTTPRequestHandler):
                 if key:
                     visible = 6 if provider == "openai" else 4
                     masked = key[:visible] + ("*" * max(0, len(key) - visible))
-                log(f"=== {'Deleting' if action == 'delete' else 'Setting'} {provider.title()} token in OpenClaw container ===")
+                log(f"=== {'Deleting' if action == 'delete' else 'Setting'} {provider.title()} token in OpenClaw ({deploy_mode or 'docker'}) ===")
                 if masked:
                     log(f"{provider.title()} API Key: {masked}")
                 script = r"""
@@ -2001,11 +2006,12 @@ profile_name = os.environ["SI_PROFILE_NAME"]
 last_good_key = os.environ["SI_LAST_GOOD_KEY"]
 action = os.environ["SI_ACTION"]
 key = os.environ.get("SI_KEY", "")
+home_dir = os.environ.get("SI_HOME_DIR", "/root")
 
-root_env_path = pathlib.Path("/root/.env")
-openclaw_env_path = pathlib.Path("/root/.openclaw/.env")
-auth_path = pathlib.Path("/root/.openclaw/agents/main/agent/auth-profiles.json")
-cfg_path = pathlib.Path("/root/.openclaw/openclaw.json")
+root_env_path = pathlib.Path(home_dir) / ".env"
+openclaw_env_path = pathlib.Path(home_dir) / ".openclaw" / ".env"
+auth_path = pathlib.Path(home_dir) / ".openclaw" / "agents" / "main" / "agent" / "auth-profiles.json"
+cfg_path = pathlib.Path(home_dir) / ".openclaw" / "openclaw.json"
 auth_path.parent.mkdir(parents=True, exist_ok=True)
 
 def parse_env(path):
@@ -2145,20 +2151,43 @@ print("Updated env file:", openclaw_env_path)
 print("Updated auth profiles:", auth_path)
 print("Gateway reload requested via SIGUSR1.")
 """
-                cmd = [
-                    "docker", "exec", "-i",
-                    "-e", f"SI_ENV_NAME={env_name}",
-                    "-e", f"SI_PROVIDER={provider}",
-                    "-e", f"SI_PROFILE_NAME={profile_name}",
-                    "-e", f"SI_LAST_GOOD_KEY={last_good_key}",
-                    "-e", f"SI_ACTION={action}",
-                    "-e", f"SI_KEY={key}",
-                    container,
-                    "python3", "-",
-                ]
-                log("Executing in container...")
+                script_env = {
+                    "SI_ENV_NAME": env_name,
+                    "SI_PROVIDER": provider,
+                    "SI_PROFILE_NAME": profile_name,
+                    "SI_LAST_GOOD_KEY": last_good_key,
+                    "SI_ACTION": action,
+                    "SI_KEY": key,
+                }
+                if deploy_mode == "docker":
+                    script_env["SI_HOME_DIR"] = "/root"
+                    cmd = ["docker", "exec", "-i"]
+                    for k, v in script_env.items():
+                        cmd += ["-e", f"{k}={v}"]
+                    cmd += [container, "python3", "-"]
+                    log("Executing in container...")
+                else:
+                    # OS-native install: find the openclaw home dir
+                    os_home = install_dir or ""
+                    if not os_home:
+                        # Fallback: try common paths
+                        for try_path in ["/home/openclaw", os.path.expanduser("~")]:
+                            if os.path.isdir(os.path.join(try_path, ".openclaw")):
+                                os_home = try_path
+                                break
+                    if not os_home:
+                        log("ERROR: Cannot determine OpenClaw install directory. Is OpenClaw installed?")
+                        return 1, "\n".join(output)
+                    script_env["SI_HOME_DIR"] = os_home
+                    run_env = dict(os.environ)
+                    run_env.update(script_env)
+                    cmd = ["python3", "-"]
+                    log(f"Executing on host (home: {os_home})...")
                 try:
-                    proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    if deploy_mode == "docker":
+                        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                    else:
+                        proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, env=run_env)
                     stdout, _ = proc.communicate(input=script, timeout=30)
                     for line in stdout.splitlines():
                         log(line)
