@@ -1147,11 +1147,10 @@ def run_openclaw_os_install(form=None, live_cb=None):
         if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
             cmd = ["sudo", "env"] + [f"{k}={env.get(k, '')}" for k in env_keys + ["SERVER_INSTALLER_DATA_DIR"] if env.get(k)] + ["bash", str(OPENCLAW_LINUX_INSTALLER)]
         code, out = run_process(cmd, env=env, live_cb=live_cb)
-        # After OS install, ensure deps, config and HTTPS proxy
-        if code == 0:
-            _ensure_openclaw_channel_deps(live_cb)
-            _ensure_openclaw_os_config(form, live_cb)
-            _ensure_openclaw_https_proxy(form, live_cb)
+        # Always ensure deps and config (even if bash script partially failed)
+        _ensure_openclaw_channel_deps(live_cb)
+        _ensure_openclaw_os_config(form, live_cb)
+        _ensure_openclaw_https_proxy(form, live_cb)
         return code, out
 
 
@@ -1255,15 +1254,43 @@ def _ensure_openclaw_os_config(form=None, live_cb=None):
         encoding="utf-8",
     )
 
-    # Also write agent settings directly to ensure they're in the right location
+    # Write agent settings with full filesystem/tool access
     agent_dir = Path(home_dir) / ".openclaw" / "agents" / "main" / "agent"
     agent_dir.mkdir(parents=True, exist_ok=True)
     settings_file = agent_dir / "settings.json"
-    if not settings_file.exists():
-        try:
-            settings_file.write_text('{"customInstructions": ""}', encoding="utf-8")
-        except Exception:
-            pass
+    try:
+        import json as _json2
+        settings = {}
+        if settings_file.exists():
+            try:
+                settings = _json2.loads(settings_file.read_text(encoding="utf-8"))
+            except Exception:
+                settings = {}
+        settings.setdefault("customInstructions", "")
+        # Allow all tools without requiring approval
+        settings["autoApprove"] = True
+        settings_file.write_text(_json2.dumps(settings, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+    # Update openclaw.json to allow tools and full filesystem access
+    oc_config_path = Path(home_dir) / ".openclaw" / "openclaw.json"
+    try:
+        import json as _json3
+        oc_cfg = {}
+        if oc_config_path.exists():
+            try:
+                oc_cfg = _json3.loads(oc_config_path.read_text(encoding="utf-8"))
+            except Exception:
+                oc_cfg = {}
+        # Enable auto-approve for all tool types
+        agents = oc_cfg.setdefault("agents", {})
+        defaults = agents.setdefault("defaults", {})
+        defaults["autoApprove"] = True
+        defaults.setdefault("compaction", {})["mode"] = "safeguard"
+        oc_config_path.write_text(_json3.dumps(oc_cfg, indent=2), encoding="utf-8")
+    except Exception:
+        pass
 
     # Retrieve gateway token directly from openclaw.json (CLI redacts it)
     gateway_token = ""
