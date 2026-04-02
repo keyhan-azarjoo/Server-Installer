@@ -1873,6 +1873,7 @@ http {{
         "  providers_cfg['ollama'] = {",
         "    'baseUrl': ollama_base,",
         "    'apiKey': os.environ.get('OLLAMA_API_KEY') or 'ollama-local',",
+        "    'api': 'ollama',",
         "    'models': [_make_model_entry(mid) for mid in ollama_models],",
         "  }",
         "  for mid in ollama_models:",
