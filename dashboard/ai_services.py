@@ -1098,6 +1098,51 @@ def run_openclaw_os_install(form=None, live_cb=None):
             if ep not in current_path:
                 current_path = ep + os.pathsep + current_path
         env["PATH"] = current_path
+        # Pre-write channel tokens to ~/.openclaw/.env before bash runs
+        # (the cached bash script may have a bash 3.x incompatible declare -A)
+        home_dir = os.path.expanduser("~")
+        oc_env_dir = Path(home_dir) / ".openclaw"
+        oc_env_dir.mkdir(parents=True, exist_ok=True)
+        oc_env_file = oc_env_dir / ".env"
+        env_data = {}
+        if oc_env_file.exists():
+            for line in oc_env_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                if "=" in line and not line.lstrip().startswith("#"):
+                    k, v = line.split("=", 1)
+                    env_data[k.strip()] = v.strip()
+        token_map = {
+            "OPENCLAW_TELEGRAM_TOKEN": "TELEGRAM_BOT_TOKEN",
+            "OPENCLAW_DISCORD_TOKEN": "DISCORD_TOKEN",
+            "OPENCLAW_SLACK_TOKEN": "SLACK_BOT_TOKEN",
+            "OPENCLAW_WHATSAPP_PHONE": "WHATSAPP_PHONE",
+            "OPENCLAW_OPENAI_KEY": "OPENAI_API_KEY",
+            "OPENCLAW_ANTHROPIC_KEY": "ANTHROPIC_API_KEY",
+        }
+        for form_key, env_key in token_map.items():
+            val = (form.get(form_key, [""])[0] or "").strip()
+            if val:
+                env_data[env_key] = val
+        env_data.setdefault("OLLAMA_API_KEY", "ollama-local")
+        oc_env_file.write_text(
+            "\n".join(f"{k}={v}" for k, v in sorted(env_data.items())) + "\n",
+            encoding="utf-8",
+        )
+        # Patch the bash script to remove declare -A if present (bash 3.x compat)
+        installer_path = str(OPENCLAW_LINUX_INSTALLER)
+        try:
+            script_text = Path(installer_path).read_text(encoding="utf-8")
+            if "declare -A" in script_text:
+                # Remove everything from "declare -A" line to the next step marker
+                import re
+                script_text = re.sub(
+                    r'declare -A ENV_DATA.*?(?=# ── Step 3d)',
+                    '# (env file written by ai_services.py)\n',
+                    script_text,
+                    flags=re.DOTALL,
+                )
+                Path(installer_path).write_text(script_text, encoding="utf-8")
+        except Exception:
+            pass
         cmd = ["bash", str(OPENCLAW_LINUX_INSTALLER)]
         if hasattr(os, "geteuid") and os.geteuid() != 0 and command_exists("sudo"):
             cmd = ["sudo", "env"] + [f"{k}={env.get(k, '')}" for k in env_keys + ["SERVER_INSTALLER_DATA_DIR"] if env.get(k)] + ["bash", str(OPENCLAW_LINUX_INSTALLER)]
