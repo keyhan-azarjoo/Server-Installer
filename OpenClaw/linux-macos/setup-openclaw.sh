@@ -476,6 +476,8 @@ DISPLAY_HOST="$HOST_IP"
 HTTP_URL="http://${DISPLAY_HOST}:${HTTP_PORT}"
 HTTPS_URL=""
 [ -n "$HTTPS_PORT" ] && HTTPS_URL="https://${DISPLAY_HOST}:${HTTPS_PORT}"
+GATEWAY_TOKEN=$("$OPENCLAW_BIN" config get gateway.auth.token 2>/dev/null || echo "")
+GATEWAY_TOKEN=$(echo "$GATEWAY_TOKEN" | tr -d '[:space:]')
 
 cat > "$STATE_FILE" <<STEOF
 {
@@ -486,6 +488,7 @@ cat > "$STATE_FILE" <<STEOF
     "deploy_mode": "os", "running": true,
     "openclaw_bin": "${OPENCLAW_BIN}",
     "gateway_port": "${HTTP_PORT}",
+    "gateway_token": "${GATEWAY_TOKEN}",
     "dashboard_url": "${DASHBOARD_URL}",
     "auth_enabled": $([ -n "$USERNAME" ] && echo "true" || echo "false"),
     "auth_username": "${USERNAME}"
