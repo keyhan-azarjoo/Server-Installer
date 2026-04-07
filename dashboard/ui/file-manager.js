@@ -132,11 +132,12 @@
   }
 
   // ─── Terminal tab view ──────────────────────────────────────────────────────
-  function TerminalView({ cwd, isActive }) {
+  function TerminalView({ cwd, isActive, initialInput }) {
     const containerRef = React.useRef(null);
     const termRef      = React.useRef(null);
     const wsRef        = React.useRef(null);
     const fitRef       = React.useRef(null);
+    const initialSentRef = React.useRef(false);
 
     React.useEffect(() => {
       const el = containerRef.current;
@@ -176,7 +177,15 @@
       ws.binaryType = "arraybuffer";
       wsRef.current  = ws;
 
-      ws.onopen    = () => { if (fitAddon) try { fitAddon.fit(); } catch (_) {} };
+      ws.onopen    = () => {
+        if (fitAddon) try { fitAddon.fit(); } catch (_) {}
+        if (!initialSentRef.current && initialInput) {
+          initialSentRef.current = true;
+          setTimeout(() => {
+            if (ws.readyState === WebSocket.OPEN) ws.send(initialInput);
+          }, 80);
+        }
+      };
       ws.onmessage = (e) => {
         if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data));
         else term.write(e.data);
@@ -437,6 +446,7 @@
     cfg,
     fileManagerPath, setFileManagerPath,
     fileManagerData, fileManagerLoading, fileManagerError,
+    fileManagerTerminalRequest, setFileManagerTerminalRequest,
     fileEditorPath, fileEditorContent, fileEditorMeta, fileEditorDirty,
     fileOpBusy,
     loadFileManager, openFileInEditor, saveFileEditor,
@@ -527,17 +537,35 @@
     }, []);
 
     // ── Tab helpers ────────────────────────────────────────────────────────
-    const openTerminalTab = React.useCallback(() => {
+    const openTerminalTab = React.useCallback((options) => {
+      const opts = options && typeof options === "object" ? options : {};
       const id = Date.now();
       const termPath = `__term__:${id}`;
+      const termCwd = String(opts.cwd || fileManagerPath || "").trim();
+      const termTitle = String(opts.title || "").trim();
+      const termInitialInput = String(opts.initialInput || "").replace(/\r\n/g, "\n");
       setTermCounter((c) => {
         const n = c + 1;
-        setEditorTabs((prev) => [...prev, { path: termPath, kind: "terminal", cwd: fileManagerPath || "", title: `Terminal ${n}` }]);
+        setEditorTabs((prev) => [...prev, {
+          path: termPath,
+          kind: "terminal",
+          cwd: termCwd,
+          title: termTitle || `Terminal ${n}`,
+          initialInput: termInitialInput,
+        }]);
         return n;
       });
       setActiveTabPath(termPath);
       setMinimizedTabs((prev) => prev.filter((p) => p !== termPath));
     }, [fileManagerPath]);
+
+    React.useEffect(() => {
+      if (!fileManagerTerminalRequest || !fileManagerTerminalRequest.id) return;
+      openTerminalTab(fileManagerTerminalRequest);
+      if (typeof setFileManagerTerminalRequest === "function") {
+        setFileManagerTerminalRequest(null);
+      }
+    }, [fileManagerTerminalRequest, openTerminalTab, setFileManagerTerminalRequest]);
 
     const openEditorTab = React.useCallback(async (path) => {
       // If already open, just activate
@@ -1117,7 +1145,7 @@
             const isTermActive = t.path === activeTabPath && !minimizedTabs.includes(t.path);
             return (
               <Box key={t.path} sx={{ display: isTermActive ? "flex" : "none", flexGrow: 1, overflow: "hidden", flexDirection: "column" }}>
-                <TerminalView cwd={t.cwd} isActive={isTermActive} />
+                <TerminalView cwd={t.cwd} isActive={isTermActive} initialInput={t.initialInput} />
               </Box>
             );
           })}

@@ -228,13 +228,21 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
 else
     # Linux
     if ! command -v node &>/dev/null || [ "$(node --version | sed 's/v//' | cut -d. -f1)" -lt 22 ] 2>/dev/null; then
-        curl -fsSL https://deb.nodesource.com/setup_22.x | bash - 2>&1 || true
         if command -v apt-get &>/dev/null; then
+            curl -fsSL https://deb.nodesource.com/setup_22.x | bash - 2>&1 || true
             apt-get install -y nodejs build-essential python3 2>&1
         elif command -v dnf &>/dev/null; then
+            dnf module reset -y nodejs 2>&1 || true
+            dnf module enable -y nodejs:22 2>&1 || true
             dnf install -y nodejs python3 gcc-c++ make 2>&1
         elif command -v yum &>/dev/null; then
+            curl -fsSL https://rpm.nodesource.com/setup_22.x | bash - 2>&1 || true
             yum install -y nodejs python3 gcc-c++ make 2>&1
+        elif command -v zypper &>/dev/null; then
+            zypper --non-interactive install nodejs22 python3 gcc-c++ make 2>&1 || \
+            zypper --non-interactive install nodejs python3 gcc-c++ make 2>&1
+        elif command -v pacman &>/dev/null; then
+            pacman -Sy --noconfirm nodejs npm python base-devel 2>&1
         fi
     fi
 fi

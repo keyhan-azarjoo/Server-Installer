@@ -8,6 +8,7 @@
       cfg,
       fileManagerPath, setFileManagerPath,
       fileManagerData, fileManagerLoading, fileManagerError,
+      fileManagerTerminalRequest, setFileManagerTerminalRequest,
       fileEditorPath, fileEditorContent, fileEditorMeta, fileEditorDirty,
       fileOpBusy,
       loadFileManager, openFileInEditor, saveFileEditor,
@@ -26,6 +27,8 @@
         fileManagerData={fileManagerData}
         fileManagerLoading={fileManagerLoading}
         fileManagerError={fileManagerError}
+        fileManagerTerminalRequest={fileManagerTerminalRequest}
+        setFileManagerTerminalRequest={setFileManagerTerminalRequest}
         fileEditorPath={fileEditorPath}
         fileEditorContent={fileEditorContent}
         fileEditorMeta={fileEditorMeta}

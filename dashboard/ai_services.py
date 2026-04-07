@@ -525,6 +525,42 @@ def _openclaw_is_blocked_primary_model(model_id):
     return mid in ("gpt-4", "openai/gpt-4", "openrouter/openai/gpt-4")
 
 
+def _openclaw_is_reasoning_model(model_id):
+    mid = str(model_id or "").strip().lower()
+    if "/" in mid:
+        mid = mid.split("/", 1)[1]
+    return mid.startswith(("o1", "o3", "o4"))
+
+
+def _openclaw_preferred_primary_model(ordered_models, preferred_provider=""):
+    ordered_models = [str(item or "").strip() for item in (ordered_models or []) if str(item or "").strip()]
+    preferred_provider = str(preferred_provider or "").strip().lower()
+    preferred_by_provider = {
+        "openai": ("openai/gpt-4.1-mini", "openai/gpt-4o-mini", "openai/gpt-4.1", "openai/gpt-4o"),
+        "anthropic": ("anthropic/claude-sonnet-4-5", "anthropic/claude-haiku-3-5"),
+    }
+    preferred_exact = list(preferred_by_provider.get(preferred_provider, ()))
+    if preferred_provider == "openai":
+        preferred_exact.extend(item for item in ordered_models if item.startswith("openai/") and not _openclaw_is_reasoning_model(item))
+    elif preferred_provider == "anthropic":
+        preferred_exact.extend(item for item in ordered_models if item.startswith("anthropic/"))
+    else:
+        for provider in ("ollama", "lmstudio", "openai", "anthropic"):
+            preferred_exact.extend(list(preferred_by_provider.get(provider, ())))
+            if provider == "openai":
+                preferred_exact.extend(item for item in ordered_models if item.startswith("openai/") and not _openclaw_is_reasoning_model(item))
+            else:
+                preferred_exact.extend(item for item in ordered_models if item.startswith(f"{provider}/"))
+    seen = set()
+    for item in preferred_exact:
+        if item in seen:
+            continue
+        seen.add(item)
+        if item in ordered_models:
+            return item
+    return ordered_models[0] if ordered_models else ""
+
+
 def _discover_openclaw_provider_models(form=None, home_dir=None):
     form = form or {}
     home_dir = str(home_dir or os.path.expanduser("~"))
@@ -727,15 +763,18 @@ def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
     explicit_primary = f"{preferred_provider}/{preferred_model}" if preferred_provider and preferred_model else ""
     primary = explicit_primary if explicit_primary in ordered_models else ""
     if not primary:
-        primary = current_primary if current_primary in ordered_models else ""
+        if current_primary in ordered_models:
+            if current_primary.startswith("openai/") and _openclaw_is_reasoning_model(current_primary):
+                primary = _openclaw_preferred_primary_model(ordered_models, "openai")
+            else:
+                primary = current_primary
     if not primary and current_settings_model in ordered_models:
-        primary = current_settings_model
+        if current_settings_model.startswith("openai/") and _openclaw_is_reasoning_model(current_settings_model):
+            primary = _openclaw_preferred_primary_model(ordered_models, "openai")
+        else:
+            primary = current_settings_model
     if not primary:
-        for preferred_prefix in ("ollama/", "lmstudio/", "openai/", "anthropic/"):
-            match = next((item for item in ordered_models if item.startswith(preferred_prefix)), "")
-            if match:
-                primary = match
-                break
+        primary = _openclaw_preferred_primary_model(ordered_models, preferred_provider)
     if primary:
         provider, _, model = primary.partition("/")
         model_cfg["primary"] = primary

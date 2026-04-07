@@ -108,6 +108,7 @@ function App() {
   const [fileManagerData, setFileManagerData] = React.useState(null);
   const [fileManagerLoading, setFileManagerLoading] = React.useState(false);
   const [fileManagerError, setFileManagerError] = React.useState("");
+  const [fileManagerTerminalRequest, setFileManagerTerminalRequest] = React.useState(null);
   const [fileEditorPath, setFileEditorPath] = React.useState("");
   const [fileEditorContent, setFileEditorContent] = React.useState("");
   const [fileEditorMeta, setFileEditorMeta] = React.useState(null);
@@ -1649,6 +1650,24 @@ function App() {
     }
   }, [fileManagerPath]);
 
+  const launchFileManagerTerminal = React.useCallback((payload) => {
+    const req = payload && typeof payload === "object" ? payload : {};
+    const cwd = String(req.cwd || fileManagerPath || "").trim();
+    const initialInput = String(req.initialInput || "").replace(/\r\n/g, "\n");
+    const title = String(req.title || "Terminal").trim() || "Terminal";
+    if (cwd) {
+      setFileManagerPath(cwd);
+      setFileManagerData(null);
+    }
+    setPage("files");
+    setFileManagerTerminalRequest({
+      id: Date.now(),
+      cwd,
+      title,
+      initialInput,
+    });
+  }, [fileManagerPath, setPage]);
+
   const openFileInEditor = React.useCallback(async (targetPath) => {
     setFileOpBusy(true);
     try {
@@ -1907,6 +1926,7 @@ function App() {
     fileManagerPath, setFileManagerPath,
     fileManagerData, setFileManagerData,
     fileManagerLoading, fileManagerError,
+    fileManagerTerminalRequest, setFileManagerTerminalRequest,
     fileEditorPath, fileEditorContent, fileEditorMeta, fileEditorDirty,
     fileOpBusy,
     netRate,
@@ -1952,6 +1972,7 @@ function App() {
     renderPythonApiRunsCard,
     launchCompassProtocol, copyText, tryOpenCompass, promptOpenMongoWebsite,
     loadFileManager, openFileInEditor, saveFileEditor,
+    launchFileManagerTerminal,
     createFolderInCurrentPath, createFileInCurrentPath,
     renameFileManagerPath, deleteFileManagerPath, uploadIntoCurrentPath,
     setFileEditorContent, setFileEditorDirty,

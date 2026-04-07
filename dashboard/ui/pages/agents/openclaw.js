@@ -7,7 +7,7 @@
       code: 'adduser --disabled-password --gecos "" openclaw\nusermod -aG sudo openclaw\necho "openclaw ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/openclaw\nchmod 440 /etc/sudoers.d/openclaw\npasswd openclaw',
     },
     {
-      title: "2. Install Required Packages",
+      title: "2. Install Required Packages (Debian / Ubuntu)",
       code: "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -\napt-get install -y nodejs build-essential python3",
     },
     {
@@ -39,6 +39,70 @@
       code: "ssh -N -L 18789:127.0.0.1:18789 openclaw@YOUR_SERVER_IP",
     },
   ];
+  var OPENCLAW_MANUAL_OPTIONS = [
+    {
+      title: "Node.js 22 Options By OS / Distro",
+      intro: "Use one of these instead of the Debian-only NodeSource command when your server is not Debian-based. OpenClaw needs Node.js 22+ and npm.",
+      options: [
+        {
+          label: "Debian / Ubuntu",
+          code: "curl -fsSL https://deb.nodesource.com/setup_22.x | bash -\napt-get install -y nodejs build-essential python3",
+        },
+        {
+          label: "RHEL / Rocky / AlmaLinux / Fedora / DGX OS",
+          code: "dnf module reset -y nodejs || true\ndnf module enable -y nodejs:22 || true\ndnf install -y nodejs python3 gcc-c++ make",
+        },
+        {
+          label: "CentOS 7 / older yum systems",
+          code: "curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -\nyum install -y nodejs python3 gcc-c++ make",
+        },
+        {
+          label: "openSUSE / SLES",
+          code: "zypper --non-interactive install nodejs22 python3 gcc-c++ make || \\\nzypper --non-interactive install nodejs python3 gcc-c++ make",
+        },
+        {
+          label: "Arch / Manjaro",
+          code: "pacman -Sy --noconfirm nodejs npm python base-devel",
+        },
+        {
+          label: "macOS (Homebrew)",
+          code: "brew install node@22 || brew upgrade node@22\nexport PATH=\"$(brew --prefix node@22)/bin:$PATH\"\nnode --version\nnpm --version",
+        },
+        {
+          label: "macOS (direct tarball, no Homebrew)",
+          code: "ARCH=\"$(uname -m)\"\nVER=\"22.19.0\"\nif [ \"$ARCH\" = \"arm64\" ]; then PKG=\"node-v${VER}-darwin-arm64.tar.gz\"; else PKG=\"node-v${VER}-darwin-x64.tar.gz\"; fi\ncurl -fsSLO \"https://nodejs.org/dist/v${VER}/${PKG}\"\nsudo tar -xzf \"$PKG\" -C /usr/local --strip-components=1\nnode --version\nnpm --version",
+        },
+        {
+          label: "Windows",
+          code: "winget install OpenJS.NodeJS.LTS\nnode --version\nnpm --version\nnpm install -g openclaw@latest",
+        },
+      ],
+    },
+    {
+      title: "NVIDIA DGX / GPU Host Notes",
+      intro: "DGX machines usually run Ubuntu or RHEL-like OSes, so use the matching block above. The OpenClaw gateway itself does not need CUDA, but local model serving does.",
+      options: [
+        {
+          label: "DGX with Ollama on the same host",
+          code: "curl -fsSL https://ollama.com/install.sh | sh\nsystemctl enable --now ollama\nollama serve\nollama pull llama3.2:3b",
+        },
+        {
+          label: "DGX with remote model server",
+          code: "export OPENCLAW_OLLAMA_URL=\"http://YOUR_DGX_IP:11434\"\n# or LM Studio / vLLM / OpenAI-compatible endpoint\nexport OPENCLAW_LMSTUDIO_URL=\"http://YOUR_SERVER:1234/v1\"",
+        },
+      ],
+    },
+    {
+      title: "Windows Manual Service Option",
+      intro: "If you do not want Docker on Windows, install OpenClaw globally and run the gateway with Task Scheduler or NSSM.",
+      options: [
+        {
+          label: "Basic Windows flow",
+          code: "winget install OpenJS.NodeJS.LTS\nnpm install -g openclaw@latest\nopenclaw gateway --bind lan --port 18789 --verbose",
+        },
+      ],
+    },
+  ];
 
   function createOpenClawCodeBlock(Paper, Button, copyText) {
     return function OpenClawCodeBlock(props) {
@@ -61,7 +125,7 @@
     var isServiceRunningStatus = p.isServiceRunningStatus, onServiceAction = p.onServiceAction;
     var renderServiceUrls = p.renderServiceUrls, renderServicePorts = p.renderServicePorts;
     var renderServiceStatus = p.renderServiceStatus, renderFolderIcon = p.renderFolderIcon;
-    var setPage = p.setPage, copyText = p.copyText;
+    var setPage = p.setPage, copyText = p.copyText, launchFileManagerTerminal = p.launchFileManagerTerminal;
 
     var ocInfo = p.openclawService || {};
     var ollamaInfo = p.ollamaService || {};
@@ -87,6 +151,20 @@
       var gatewayUrlParam = gatewayWsUrl ? ("?gatewayUrl=" + encodeURIComponent(gatewayWsUrl)) : "";
       tokenizedBestUrl = bestUrl + gatewayUrlParam + "#token=" + encodeURIComponent(gatewayToken);
     }
+    var deployMode = String(ocInfo.deploy_mode || "").trim().toLowerCase();
+    var installDir = String(ocInfo.install_dir || "").trim();
+    var interactiveSetupCommand = deployMode === "docker"
+      ? "clear\ndocker exec -it " + (String(ocInfo.service_name || "serverinstaller-openclaw").trim() || "serverinstaller-openclaw") + " openclaw setup\n"
+      : "clear\nopenclaw setup\n";
+    var interactiveSetupTitle = deployMode === "docker" ? "OpenClaw Setup (Docker)" : "OpenClaw Setup";
+    var launchInteractiveSetup = function() {
+      if (!launchFileManagerTerminal) return;
+      launchFileManagerTerminal({
+        cwd: installDir || "",
+        title: interactiveSetupTitle,
+        initialInput: interactiveSetupCommand,
+      });
+    };
 
     var installOsLabel = p.getInstallOsLabel ? p.getInstallOsLabel(cfg) : (cfg.os_label || "Linux");
     var commonFields = [
@@ -455,16 +533,16 @@
                   </Grid>
                   {saveMsg && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2 }}>{saveMsg}</Typography>}
                   <Alert severity="info" sx={{ mt: 2, borderRadius: 2 }}>
-                    <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>If models don't appear, run this in your server terminal (SSH):</Typography>
+                    <Typography variant="body2" fontWeight={700} sx={{ mb: 0.5 }}>If models or channels do not appear yet, rerun the full setup flow in a terminal:</Typography>
                     <Paper elevation={0} sx={{ p: 1, bgcolor: "#0f172a", borderRadius: 1, mt: 0.5, position: "relative" }}>
-                      <Button size="small" onClick={function() { if (copyText) copyText("docker exec -it serverinstaller-openclaw openclaw configure", "Command"); }}
+                      <Button size="small" onClick={function() { if (copyText) copyText("docker exec -it serverinstaller-openclaw openclaw setup", "Command"); }}
                         sx={{ position: "absolute", top: 4, right: 4, minWidth: 0, px: 1, py: 0.2, color: "#94a3b8", bgcolor: "#1e293b", textTransform: "none", fontSize: 10 }}>Copy</Button>
                       <Typography variant="body2" sx={{ color: "#e2e8f0", fontFamily: "monospace", fontSize: 12 }}>
-                        docker exec -it serverinstaller-openclaw openclaw configure
+                        docker exec -it serverinstaller-openclaw openclaw setup
                       </Typography>
                     </Paper>
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-                      This opens an interactive wizard where you can register Ollama, OpenAI, or Anthropic as providers.
+                      This opens the full interactive wizard so the user can choose provider, model, channels, skills, DM policy, and other setup options from a real terminal.
                     </Typography>
                   </Alert>
                 </CardContent>
@@ -473,136 +551,38 @@
           );
         })}
 
-        {/* Configure Providers (Interactive Terminal) */}
-        {installed && React.createElement(function ConfigureTerminal() {
-          var _sessionId = React.useState("");
-          var sessionId = _sessionId[0], setSessionId = _sessionId[1];
-          var _output = React.useState("");
-          var output = _output[0], setOutput = _output[1];
-          var _inputVal = React.useState("");
-          var inputVal = _inputVal[0], setInputVal = _inputVal[1];
-          var _running = React.useState(false);
-          var running = _running[0], setRunning = _running[1];
-          var _done = React.useState(false);
-          var done = _done[0], setDone = _done[1];
-          var outputRef = React.useRef(null);
-
-          var pollOutput = function(sid) {
-            fetch("/run/openclaw_configure_output?session_id=" + sid)
-              .then(function(r) { return r.json(); })
-              .then(function(j) {
-                if (j.output) {
-                  setOutput(function(prev) { return prev + j.output; });
-                }
-                if (j.done) {
-                  setDone(true);
-                  setRunning(false);
-                } else {
-                  setTimeout(function() { pollOutput(sid); }, 500);
-                }
-              })
-              .catch(function() {
-                setDone(true);
-                setRunning(false);
-              });
-          };
-
-          React.useEffect(function() {
-            if (outputRef.current) {
-              outputRef.current.scrollTop = outputRef.current.scrollHeight;
-            }
-          }, [output]);
-
-          var handleStart = function() {
-            setOutput("");
-            setDone(false);
-            setRunning(true);
-            setInputVal("");
-            fetch("/run/openclaw_configure_start", { method: "POST", headers: { "X-Requested-With": "fetch" } })
-              .then(function(r) { return r.json(); })
-              .then(function(j) {
-                if (j.ok && j.session_id) {
-                  setSessionId(j.session_id);
-                  pollOutput(j.session_id);
-                } else {
-                  setOutput("Error: " + (j.error || "Failed to start"));
-                  setRunning(false);
-                }
-              })
-              .catch(function(e) {
-                setOutput("Error: " + e);
-                setRunning(false);
-              });
-          };
-
-          var handleSend = function() {
-            if (!sessionId || !running) return;
-            var fd = new FormData();
-            fd.append("session_id", sessionId);
-            fd.append("input", inputVal);
-            setInputVal("");
-            fetch("/run/openclaw_configure_input", { method: "POST", headers: { "X-Requested-With": "fetch" }, body: fd })
-              .then(function(r) { return r.json(); })
-              .then(function() {})
-              .catch(function() {});
-          };
-
-          var handleKeyDown = function(e) {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              handleSend();
-            }
-          };
-
-          return (
-            <Grid item xs={12}>
-              <Card sx={{ borderRadius: 3, border: "1.5px solid #7c3aed33" }}>
-                <CardContent>
-                  <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2 }}>
-                    <Box sx={{ width: 5, height: 32, borderRadius: 3, bgcolor: "#7c3aed" }} />
-                    <Typography variant="h6" fontWeight={800} sx={{ color: "#7c3aed" }}>Configure Providers</Typography>
-                  </Stack>
-                  <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-                    Run the interactive OpenClaw configure wizard directly from your browser. Register Ollama, OpenAI, Anthropic, or other providers.
+        {/* Interactive setup in File Manager terminal */}
+        {installed && (
+          <Grid item xs={12}>
+            <Card sx={{ borderRadius: 3, border: "1.5px solid #7c3aed33" }}>
+              <CardContent>
+                <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 2 }}>
+                  <Box sx={{ width: 5, height: 32, borderRadius: 3, bgcolor: "#7c3aed" }} />
+                  <Typography variant="h6" fontWeight={800} sx={{ color: "#7c3aed" }}>Interactive Setup In File Manager Terminal</Typography>
+                </Stack>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5, lineHeight: 1.8 }}>
+                  Use the real PTY terminal from File Manager instead of the browser log terminal. This launches the full interactive <code>openclaw setup</code> flow so the user can select models, channels, skills, and all other OpenClaw options exactly like a normal terminal session.
+                </Typography>
+                <Paper elevation={0} sx={{ p: 1.5, bgcolor: "#f8fafc", borderRadius: 2, border: "1px solid #e2e8f0", mb: 1.5 }}>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>Command that will run</Typography>
+                  <Typography variant="body2" sx={{ fontFamily: "monospace", fontSize: 12, wordBreak: "break-all" }}>
+                    {interactiveSetupCommand.trim()}
                   </Typography>
-                  <Button variant="contained" disabled={running} onClick={handleStart}
-                    sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, fontWeight: 700, mb: 2 }}>
-                    {running ? "Running..." : (done ? "Restart Configure" : "Start Configure")}
+                </Paper>
+                <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                  <Button variant="contained" onClick={launchInteractiveSetup}
+                    sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, fontWeight: 700 }}>
+                    Open In File Manager Terminal
                   </Button>
-                  {(output || running) && (
-                    <Box>
-                      <Paper ref={outputRef} elevation={0} sx={{
-                        bgcolor: "#0f172a", color: "#e2e8f0", fontFamily: "'Fira Code', monospace", fontSize: 12,
-                        p: 2, borderRadius: 2, minHeight: 180, maxHeight: 400, overflowY: "auto",
-                        whiteSpace: "pre-wrap", wordBreak: "break-all", lineHeight: 1.7, mb: 1.5
-                      }}>
-                        {output}{running && !done && <span style={{ opacity: 0.5 }}>_</span>}
-                      </Paper>
-                      {running && !done && (
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <TextField size="small" fullWidth value={inputVal}
-                            onChange={function(e) { setInputVal(e.target.value); }}
-                            onKeyDown={handleKeyDown}
-                            placeholder="Type your response and press Enter..."
-                            sx={{ "& .MuiInputBase-root": { fontFamily: "monospace", fontSize: 13 } }} />
-                          <Button variant="contained" onClick={handleSend}
-                            sx={{ textTransform: "none", bgcolor: "#7c3aed", "&:hover": { bgcolor: "#6d28d9" }, fontWeight: 700, minWidth: 80 }}>
-                            Send
-                          </Button>
-                        </Stack>
-                      )}
-                      {done && (
-                        <Alert severity="success" sx={{ borderRadius: 2 }}>
-                          <Typography variant="body2">Configure wizard has finished.</Typography>
-                        </Alert>
-                      )}
-                    </Box>
-                  )}
-                </CardContent>
-              </Card>
-            </Grid>
-          );
-        })}
+                  <Button variant="outlined" onClick={function() { if (copyText) copyText(interactiveSetupCommand.trim(), "Command"); }}
+                    sx={{ textTransform: "none", fontWeight: 700 }}>
+                    Copy Command
+                  </Button>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Grid>
+        )}
 
         {/* Services */}
         <Grid item xs={12} md={6}>
@@ -781,7 +761,7 @@
                 <Button variant="text" size="small" href="https://mer.vin/2026/02/openclaw-remote-server-setup/" target="_blank" rel="noopener" sx={{ textTransform: "none", color: "#dc2626" }}>Source Article</Button>
               </Stack>
               <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.8 }}>
-                Follow these commands in order on the target Linux server. This manual path installs Node.js, OpenClaw, the gateway service, Ollama, and the dashboard access flow step by step.
+                Start with the Linux remote-server flow below if you are on Debian or Ubuntu. If you are on macOS, Windows, Fedora/RHEL, Arch, openSUSE, or NVIDIA DGX hardware, use the OS-specific Node.js and runtime options in the platform section first, then continue with the OpenClaw install and provider setup that matches your environment.
               </Typography>
             </CardContent>
           </Card>
@@ -790,6 +770,31 @@
         <Grid item xs={12}>
           <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
             <CardContent>
+              <Typography variant="h6" fontWeight={800} sx={{ mb: 1.5, color: "#1e293b" }}>Platform Options</Typography>
+              {OPENCLAW_MANUAL_OPTIONS.map(function(section, sectionIndex) {
+                return (
+                  <Box key={section.title} sx={{ mb: sectionIndex === OPENCLAW_MANUAL_OPTIONS.length - 1 ? 0 : 2.5 }}>
+                    <Typography variant="subtitle1" fontWeight={800} sx={{ mb: 0.5, color: "#1e293b" }}>{section.title}</Typography>
+                    {section.intro && <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25, lineHeight: 1.7 }}>{section.intro}</Typography>}
+                    {section.options.map(function(option, optionIndex) {
+                      return (
+                        <Box key={section.title + "-" + option.label} sx={{ mb: optionIndex === section.options.length - 1 ? 0 : 1.5 }}>
+                          <Typography variant="subtitle2" fontWeight={700} sx={{ mb: 0.5, color: "#475569" }}>{option.label}</Typography>
+                          {React.createElement(CodeBlock, { code: option.code })}
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                );
+              })}
+            </CardContent>
+          </Card>
+        </Grid>
+
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 3, border: "1px solid #dbe5f6" }}>
+            <CardContent>
+              <Typography variant="h6" fontWeight={800} sx={{ mb: 1.5, color: "#1e293b" }}>Linux Remote-Server Flow</Typography>
               {OPENCLAW_MANUAL_STEPS.map(function(step, index) {
                 return (
                   <Box key={step.title} sx={{ mb: index === OPENCLAW_MANUAL_STEPS.length - 1 ? 0 : 2 }}>
