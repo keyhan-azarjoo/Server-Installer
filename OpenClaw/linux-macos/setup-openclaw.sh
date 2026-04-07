@@ -39,7 +39,7 @@ version_ge() {
     [ "$first" = "$2" ]
 }
 
-require_runtime_dep() {
+has_runtime_dep() {
     local pkg_dir="$1"
     local dep_name="$2"
     [ -d "$pkg_dir" ] || return 1
@@ -47,36 +47,56 @@ require_runtime_dep() {
     if [ -f "${dep_dir}/package.json" ]; then
         return 0
     fi
-    log "Repairing missing OpenClaw runtime dependency: $dep_name"
-    (cd "$pkg_dir" && npm install --no-save --ignore-scripts "$dep_name" 2>&1) || true
-    if [ -f "${dep_dir}/package.json" ]; then
-        return 0
-    fi
     return 1
+}
+
+install_openclaw_runtime_deps() {
+    local pkg_dir="$1"
+    shift
+    [ -d "$pkg_dir" ] || return 1
+    [ "$#" -gt 0 ] || return 0
+    log "Installing OpenClaw runtime dependencies: $*"
+    (cd "$pkg_dir" && npm install --no-save --ignore-scripts --package-lock=false "$@" 2>&1) || return 1
 }
 
 ensure_openclaw_runtime_deps() {
     local pkg_dir="$1"
     local dep
+    local missing=()
     for dep in "@buape/carbon" "@larksuiteoapi/node-sdk"; do
-        require_runtime_dep "$pkg_dir" "$dep" || return 1
+        if ! has_runtime_dep "$pkg_dir" "$dep"; then
+            missing+=("$dep")
+        fi
     done
+    if [ "${#missing[@]}" -gt 0 ]; then
+        for dep in "${missing[@]}"; do
+            log "Repairing missing OpenClaw runtime dependency: $dep"
+        done
+        install_openclaw_runtime_deps "$pkg_dir" "${missing[@]}" || return 1
+        for dep in "${missing[@]}"; do
+            has_runtime_dep "$pkg_dir" "$dep" || return 1
+        done
+    fi
 }
 
 repair_runtime_deps_from_log() {
     local pkg_dir="$1"
     local dep
-    local repaired=1
+    local missing=()
     for dep in $(grep -oE "Cannot find module '[^']+'" "$LOG_FILE" 2>/dev/null | sed "s/Cannot find module '//; s/'$//" | sort -u); do
         case "$dep" in
             "@buape/carbon"|@larksuiteoapi/node-sdk)
                 log "Repairing runtime dependency reported by gateway log: $dep"
-                require_runtime_dep "$pkg_dir" "$dep" || return 1
-                repaired=0
+                missing+=("$dep")
                 ;;
         esac
     done
-    return $repaired
+    [ "${#missing[@]}" -gt 0 ] || return 1
+    install_openclaw_runtime_deps "$pkg_dir" "${missing[@]}" || return 1
+    for dep in "${missing[@]}"; do
+        has_runtime_dep "$pkg_dir" "$dep" || return 1
+    done
+    return 0
 }
 
 verify_openclaw_install() {
