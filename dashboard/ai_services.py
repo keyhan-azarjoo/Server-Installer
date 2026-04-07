@@ -1151,6 +1151,10 @@ def run_openclaw_os_install(form=None, live_cb=None):
         _ensure_openclaw_channel_deps(live_cb)
         _ensure_openclaw_os_config(form, live_cb)
         _ensure_openclaw_https_proxy(form, live_cb)
+        if code != 0 and os.name != "nt" and not command_exists("systemctl"):
+            recovered = _ensure_openclaw_macos_gateway_running(form=form, live_cb=live_cb)
+            if recovered:
+                code = 0
         return code, out
 
 
@@ -1208,6 +1212,74 @@ def _ensure_openclaw_channel_deps(live_cb=None):
             _log(f"[OpenClaw] WARNING: npm install failed: {(proc.stdout or '')[:400]}")
     except Exception as e:
         _log(f"[OpenClaw] WARNING: Could not install required OpenClaw runtime dependencies: {e}")
+
+
+def _ensure_openclaw_macos_gateway_running(form=None, live_cb=None):
+    form = form or {}
+    state = _read_json_file(OPENCLAW_STATE_FILE)
+    oc_bin = str(state.get("openclaw_bin") or "").strip()
+    if not oc_bin or not os.path.isfile(oc_bin):
+        return False
+    http_port = str(state.get("http_port") or (form.get("OPENCLAW_HTTP_PORT", ["18800"])[0] or "").strip() or "18800").strip()
+    host_ip = str(state.get("host") or (form.get("OPENCLAW_HOST_IP", ["0.0.0.0"])[0] or "").strip() or "0.0.0.0").strip()
+    bind_arg = "lan" if host_ip in ("", "0.0.0.0", "*") else "lan"
+    log_file = OPENCLAW_STATE_DIR / "openclaw.log"
+
+    def _log(m):
+        if live_cb:
+            live_cb(m + "\n")
+
+    try:
+        run_capture(["pkill", "-f", "openclaw gateway"], timeout=10)
+    except Exception:
+        pass
+
+    env = os.environ.copy()
+    env["PATH"] = os.pathsep.join([
+        str(Path(oc_bin).parent),
+        str(OPENCLAW_STATE_DIR / "node" / "bin"),
+        env.get("PATH", ""),
+    ])
+    env["HOME"] = str(OPENCLAW_STATE_DIR)
+
+    oc_env_file = Path(env["HOME"]) / ".openclaw" / ".env"
+    if oc_env_file.exists():
+        for line in oc_env_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+            if "=" in line and not line.lstrip().startswith("#"):
+                k, v = line.split("=", 1)
+                env[k.strip()] = v.strip()
+
+    try:
+        log_file.write_text("", encoding="utf-8")
+    except Exception:
+        pass
+
+    _log(f"[OpenClaw] Retrying gateway after backend dependency repair on port {http_port}...")
+    try:
+        proc = subprocess.Popen(
+            [oc_bin, "gateway", "--bind", bind_arg, "--allow-unconfigured", "--port", http_port, "--verbose"],
+            stdout=open(log_file, "a", encoding="utf-8"),
+            stderr=subprocess.STDOUT,
+            env=env,
+        )
+    except Exception as e:
+        _log(f"[OpenClaw] WARNING: Could not restart gateway after repair: {e}")
+        return False
+
+    time.sleep(5)
+    if proc.poll() is None:
+        state["running"] = True
+        _write_json_file(OPENCLAW_STATE_FILE, state)
+        _log("[OpenClaw] Gateway recovered after backend dependency repair.")
+        return True
+
+    try:
+        tail = log_file.read_text(encoding="utf-8", errors="ignore").splitlines()[-20:]
+        for line in tail:
+            _log(f"[OpenClaw]   {line}")
+    except Exception:
+        pass
+    return False
 
 
 def _ensure_openclaw_os_config(form=None, live_cb=None):
