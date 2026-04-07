@@ -548,16 +548,95 @@ if isinstance(providers_cfg, dict):
         models_cfg.pop("providers", None)
 models_catalog = defaults.get("models")
 if isinstance(models_catalog, dict):
-    for key in [k for k in list(models_catalog.keys()) if str(k).startswith("ollama/")]:
+    for key in [k for k in list(models_catalog.keys()) if "/" in str(k)]:
         models_catalog.pop(key, None)
     if not models_catalog:
         defaults.pop("models", None)
 model_cfg["primary"] = f"{provider}/{model}"
+
+def _safe_json(url, headers=None):
+    try:
+        import ssl, urllib.request
+        req = urllib.request.Request(url, headers=headers or {}, method="GET")
+        ctx = ssl._create_unverified_context() if str(url).startswith("https://") else None
+        with urllib.request.urlopen(req, timeout=8, context=ctx) as resp:
+            return json.loads(resp.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return {}
+
+def _make_model_entry(model_id, name=None, context_window=128000, max_tokens=16384):
+    mid = str(model_id or "").strip()
+    display = str(name or mid).strip()
+    return {
+        "id": mid,
+        "name": display,
+        "reasoning": False,
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": int(context_window),
+        "maxTokens": int(max_tokens),
+    }
+
+def _allow_cloud_model(provider_name, model_id):
+    mid = str(model_id or "").strip().lower()
+    if not mid:
+        return False
+    blocked = ("embedding", "image", "audio", "transcribe", "tts", "realtime", "search", "moderation", "whisper", "sora")
+    if any(part in mid for part in blocked):
+        return False
+    if provider_name == "openai":
+        return mid.startswith(("gpt", "o1", "o3", "o4", "chatgpt"))
+    if provider_name == "anthropic":
+        return mid.startswith("claude")
+    return True
+
+agent_models = {"mode": "replace", "providers": {}}
+ollama_base = "http://127.0.0.1:11434"
+agent_models["providers"]["ollama"] = {
+    "baseUrl": ollama_base,
+    "api": "ollama",
+    "apiKey": ollama_key,
+    "models": [_make_model_entry(model, model, 16384, 4096)],
+}
+openai_models = []
+if openai_key:
+    result = _safe_json("https://api.openai.com/v1/models", {"Authorization": f"Bearer {openai_key}"})
+    for item in result.get("data") or []:
+        mid = str(item.get("id") or "").strip()
+        if _allow_cloud_model("openai", mid):
+            openai_models.append(_make_model_entry(mid, mid, 128000, 16384))
+    openai_models.sort(key=lambda item: str(item.get("id") or "").lower())
+if openai_models:
+    agent_models["providers"]["openai"] = {
+        "baseUrl": "https://api.openai.com/v1",
+        "apiKey": openai_key,
+        "models": openai_models,
+    }
+anthropic_models = []
+if anthropic_key:
+    result = _safe_json("https://api.anthropic.com/v1/models", {"x-api-key": anthropic_key, "anthropic-version": "2023-06-01"})
+    for item in result.get("data") or []:
+        mid = str(item.get("id") or "").strip()
+        if _allow_cloud_model("anthropic", mid):
+            anthropic_models.append(_make_model_entry(mid, item.get("display_name") or mid, 200000, 16384))
+    anthropic_models.sort(key=lambda item: str(item.get("id") or "").lower())
+if anthropic_models:
+    agent_models["providers"]["anthropic"] = {
+        "baseUrl": "https://api.anthropic.com/v1",
+        "apiKey": anthropic_key,
+        "models": anthropic_models,
+    }
+(cfg.setdefault("models", {}))["mode"] = "replace"
+cfg["models"]["providers"] = json.loads(json.dumps(agent_models["providers"]))
+if not cfg["models"]["providers"]:
+    cfg["models"].pop("providers", None)
+(agent_dir / "models.json").write_text(json.dumps(agent_models, indent=2), encoding="utf-8")
 cfg_path.parent.mkdir(parents=True, exist_ok=True)
 cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 print(f"Auth profiles written: {auth_path}")
 print(f"Agent settings written: {settings_path} (model: {settings['model']})")
 print(f"Configured primary model: {model_cfg['primary']}")
+print(f"Agent model registry written: {agent_dir / 'models.json'}")
 PYEOF
 
         # Also set via config CLI as fallback for older builds.
