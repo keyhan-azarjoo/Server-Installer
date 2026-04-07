@@ -52,8 +52,34 @@ require_runtime_dep() {
         return 0
     fi
     log "Rehydrating OpenClaw package dependencies..."
+    run_openclaw_postinstall "$pkg_dir" || true
+    install_openclaw_bundle_deps "$pkg_dir" || true
     (cd "$pkg_dir" && npm install --include=optional --omit=dev 2>&1) || true
     node -e "require(require.resolve('$dep_name', { paths: ['$pkg_dir'] }))" >/dev/null 2>&1
+}
+
+run_openclaw_postinstall() {
+    local pkg_dir="$1"
+    [ -d "$pkg_dir" ] || return 1
+    if [ -f "$pkg_dir/scripts/postinstall-bundled-plugins.mjs" ]; then
+        log "Running OpenClaw bundled plugin postinstall..."
+        (cd "$pkg_dir" && node scripts/postinstall-bundled-plugins.mjs 2>&1) || return 1
+    fi
+}
+
+install_openclaw_bundle_deps() {
+    local pkg_dir="$1"
+    [ -d "$pkg_dir" ] || return 1
+    log "Installing bundled OpenClaw channel dependencies..."
+    (
+        cd "$pkg_dir" && npm install --no-save \
+            grammy @grammyjs/runner @grammyjs/transformer-throttler \
+            @whiskeysockets/baileys \
+            @slack/web-api @slack/bolt \
+            @larksuiteoapi/node-sdk \
+            @buape/carbon discord-api-types @discordjs/voice \
+            discord.js 2>&1
+    ) || return 1
 }
 
 verify_openclaw_install() {
@@ -62,6 +88,7 @@ verify_openclaw_install() {
     local bin_dir pkg_dir
     bin_dir="$(cd "$(dirname "$OPENCLAW_BIN")" && pwd)" || return 1
     pkg_dir="$(cd "${bin_dir}/../lib/node_modules/openclaw" 2>/dev/null && pwd)" || return 1
+    run_openclaw_postinstall "$pkg_dir" || true
     require_runtime_dep "$pkg_dir" "@buape/carbon" || return 1
 }
 
@@ -200,7 +227,8 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     # Install optional peer dependencies for channels (Telegram, Discord, Slack, etc.)
     OC_PKG_DIR="$NPM_GLOBAL/lib/node_modules/openclaw"
     if [ -d "$OC_PKG_DIR" ]; then
-        (cd "$OC_PKG_DIR" && npm install grammy discord.js @slack/bolt 2>&1) || true
+        run_openclaw_postinstall "$OC_PKG_DIR" || true
+        install_openclaw_bundle_deps "$OC_PKG_DIR" || true
     fi
 else
     # Linux — install as openclaw user
