@@ -589,7 +589,7 @@ def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
         catalog_cfg = {}
         defaults["models"] = catalog_cfg
     models_cfg = cfg.setdefault("models", {})
-    models_cfg["mode"] = "merge"
+    models_cfg["mode"] = "replace"
     providers_cfg = models_cfg.setdefault("providers", {})
     if not isinstance(providers_cfg, dict):
         providers_cfg = {}
@@ -622,9 +622,17 @@ def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
             ordered_models.append(f"{provider}/{mid}")
             catalog_cfg[f"{provider}/{mid.lower()}"] = {"alias": str(item.get("name") or mid)}
 
-    primary = str(model_cfg.get("primary") or "").strip()
-    if primary not in ordered_models:
-        primary = ordered_models[0] if ordered_models else ""
+    current_primary = str(model_cfg.get("primary") or "").strip()
+    current_settings_model = str(settings.get("model") or "").strip()
+    primary = current_primary if current_primary in ordered_models else ""
+    if not primary and current_settings_model in ordered_models:
+        primary = current_settings_model
+    if not primary:
+        for preferred_prefix in ("ollama/", "lmstudio/", "openai/", "anthropic/"):
+            match = next((item for item in ordered_models if item.startswith(preferred_prefix)), "")
+            if match:
+                primary = match
+                break
     if primary:
         provider, _, model = primary.partition("/")
         model_cfg["primary"] = primary
