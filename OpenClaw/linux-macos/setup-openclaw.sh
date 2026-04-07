@@ -496,6 +496,7 @@ if command -v ollama &>/dev/null; then
         # Write agent auth + model config in the current OpenClaw schema.
         OPENCLAW_MODEL="$OLLAMA_MODEL" OPENCLAW_PROVIDER="ollama" python3 - <<'PYEOF'
 import json, os, pathlib
+import urllib.parse
 
 home_dir = pathlib.Path(os.environ.get("HOME", ""))
 agent_dir = home_dir / ".openclaw" / "agents" / "main" / "agent"
@@ -513,6 +514,9 @@ def load_json(path):
 provider = (os.environ.get("OPENCLAW_PROVIDER") or "").strip()
 model = (os.environ.get("OPENCLAW_MODEL") or "").strip()
 ollama_key = os.environ.get("OLLAMA_API_KEY") or "ollama-local"
+ollama_url = (os.environ.get("OPENCLAW_OLLAMA_URL") or "").strip()
+lmstudio_url = (os.environ.get("OPENCLAW_LMSTUDIO_URL") or "").strip()
+lmstudio_key = (os.environ.get("LMSTUDIO_API_KEY") or "").strip() or "lmstudio-local"
 openai_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
 anthropic_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
 
@@ -564,6 +568,26 @@ def _safe_json(url, headers=None):
     except Exception:
         return {}
 
+def _normalize_ollama_root(url):
+    base = str(url or "").strip().rstrip("/")
+    if not base:
+        return "http://127.0.0.1:11434"
+    for suffix in ("/api/tags", "/api", "/v1"):
+        if base.endswith(suffix):
+            base = base[:-len(suffix)]
+            break
+    return base.rstrip("/")
+
+def _normalize_lmstudio_base(url):
+    base = str(url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    if base.endswith("/models"):
+        base = base[:-len("/models")]
+    if not base.endswith("/v1"):
+        base = base + "/v1"
+    return base.rstrip("/")
+
 def _make_model_entry(model_id, name=None, context_window=128000, max_tokens=16384):
     mid = str(model_id or "").strip()
     display = str(name or mid).strip()
@@ -591,13 +615,38 @@ def _allow_cloud_model(provider_name, model_id):
     return True
 
 agent_models = {"mode": "replace", "providers": {}}
-ollama_base = "http://127.0.0.1:11434"
-agent_models["providers"]["ollama"] = {
-    "baseUrl": ollama_base,
-    "api": "ollama",
-    "apiKey": ollama_key,
-    "models": [_make_model_entry(model, model, 16384, 4096)],
-}
+ollama_root = _normalize_ollama_root(ollama_url)
+ollama_result = _safe_json(ollama_root + "/api/tags")
+ollama_models = []
+for item in ollama_result.get("models") or []:
+    mid = str(item.get("name") or item.get("model") or "").strip()
+    if mid:
+        ollama_models.append(_make_model_entry(mid, mid, int(item.get("context_length") or 16384), 4096))
+if not ollama_models and model:
+    ollama_models.append(_make_model_entry(model, model, 16384, 4096))
+if ollama_models:
+    agent_models["providers"]["ollama"] = {
+        "baseUrl": ollama_root,
+        "api": "ollama",
+        "apiKey": ollama_key,
+        "models": ollama_models,
+    }
+lmstudio_base = _normalize_lmstudio_base(lmstudio_url)
+lmstudio_models = []
+if lmstudio_base:
+    result = _safe_json(lmstudio_base + "/models", {"Authorization": f"Bearer {lmstudio_key}"})
+    for item in result.get("data") or []:
+        mid = str(item.get("id") or "").strip()
+        if mid:
+            lmstudio_models.append(_make_model_entry(mid, mid, 16384, 4096))
+    lmstudio_models.sort(key=lambda item: str(item.get("id") or "").lower())
+if lmstudio_models:
+    agent_models["providers"]["lmstudio"] = {
+        "baseUrl": lmstudio_base,
+        "api": "openai-responses",
+        "apiKey": lmstudio_key,
+        "models": lmstudio_models,
+    }
 openai_models = []
 if openai_key:
     result = _safe_json("https://api.openai.com/v1/models", {"Authorization": f"Bearer {openai_key}"})
@@ -631,6 +680,18 @@ cfg["models"]["providers"] = json.loads(json.dumps(agent_models["providers"]))
 if not cfg["models"]["providers"]:
     cfg["models"].pop("providers", None)
 (agent_dir / "models.json").write_text(json.dumps(agent_models, indent=2), encoding="utf-8")
+available_models = []
+for provider_name, provider_cfg in agent_models.get("providers", {}).items():
+    for item in provider_cfg.get("models") or []:
+        mid = str(item.get("id") or "").strip()
+        if mid:
+            available_models.append(f"{provider_name}/{mid}")
+if available_models and f"{provider}/{model}" not in available_models:
+    preferred = next((m for m in available_models if m.startswith("ollama/")), "") or available_models[0]
+    settings["provider"], _, resolved_model = preferred.partition("/")
+    settings["model"] = preferred
+    model_cfg["primary"] = preferred
+    settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
 cfg_path.parent.mkdir(parents=True, exist_ok=True)
 cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
 print(f"Auth profiles written: {auth_path}")
