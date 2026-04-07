@@ -26,6 +26,7 @@ const {
   extractLabeledUrl,
   formatBytes,
   formatUptime,
+  getInstallOsLabel,
   getDefaultSelectableIp,
   getSelectableIps,
   uniqUrls,
