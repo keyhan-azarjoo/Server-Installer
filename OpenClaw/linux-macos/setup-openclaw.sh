@@ -493,29 +493,84 @@ if command -v ollama &>/dev/null; then
         AGENT_DIR="${HOME}/.openclaw/agents/main/agent"
         mkdir -p "$AGENT_DIR"
 
-        # Write auth-profiles.json so OpenClaw knows about Ollama provider
-        cat > "$AGENT_DIR/auth-profiles.json" <<'APROF'
-{
-  "ollama": {
-    "provider": "ollama",
-    "baseUrl": "http://127.0.0.1:11434",
-    "apiKey": "ollama"
-  }
-}
-APROF
-        log "Auth profiles written: $AGENT_DIR/auth-profiles.json"
+        # Write agent auth + model config in the current OpenClaw schema.
+        OPENCLAW_MODEL="$OLLAMA_MODEL" OPENCLAW_PROVIDER="ollama" python3 - <<'PYEOF'
+import json, os, pathlib
 
-        # Write agent settings to make Ollama the default model
-        cat > "$AGENT_DIR/settings.json" <<ASET
-{
-  "model": "ollama/${OLLAMA_MODEL}",
-  "provider": "ollama",
-  "customInstructions": ""
-}
-ASET
-        log "Agent settings written: $AGENT_DIR/settings.json (model: ollama/${OLLAMA_MODEL})"
+home_dir = pathlib.Path(os.environ.get("HOME", ""))
+agent_dir = home_dir / ".openclaw" / "agents" / "main" / "agent"
+agent_dir.mkdir(parents=True, exist_ok=True)
+auth_path = agent_dir / "auth-profiles.json"
+settings_path = agent_dir / "settings.json"
+cfg_path = home_dir / ".openclaw" / "openclaw.json"
 
-        # Also set via config CLI as fallback
+def load_json(path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+    except Exception:
+        return {}
+
+provider = (os.environ.get("OPENCLAW_PROVIDER") or "").strip()
+model = (os.environ.get("OPENCLAW_MODEL") or "").strip()
+ollama_key = os.environ.get("OLLAMA_API_KEY") or "ollama-local"
+openai_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+anthropic_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+
+auth_data = load_json(auth_path)
+profiles = auth_data.get("profiles") if isinstance(auth_data.get("profiles"), dict) else {}
+last_good = auth_data.get("lastGood") if isinstance(auth_data.get("lastGood"), dict) else {}
+profiles["ollama:local"] = {"type": "api_key", "provider": "ollama", "key": ollama_key}
+last_good["ollama"] = "ollama:local"
+if openai_key:
+    profiles["openai:default"] = {"type": "api_key", "provider": "openai", "key": openai_key}
+    last_good["openai"] = "openai:default"
+if anthropic_key:
+    profiles["anthropic:default"] = {"type": "api_key", "provider": "anthropic", "key": anthropic_key}
+    last_good["anthropic"] = "anthropic:default"
+auth_path.write_text(json.dumps({"version": 1, "profiles": profiles, "lastGood": last_good}, indent=2), encoding="utf-8")
+
+settings = load_json(settings_path)
+settings["provider"] = provider
+settings["model"] = f"{provider}/{model}"
+settings.setdefault("customInstructions", "")
+settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+
+cfg = load_json(cfg_path)
+agents = cfg.setdefault("agents", {})
+defaults = agents.setdefault("defaults", {})
+model_cfg = defaults.setdefault("model", {})
+models_catalog = defaults.setdefault("models", {})
+models_cfg = cfg.setdefault("models", {})
+providers_cfg = models_cfg.setdefault("providers", {})
+models_cfg["mode"] = "merge"
+providers_cfg["ollama"] = {
+    "baseUrl": "http://127.0.0.1:11434/v1",
+    "api": "openai-completions",
+    "apiKey": ollama_key,
+    "models": [{
+        "id": model,
+        "name": model,
+        "reasoning": False,
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": 16384,
+        "maxTokens": 4096,
+    }],
+}
+models_catalog[f"ollama/{model.lower()}"] = {"alias": model}
+if openai_key:
+    providers_cfg.setdefault("openai", {}).setdefault("baseUrl", "https://api.openai.com/v1")
+if anthropic_key:
+    providers_cfg.setdefault("anthropic", {}).setdefault("baseUrl", "https://api.anthropic.com/v1")
+model_cfg["primary"] = f"{provider}/{model}"
+cfg_path.parent.mkdir(parents=True, exist_ok=True)
+cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+print(f"Auth profiles written: {auth_path}")
+print(f"Agent settings written: {settings_path} (model: {settings['model']})")
+print(f"Configured primary model: {model_cfg['primary']}")
+PYEOF
+
+        # Also set via config CLI as fallback for older builds.
         "$OPENCLAW_BIN" config set models.default.provider ollama 2>/dev/null || true
         "$OPENCLAW_BIN" config set models.default.model "$OLLAMA_MODEL" 2>/dev/null || true
     fi
