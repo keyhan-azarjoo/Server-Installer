@@ -168,6 +168,7 @@ from ai_services import (
     run_piper_delete,
     run_generic_ai_docker,
     run_generic_ai_delete,
+    sync_openclaw_provider_catalog,
 )
 from ai_media import transcribe_media_with_whisper
 from system_admin import (
@@ -276,6 +277,15 @@ class Handler(BaseHTTPRequestHandler):
             return lmstudio_list_models()
         if path == "/api/lmstudio/health":
             return lmstudio_health()
+        if path == "/api/openclaw/provider-models":
+            state = _read_json_file(OPENCLAW_STATE_FILE)
+            install_dir = str(state.get("install_dir") or "").strip()
+            home_dir = os.path.expanduser("~")
+            for try_path in [home_dir, install_dir, "/home/openclaw", "/root", "/var/root"]:
+                if try_path and os.path.isdir(os.path.join(try_path, ".openclaw")):
+                    home_dir = try_path
+                    break
+            return sync_openclaw_provider_catalog(home_dir=home_dir)
 
         return None  # Not handled
 
@@ -2200,6 +2210,15 @@ print("Gateway reload requested via SIGUSR1.")
                 except Exception as e:
                     log(f"Error: {e}")
                     code = 1
+                if code == 0 and deploy_mode != "docker":
+                    try:
+                        sync_info = sync_openclaw_provider_catalog(home_dir=script_env.get("SI_HOME_DIR"))
+                        for item in sync_info.get("providers", []):
+                            log(f"Provider models synced: {item.get('label')} ({item.get('model_count')})")
+                        if sync_info.get("primary_model"):
+                            log(f"Primary model: {sync_info.get('primary_model')}")
+                    except Exception as ex:
+                        log(f"Warning: could not sync provider models: {ex}")
                 if code == 0:
                     log(f"\n{provider.title()} token {'deleted' if action == 'delete' else 'saved'}. Gateway reloading.")
                     log("Wait a few seconds, then refresh the OpenClaw dashboard.")

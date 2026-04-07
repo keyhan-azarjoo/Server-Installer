@@ -270,6 +270,81 @@
 
         {/* (Models are selected in OpenClaw's own dashboard) */}
 
+        {installed && React.createElement(function AccessibleModelsPanel() {
+          var _state = React.useState({ loading: true, providers: [], primary_model: "", error: "" });
+          var state = _state[0], setState = _state[1];
+
+          var load = function() {
+            setState(function(prev) { return { loading: true, providers: prev.providers || [], primary_model: prev.primary_model || "", error: "" }; });
+            fetch("/api/openclaw/provider-models", { headers: { "X-Requested-With": "fetch" } })
+              .then(function(r) { return r.json(); })
+              .then(function(j) {
+                setState({
+                  loading: false,
+                  providers: Array.isArray(j.providers) ? j.providers : [],
+                  primary_model: String(j.primary_model || "").trim(),
+                  error: j && j.ok === false ? String(j.error || "Failed to load models") : "",
+                });
+              })
+              .catch(function(e) {
+                setState({ loading: false, providers: [], primary_model: "", error: String(e || "Failed to load models") });
+              });
+          };
+
+          React.useEffect(function() { load(); }, []);
+          React.useEffect(function() {
+            var onRefresh = function() { load(); };
+            window.addEventListener("openclaw-models-refresh", onRefresh);
+            return function() { window.removeEventListener("openclaw-models-refresh", onRefresh); };
+          }, []);
+
+          return (
+            <Grid item xs={12}>
+              <Card sx={{ borderRadius: 3, border: "1.5px solid #0f766e33" }}>
+                <CardContent>
+                  <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1.5 }}>
+                    <Box sx={{ width: 5, height: 32, borderRadius: 3, bgcolor: "#0f766e" }} />
+                    <Box sx={{ flexGrow: 1 }}>
+                      <Typography variant="h6" fontWeight={800} sx={{ color: "#0f766e" }}>Accessible Models</Typography>
+                      <Typography variant="body2" color="text.secondary">Only providers that are configured and reachable are added to OpenClaw.</Typography>
+                    </Box>
+                    <Button variant="outlined" size="small" onClick={load} sx={{ textTransform: "none" }}>Reload</Button>
+                  </Stack>
+                  {state.primary_model && (
+                    <Typography variant="body2" sx={{ mb: 1.5 }}>
+                      Primary model: <b>{state.primary_model}</b>
+                    </Typography>
+                  )}
+                  {state.loading && <Typography variant="body2" color="text.secondary">Loading accessible provider models...</Typography>}
+                  {!state.loading && state.error && <Alert severity="warning" sx={{ borderRadius: 2 }}>{state.error}</Alert>}
+                  {!state.loading && !state.error && state.providers.length === 0 && (
+                    <Alert severity="info" sx={{ borderRadius: 2 }}>No accessible providers detected yet. Add a reachable Ollama or LM Studio URL, or apply an OpenAI/Anthropic key.</Alert>
+                  )}
+                  {!state.loading && !state.error && state.providers.length > 0 && (
+                    <Grid container spacing={2}>
+                      {state.providers.map(function(provider) {
+                        return (
+                          <Grid item xs={12} md={6} key={"provider-" + provider.id}>
+                            <Paper variant="outlined" sx={{ p: 1.5, borderRadius: 2, height: "100%" }}>
+                              <Typography variant="subtitle2" fontWeight={800}>{provider.label}</Typography>
+                              {provider.base_url && <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>{provider.base_url}</Typography>}
+                              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                                {(provider.models || []).map(function(model) {
+                                  return <Chip key={provider.id + "-" + model} label={model} size="small" sx={{ fontWeight: 600 }} />;
+                                })}
+                              </Stack>
+                            </Paper>
+                          </Grid>
+                        );
+                      })}
+                    </Grid>
+                  )}
+                </CardContent>
+              </Card>
+            </Grid>
+          );
+        })}
+
         {/* API Tokens — configure LLM providers */}
         {installed && React.createElement(function ApiTokensPanel() {
           var _ollamaKey = React.useState("ollama-local");
@@ -295,6 +370,7 @@
                   setSaving(false);
                   setActiveProvider("");
                   if (Number(j.exit_code) === 0) {
+                    try { window.dispatchEvent(new CustomEvent("openclaw-models-refresh")); } catch (_) {}
                     setSaveMsg("Token updated. Gateway restarting... refresh OpenClaw dashboard in a few seconds.");
                   } else {
                     setSaveMsg("Failed (exit " + j.exit_code + "). " + (j.output || "").slice(0, 200));

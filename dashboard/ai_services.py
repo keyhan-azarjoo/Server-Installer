@@ -3,9 +3,12 @@ import os
 import platform
 import re
 import shutil
+import ssl
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from copy import deepcopy
 from pathlib import Path
 
@@ -55,6 +58,7 @@ from python_manager import _linux_systemd_unit_status
 from port_manager import is_local_tcp_port_listening, manage_firewall_port
 from website_manager import _docker_add_macos_path, _docker_wait_macos, _install_engine_docker, _run_install_cmd
 
+OPENCLAW_MANAGED_PROVIDERS = ("ollama", "lmstudio", "openai", "anthropic")
 
 def _ensure_docker_ready(log):
     if sys.platform == "darwin":
@@ -344,6 +348,303 @@ def get_openclaw_info():
         except Exception:
             pass
     return info
+
+
+def _openclaw_internal_ssl_ctx():
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    return ctx
+
+
+def _openclaw_load_json(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8")) if Path(path).exists() else {}
+    except Exception:
+        return {}
+
+
+def _openclaw_read_env_file(home_dir):
+    env_path = Path(home_dir) / ".openclaw" / ".env"
+    data = {}
+    if not env_path.exists():
+        return data
+    for line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        if "=" in line and not line.lstrip().startswith("#"):
+            k, v = line.split("=", 1)
+            data[k.strip()] = v.strip()
+    return data
+
+
+def _openclaw_normalize_base_url(url, suffix=""):
+    base = str(url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    if suffix == "/v1":
+        if base.endswith("/v1"):
+            return base
+        if base.endswith("/models"):
+            return base[:-len("/models")]
+        return base + "/v1"
+    return base
+
+
+def _openclaw_safe_json(url, headers=None, timeout=8):
+    try:
+        req = urllib.request.Request(url, headers=headers or {}, method="GET")
+        ctx = _openclaw_internal_ssl_ctx() if url.startswith("https://") else None
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            return json.loads(resp.read().decode("utf-8", errors="replace"))
+    except Exception:
+        return {}
+
+
+def _openclaw_make_model_entry(item):
+    mid = str((item or {}).get("id") or (item or {}).get("name") or "").strip()
+    name = str((item or {}).get("name") or mid).strip()
+    context_window = int((item or {}).get("contextWindow") or 128000)
+    max_tokens = int((item or {}).get("maxTokens") or max(2048, min(8192, context_window // 4)))
+    return {
+        "id": mid,
+        "name": name,
+        "reasoning": False,
+        "input": ["text"],
+        "cost": {"input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0},
+        "contextWindow": context_window,
+        "maxTokens": max_tokens,
+    }
+
+
+def _openclaw_filter_text_model_id(provider, model_id):
+    mid = str(model_id or "").strip().lower()
+    if not mid:
+        return False
+    excluded_parts = (
+        "embedding", "image", "audio", "transcribe", "tts", "realtime",
+        "search", "moderation", "whisper", "sora",
+    )
+    if any(part in mid for part in excluded_parts):
+        return False
+    if provider == "openai":
+        return mid.startswith(("gpt", "o1", "o3", "o4", "chatgpt"))
+    if provider == "anthropic":
+        return mid.startswith("claude")
+    return True
+
+
+def _discover_openclaw_provider_models(form=None, home_dir=None):
+    form = form or {}
+    home_dir = str(home_dir or os.path.expanduser("~"))
+    env_keys = _openclaw_read_env_file(home_dir)
+    providers = {}
+
+    ollama_url = (form.get("OPENCLAW_OLLAMA_URL", [""])[0] if form.get("OPENCLAW_OLLAMA_URL") else "") or ""
+    ollama_url = str(ollama_url).strip() or str((get_ollama_info() or {}).get("api_url") or "").strip()
+    if ollama_url:
+        tags_url = _openclaw_normalize_base_url(ollama_url).rstrip("/") + "/api/tags"
+        result = _openclaw_safe_json(tags_url)
+        models = []
+        for item in result.get("models") or []:
+            mid = str(item.get("name") or item.get("model") or "").strip()
+            if mid:
+                models.append({
+                    "id": mid,
+                    "name": mid,
+                    "contextWindow": int(item.get("context_length") or 16384),
+                    "maxTokens": 4096,
+                })
+        if models:
+            providers["ollama"] = {
+                "label": "Ollama",
+                "baseUrl": "http://127.0.0.1:11434/v1",
+                "api": "openai-completions",
+                "apiKey": env_keys.get("OLLAMA_API_KEY") or "ollama-local",
+                "models": models,
+                "reachable": True,
+                "sourceUrl": ollama_url,
+            }
+
+    lmstudio_url = (form.get("OPENCLAW_LMSTUDIO_URL", [""])[0] if form.get("OPENCLAW_LMSTUDIO_URL") else "") or ""
+    lmstudio_url = str(lmstudio_url).strip() or str((get_lmstudio_info() or {}).get("api_url") or "").strip()
+    if lmstudio_url:
+        lmstudio_base = _openclaw_normalize_base_url(lmstudio_url, "/v1")
+        headers = {}
+        lmstudio_key = env_keys.get("LMSTUDIO_API_KEY") or "lmstudio-local"
+        if lmstudio_key:
+            headers["Authorization"] = f"Bearer {lmstudio_key}"
+        result = _openclaw_safe_json(lmstudio_base.rstrip("/") + "/models", headers=headers)
+        models = []
+        for item in result.get("data") or []:
+            mid = str(item.get("id") or "").strip()
+            if mid:
+                models.append({"id": mid, "name": mid, "contextWindow": 16384, "maxTokens": 4096})
+        if models:
+            providers["lmstudio"] = {
+                "label": "LM Studio",
+                "baseUrl": lmstudio_base,
+                "api": "openai-responses",
+                "apiKey": lmstudio_key,
+                "models": models,
+                "reachable": True,
+                "sourceUrl": lmstudio_url,
+            }
+
+    openai_key = (form.get("OPENCLAW_OPENAI_KEY", [""])[0] if form.get("OPENCLAW_OPENAI_KEY") else "") or ""
+    openai_key = str(openai_key).strip() or env_keys.get("OPENAI_API_KEY") or ""
+    if openai_key:
+        result = _openclaw_safe_json(
+            "https://api.openai.com/v1/models",
+            headers={"Authorization": f"Bearer {openai_key}"},
+        )
+        models = []
+        for item in result.get("data") or []:
+            mid = str(item.get("id") or "").strip()
+            if _openclaw_filter_text_model_id("openai", mid):
+                models.append({"id": mid, "name": mid, "contextWindow": 128000, "maxTokens": 16384})
+        models.sort(key=lambda item: str(item.get("id") or "").lower())
+        if models:
+            providers["openai"] = {
+                "label": "OpenAI",
+                "baseUrl": "https://api.openai.com/v1",
+                "apiKey": openai_key,
+                "models": models,
+                "reachable": True,
+                "sourceUrl": "https://api.openai.com/v1",
+            }
+
+    anthropic_key = (form.get("OPENCLAW_ANTHROPIC_KEY", [""])[0] if form.get("OPENCLAW_ANTHROPIC_KEY") else "") or ""
+    anthropic_key = str(anthropic_key).strip() or env_keys.get("ANTHROPIC_API_KEY") or ""
+    if anthropic_key:
+        result = _openclaw_safe_json(
+            "https://api.anthropic.com/v1/models",
+            headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01"},
+        )
+        models = []
+        for item in result.get("data") or []:
+            mid = str(item.get("id") or "").strip()
+            name = str(item.get("display_name") or mid).strip()
+            if _openclaw_filter_text_model_id("anthropic", mid):
+                models.append({"id": mid, "name": name, "contextWindow": 200000, "maxTokens": 16384})
+        models.sort(key=lambda item: str(item.get("id") or "").lower())
+        if models:
+            providers["anthropic"] = {
+                "label": "Anthropic",
+                "baseUrl": "https://api.anthropic.com/v1",
+                "apiKey": anthropic_key,
+                "models": models,
+                "reachable": True,
+                "sourceUrl": "https://api.anthropic.com/v1",
+            }
+
+    return providers
+
+
+def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
+    home_dir = str(home_dir or os.path.expanduser("~"))
+    agent_dir = Path(home_dir) / ".openclaw" / "agents" / "main" / "agent"
+    agent_dir.mkdir(parents=True, exist_ok=True)
+    auth_path = agent_dir / "auth-profiles.json"
+    settings_path = agent_dir / "settings.json"
+    cfg_path = Path(home_dir) / ".openclaw" / "openclaw.json"
+
+    providers = _discover_openclaw_provider_models(form=form, home_dir=home_dir)
+    auth = _openclaw_load_json(auth_path)
+    settings = _openclaw_load_json(settings_path)
+    cfg = _openclaw_load_json(cfg_path)
+
+    profiles = auth.get("profiles") if isinstance(auth.get("profiles"), dict) else {}
+    last_good = auth.get("lastGood") if isinstance(auth.get("lastGood"), dict) else {}
+    for provider in OPENCLAW_MANAGED_PROVIDERS:
+        for key in [k for k in list(profiles.keys()) if str(k).startswith(f"{provider}:")]:
+            profiles.pop(key, None)
+        last_good.pop(provider, None)
+    for provider, info in providers.items():
+        profile_name = f"{provider}:local" if provider in ("ollama", "lmstudio") else f"{provider}:default"
+        profiles[profile_name] = {"type": "api_key", "provider": provider, "key": str(info.get("apiKey") or "")}
+        last_good[provider] = profile_name
+    auth = {"version": 1, "profiles": profiles, "lastGood": last_good}
+    auth_path.write_text(json.dumps(auth, indent=2), encoding="utf-8")
+
+    agents = cfg.setdefault("agents", {})
+    defaults = agents.setdefault("defaults", {})
+    model_cfg = defaults.setdefault("model", {})
+    catalog_cfg = defaults.setdefault("models", {})
+    if not isinstance(catalog_cfg, dict):
+        catalog_cfg = {}
+        defaults["models"] = catalog_cfg
+    models_cfg = cfg.setdefault("models", {})
+    models_cfg["mode"] = "merge"
+    providers_cfg = models_cfg.setdefault("providers", {})
+    if not isinstance(providers_cfg, dict):
+        providers_cfg = {}
+        models_cfg["providers"] = providers_cfg
+
+    for provider in OPENCLAW_MANAGED_PROVIDERS:
+        providers_cfg.pop(provider, None)
+        for key in [k for k in list(catalog_cfg.keys()) if str(k).startswith(f"{provider}/")]:
+            catalog_cfg.pop(key, None)
+
+    ordered_models = []
+    for provider in ("ollama", "lmstudio", "openai", "anthropic"):
+        info = providers.get(provider)
+        if not info:
+            continue
+        providers_cfg[provider] = {
+            "baseUrl": str(info.get("baseUrl") or "").strip(),
+            "apiKey": str(info.get("apiKey") or "").strip(),
+            "models": [_openclaw_make_model_entry(item) for item in info.get("models") or []],
+        }
+        if info.get("api"):
+            providers_cfg[provider]["api"] = info["api"]
+        for item in info.get("models") or []:
+            mid = str(item.get("id") or "").strip()
+            if not mid:
+                continue
+            ordered_models.append(f"{provider}/{mid}")
+            catalog_cfg[f"{provider}/{mid.lower()}"] = {"alias": str(item.get("name") or mid)}
+
+    primary = str(model_cfg.get("primary") or "").strip()
+    if primary not in ordered_models:
+        primary = ordered_models[0] if ordered_models else ""
+    if primary:
+        provider, _, model = primary.partition("/")
+        model_cfg["primary"] = primary
+        settings["provider"] = provider
+        settings["model"] = primary
+    else:
+        model_cfg.pop("primary", None)
+        settings.pop("provider", None)
+        settings.pop("model", None)
+    if not providers_cfg:
+        models_cfg.pop("providers", None)
+    if not catalog_cfg:
+        defaults.pop("models", None)
+
+    settings_path.write_text(json.dumps(settings, indent=2), encoding="utf-8")
+    cfg_path.parent.mkdir(parents=True, exist_ok=True)
+    cfg_path.write_text(json.dumps(cfg, indent=2), encoding="utf-8")
+
+    result = {
+        "ok": True,
+        "providers": [
+            {
+                "id": provider,
+                "label": providers[provider]["label"],
+                "base_url": providers[provider]["sourceUrl"],
+                "model_count": len(providers[provider].get("models") or []),
+                "models": [str(item.get("id") or "").strip() for item in (providers[provider].get("models") or []) if str(item.get("id") or "").strip()],
+            }
+            for provider in ("ollama", "lmstudio", "openai", "anthropic")
+            if provider in providers
+        ],
+        "primary_model": primary,
+    }
+    if live_cb:
+        for item in result["providers"]:
+            live_cb(f"Provider models synced: {item['label']} ({item['model_count']})\n")
+        if primary:
+            live_cb(f"OpenClaw primary model: {primary}\n")
+    return result
 
 
 def get_lmstudio_info():
@@ -1409,6 +1710,11 @@ def _ensure_openclaw_os_config(form=None, live_cb=None):
     except Exception:
         pass
 
+    try:
+        sync_openclaw_provider_catalog(form=form, home_dir=home_dir, live_cb=live_cb)
+    except Exception:
+        pass
+
     # Retrieve gateway token directly from openclaw.json (CLI redacts it)
     gateway_token = ""
     oc_config_path = Path(home_dir) / ".openclaw" / "openclaw.json"
@@ -1681,7 +1987,13 @@ def run_openclaw_refresh_models(live_cb=None):
 
     deploy_mode = str(state.get("deploy_mode") or "").strip().lower()
     log("=== Refreshing OpenClaw model list ===")
-    log("OpenClaw reloads Ollama models on startup, so this refresh restarts the service.")
+    log("OpenClaw refresh re-syncs reachable provider models, then restarts the service.")
+
+    if deploy_mode != "docker":
+        try:
+            sync_openclaw_provider_catalog(live_cb=live_cb)
+        except Exception as ex:
+            log(f"Warning: provider model sync failed before restart: {ex}")
 
     if deploy_mode == "docker" and command_exists("docker"):
         container_name = str(state.get("service_name") or "serverinstaller-openclaw").strip() or "serverinstaller-openclaw"
