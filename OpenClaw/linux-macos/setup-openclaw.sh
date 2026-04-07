@@ -62,6 +62,22 @@ ensure_openclaw_runtime_deps() {
     done
 }
 
+repair_runtime_deps_from_log() {
+    local pkg_dir="$1"
+    local dep
+    local repaired=1
+    for dep in $(grep -oE "Cannot find module '[^']+'" "$LOG_FILE" 2>/dev/null | sed "s/Cannot find module '//; s/'$//" | sort -u); do
+        case "$dep" in
+            "@buape/carbon"|@larksuiteoapi/node-sdk)
+                log "Repairing runtime dependency reported by gateway log: $dep"
+                require_runtime_dep "$pkg_dir" "$dep" || return 1
+                repaired=0
+                ;;
+        esac
+    done
+    return $repaired
+}
+
 verify_openclaw_install() {
     [ -x "$OPENCLAW_BIN" ] || return 1
     "$OPENCLAW_BIN" --version >/dev/null 2>&1 || return 1
@@ -345,28 +361,38 @@ else
         fi
         if [ -x "$OPENCLAW_BIN" ]; then
             export PATH="$(dirname "$OPENCLAW_BIN"):$PATH"
-            log "Running: $OPENCLAW_BIN gateway $BIND_ARG --allow-unconfigured --port $HTTP_PORT --verbose"
-            "$OPENCLAW_BIN" gateway $BIND_ARG --allow-unconfigured --port "$HTTP_PORT" --verbose >> "$LOG_FILE" 2>&1 &
-            GW_PID=$!
-            log "Gateway process started (PID $GW_PID)."
-            sleep 5
-            # Check if it's still running
-            if kill -0 "$GW_PID" 2>/dev/null; then
-                log "Gateway is running."
-                # Verify port is listening
-                if check_gateway_http; then
-                    GATEWAY_OK=1
-                    log "Gateway responding on port ${HTTP_PORT}."
-                else
-                    log "Gateway running but not responding yet. Check log: $LOG_FILE"
-                    tail -10 "$LOG_FILE" 2>/dev/null | while read line; do log "  $line"; done
-                    exit 1
+            OC_PKG_DIR="${NPM_GLOBAL}/lib/node_modules/openclaw"
+            STARTUP_REPAIRED=0
+            for attempt in 1 2; do
+                log "Running: $OPENCLAW_BIN gateway $BIND_ARG --allow-unconfigured --port $HTTP_PORT --verbose"
+                "$OPENCLAW_BIN" gateway $BIND_ARG --allow-unconfigured --port "$HTTP_PORT" --verbose >> "$LOG_FILE" 2>&1 &
+                GW_PID=$!
+                log "Gateway process started (PID $GW_PID)."
+                sleep 5
+                if kill -0 "$GW_PID" 2>/dev/null; then
+                    log "Gateway is running."
+                    if check_gateway_http; then
+                        GATEWAY_OK=1
+                        log "Gateway responding on port ${HTTP_PORT}."
+                        break
+                    else
+                        log "Gateway running but not responding yet. Check log: $LOG_FILE"
+                        tail -10 "$LOG_FILE" 2>/dev/null | while read line; do log "  $line"; done
+                        exit 1
+                    fi
                 fi
-            else
                 log "ERROR: Gateway process died. Check log: $LOG_FILE"
                 tail -20 "$LOG_FILE" 2>/dev/null | while read line; do log "  $line"; done
+                if [ "$attempt" -eq 1 ] && [ -d "$OC_PKG_DIR" ]; then
+                    if repair_runtime_deps_from_log "$OC_PKG_DIR"; then
+                        STARTUP_REPAIRED=1
+                        : > "$LOG_FILE"
+                        continue
+                    fi
+                fi
                 exit 1
-            fi
+            done
+            [ "$STARTUP_REPAIRED" -eq 1 ] && log "Gateway recovered after runtime dependency repair."
         else
             log "FATAL: Cannot find openclaw binary. Install failed."
             log "Try manually: npm install -g openclaw@latest"
