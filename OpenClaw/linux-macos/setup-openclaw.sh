@@ -93,7 +93,7 @@ ensure_openclaw_runtime_deps() {
     local pkg_dir="$1"
     local dep
     local missing=()
-    for dep in "@buape/carbon" "@larksuiteoapi/node-sdk" "@slack/web-api"; do
+    for dep in "@buape/carbon" "@larksuiteoapi/node-sdk" "@slack/web-api" "@slack/bolt"; do
         if ! has_runtime_dep "$pkg_dir" "$dep"; then
             missing+=("$dep")
         fi
@@ -115,7 +115,7 @@ repair_runtime_deps_from_log() {
     local missing=()
     for dep in $(grep -oE "Cannot find module '[^']+'" "$LOG_FILE" 2>/dev/null | sed "s/Cannot find module '//; s/'$//" | sort -u); do
         case "$dep" in
-            "@buape/carbon"|@larksuiteoapi/node-sdk|@slack/web-api)
+            "@buape/carbon"|@larksuiteoapi/node-sdk|@slack/web-api|@slack/bolt)
                 log "Repairing runtime dependency reported by gateway log: $dep"
                 missing+=("$dep")
                 ;;

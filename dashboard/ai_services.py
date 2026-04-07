@@ -450,10 +450,17 @@ def _openclaw_filter_text_model_id(provider, model_id):
     if any(part in mid for part in excluded_parts):
         return False
     if provider == "openai":
+        if mid in ("gpt-4", "openai/gpt-4", "openrouter/openai/gpt-4"):
+            return False
         return mid.startswith(("gpt", "o1", "o3", "o4", "chatgpt"))
     if provider == "anthropic":
         return mid.startswith("claude")
     return True
+
+
+def _openclaw_is_blocked_primary_model(model_id):
+    mid = str(model_id or "").strip().lower()
+    return mid in ("gpt-4", "openai/gpt-4", "openrouter/openai/gpt-4")
 
 
 def _discover_openclaw_provider_models(form=None, home_dir=None):
@@ -646,6 +653,12 @@ def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
 
     current_primary = str(model_cfg.get("primary") or "").strip()
     current_settings_model = str(settings.get("model") or "").strip()
+    if _openclaw_is_blocked_primary_model(current_primary):
+        current_primary = ""
+        model_cfg.pop("primary", None)
+    if _openclaw_is_blocked_primary_model(current_settings_model):
+        current_settings_model = ""
+        settings.pop("model", None)
     primary = current_primary if current_primary in ordered_models else ""
     if not primary and current_settings_model in ordered_models:
         primary = current_settings_model
@@ -2861,6 +2874,8 @@ http {{
         "elif provider in ('openai', 'anthropic'):",
         "  settings['provider'] = provider",
         "  model_cfg['primary'] = defaults.get('model', {}).get('primary') or ''",
+        "  if str(model_cfg['primary']).strip().lower() in ('gpt-4', 'openai/gpt-4', 'openrouter/openai/gpt-4'):",
+        "    model_cfg['primary'] = ''",
         "  if not model_cfg['primary'] and provider == 'openai':",
         "    model_cfg['primary'] = 'openai/gpt-4.1-mini'",
         "  if not model_cfg['primary'] and provider == 'anthropic':",
