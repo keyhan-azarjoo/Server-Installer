@@ -389,6 +389,17 @@ def _openclaw_normalize_base_url(url, suffix=""):
     return base
 
 
+def _openclaw_ollama_api_root(url):
+    base = str(url or "").strip().rstrip("/")
+    if not base:
+        return ""
+    for suffix in ("/api/tags", "/api", "/v1"):
+        if base.endswith(suffix):
+            base = base[:-len(suffix)]
+            break
+    return base.rstrip("/")
+
+
 def _openclaw_safe_json(url, headers=None, timeout=8):
     try:
         req = urllib.request.Request(url, headers=headers or {}, method="GET")
@@ -441,7 +452,8 @@ def _discover_openclaw_provider_models(form=None, home_dir=None):
     ollama_url = (form.get("OPENCLAW_OLLAMA_URL", [""])[0] if form.get("OPENCLAW_OLLAMA_URL") else "") or ""
     ollama_url = str(ollama_url).strip() or str((get_ollama_info() or {}).get("api_url") or "").strip()
     if ollama_url:
-        tags_url = _openclaw_normalize_base_url(ollama_url).rstrip("/") + "/api/tags"
+        ollama_root = _openclaw_ollama_api_root(ollama_url)
+        tags_url = ollama_root.rstrip("/") + "/api/tags"
         result = _openclaw_safe_json(tags_url)
         models = []
         for item in result.get("models") or []:
@@ -456,7 +468,7 @@ def _discover_openclaw_provider_models(form=None, home_dir=None):
         if models:
             providers["ollama"] = {
                 "label": "Ollama",
-                "baseUrl": "http://127.0.0.1:11434/v1",
+                "baseUrl": ollama_root.rstrip("/") + "/v1",
                 "api": "openai-completions",
                 "apiKey": env_keys.get("OLLAMA_API_KEY") or "ollama-local",
                 "models": models,
