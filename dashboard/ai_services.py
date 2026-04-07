@@ -1177,10 +1177,14 @@ def _ensure_openclaw_channel_deps(live_cb=None):
     def _log(m):
         if live_cb:
             live_cb(m + "\n")
-    carbon_dir = os.path.join(pkg_dir, "node_modules", "@buape", "carbon")
-    if os.path.isdir(carbon_dir):
+    required_runtime_deps = ["@buape/carbon", "@larksuiteoapi/node-sdk"]
+    missing_runtime_deps = [
+        dep for dep in required_runtime_deps
+        if not os.path.isdir(os.path.join(pkg_dir, "node_modules", *dep.split("/")))
+    ]
+    if not missing_runtime_deps:
         return
-    _log("[OpenClaw] Installing required OpenClaw UI dependency (@buape/carbon)...")
+    _log(f"[OpenClaw] Installing required OpenClaw runtime dependencies: {', '.join(missing_runtime_deps)}")
     npm_bin = "npm"
     for try_npm in [str(Path(oc_bin).parent / "npm"), str(OPENCLAW_STATE_DIR / "node" / "bin" / "npm"), "/usr/local/bin/npm"]:
         if os.path.isfile(try_npm):
@@ -1194,16 +1198,16 @@ def _ensure_openclaw_channel_deps(live_cb=None):
     _log(f"[OpenClaw] Using npm: {npm_bin}, pkg_dir: {pkg_dir}")
     try:
         proc = subprocess.run(
-            [npm_bin, "install", "--no-save", "--ignore-scripts", "@buape/carbon"],
+            [npm_bin, "install", "--no-save", "--ignore-scripts", *missing_runtime_deps],
             cwd=pkg_dir, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, timeout=120, env=npm_env,
         )
         if proc.returncode == 0:
-            _log("[OpenClaw] Required OpenClaw UI dependency installed.")
+            _log("[OpenClaw] Required OpenClaw runtime dependencies installed.")
         else:
             _log(f"[OpenClaw] WARNING: npm install failed: {(proc.stdout or '')[:400]}")
     except Exception as e:
-        _log(f"[OpenClaw] WARNING: Could not install required OpenClaw UI dependency: {e}")
+        _log(f"[OpenClaw] WARNING: Could not install required OpenClaw runtime dependencies: {e}")
 
 
 def _ensure_openclaw_os_config(form=None, live_cb=None):

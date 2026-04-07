@@ -43,16 +43,23 @@ require_runtime_dep() {
     local pkg_dir="$1"
     local dep_name="$2"
     [ -d "$pkg_dir" ] || return 1
-    local dep_dir="${pkg_dir}/node_modules/${dep_name}"
-    if [ -f "${dep_dir}/package.json" ]; then
+    if node -e "require.resolve('$dep_name', { paths: ['$pkg_dir'] })" >/dev/null 2>&1; then
         return 0
     fi
     log "Repairing missing OpenClaw runtime dependency: $dep_name"
     (cd "$pkg_dir" && npm install --no-save --ignore-scripts "$dep_name" 2>&1) || true
-    if [ -f "${dep_dir}/package.json" ]; then
+    if node -e "require.resolve('$dep_name', { paths: ['$pkg_dir'] })" >/dev/null 2>&1; then
         return 0
     fi
     return 1
+}
+
+ensure_openclaw_runtime_deps() {
+    local pkg_dir="$1"
+    local dep
+    for dep in "@buape/carbon" "@larksuiteoapi/node-sdk"; do
+        require_runtime_dep "$pkg_dir" "$dep" || return 1
+    done
 }
 
 verify_openclaw_install() {
@@ -61,7 +68,7 @@ verify_openclaw_install() {
     local bin_dir pkg_dir
     bin_dir="$(cd "$(dirname "$OPENCLAW_BIN")" && pwd)" || return 1
     pkg_dir="$(cd "${bin_dir}/../lib/node_modules/openclaw" 2>/dev/null && pwd)" || return 1
-    require_runtime_dep "$pkg_dir" "@buape/carbon" || return 1
+    ensure_openclaw_runtime_deps "$pkg_dir" || return 1
 }
 
 check_gateway_http() {
@@ -199,7 +206,7 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     # Install optional peer dependencies for channels (Telegram, Discord, Slack, etc.)
     OC_PKG_DIR="$NPM_GLOBAL/lib/node_modules/openclaw"
     if [ -d "$OC_PKG_DIR" ]; then
-        require_runtime_dep "$OC_PKG_DIR" "@buape/carbon" || true
+        ensure_openclaw_runtime_deps "$OC_PKG_DIR" || true
     fi
 else
     # Linux — install as openclaw user
@@ -324,6 +331,7 @@ else
         pkill -f "openclaw gateway" 2>/dev/null || true
         pkill -f "https-proxy.py" 2>/dev/null || true
         sleep 1
+        : > "$LOG_FILE"
         if [ ! -x "$OPENCLAW_BIN" ]; then
             log "ERROR: OpenClaw binary not found at $OPENCLAW_BIN"
             log "Trying to find it..."
