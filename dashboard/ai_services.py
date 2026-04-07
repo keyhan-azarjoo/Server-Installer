@@ -566,10 +566,14 @@ def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
 
     profiles = auth.get("profiles") if isinstance(auth.get("profiles"), dict) else {}
     last_good = auth.get("lastGood") if isinstance(auth.get("lastGood"), dict) else {}
-    for provider in OPENCLAW_MANAGED_PROVIDERS:
-        for key in [k for k in list(profiles.keys()) if str(k).startswith(f"{provider}:")]:
+    accessible_providers = set(providers.keys())
+    for key in list(profiles.keys()):
+        provider_name = str((profiles.get(key) or {}).get("provider") or "").strip().lower()
+        if not provider_name or provider_name not in accessible_providers:
             profiles.pop(key, None)
-        last_good.pop(provider, None)
+    for provider in list(last_good.keys()):
+        if str(provider).strip().lower() not in accessible_providers:
+            last_good.pop(provider, None)
     for provider, info in providers.items():
         profile_name = f"{provider}:local" if provider in ("ollama", "lmstudio") else f"{provider}:default"
         profiles[profile_name] = {"type": "api_key", "provider": provider, "key": str(info.get("apiKey") or "")}
@@ -591,9 +595,12 @@ def sync_openclaw_provider_catalog(form=None, home_dir=None, live_cb=None):
         providers_cfg = {}
         models_cfg["providers"] = providers_cfg
 
-    for provider in OPENCLAW_MANAGED_PROVIDERS:
-        providers_cfg.pop(provider, None)
-        for key in [k for k in list(catalog_cfg.keys()) if str(k).startswith(f"{provider}/")]:
+    for provider in list(providers_cfg.keys()):
+        if str(provider).strip().lower() not in accessible_providers:
+            providers_cfg.pop(provider, None)
+    for key in list(catalog_cfg.keys()):
+        provider_name = str(key).split("/", 1)[0].strip().lower()
+        if provider_name not in accessible_providers:
             catalog_cfg.pop(key, None)
 
     ordered_models = []
