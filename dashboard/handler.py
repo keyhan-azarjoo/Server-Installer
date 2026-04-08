@@ -149,6 +149,7 @@ from ai_services import (
     run_lmstudio_delete,
     run_lmstudio_docker,
     run_openclaw_os_install,
+    run_openclaw_install_script,
     run_openclaw_start,
     run_openclaw_stop,
     run_openclaw_delete,
@@ -2349,6 +2350,15 @@ print("Gateway reload requested via SIGUSR1.")
                 self.write_json({"job_id": job_id, "title": title})
             else:
                 code, output = run_openclaw_docker(form)
+                self.respond_run_result(title, code, output)
+            return
+        if self.path == "/run/openclaw_install_script":
+            title = "OpenClaw Install"
+            if self.is_fetch():
+                job_id = start_live_job(title, lambda cb: run_openclaw_install_script(form, live_cb=cb))
+                self.write_json({"job_id": job_id, "title": title})
+            else:
+                code, output = run_openclaw_install_script(form)
                 self.respond_run_result(title, code, output)
             return
         if self.path in ("/run/openclaw_windows_os", "/run/openclaw_unix_os"):

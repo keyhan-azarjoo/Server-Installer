@@ -1645,6 +1645,25 @@ def run_openclaw_os_install(form=None, live_cb=None):
         return code, out
 
 
+def run_openclaw_install_script(form=None, live_cb=None):
+    if live_cb:
+        if os.name == "nt":
+            live_cb("[INFO] Running: powershell -c \"irm https://openclaw.ai/install.ps1 | iex\"\n")
+        else:
+            live_cb("[INFO] Running: curl -fsSL https://openclaw.ai/install.sh | bash\n")
+    if os.name == "nt":
+        return run_process(
+            ["powershell.exe", "-NoProfile", "-Command", "irm https://openclaw.ai/install.ps1 | iex"],
+            env=os.environ.copy(),
+            live_cb=live_cb,
+        )
+    return run_process(
+        ["bash", "-lc", "curl -fsSL https://openclaw.ai/install.sh | bash"],
+        env=os.environ.copy(),
+        live_cb=live_cb,
+    )
+
+
 def _ensure_openclaw_channel_deps(live_cb=None):
     """Install optional peer dependencies for OpenClaw channels (Telegram, Discord, Slack)."""
     state = _read_json_file(OPENCLAW_STATE_FILE)
