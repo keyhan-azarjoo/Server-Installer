@@ -2,6 +2,164 @@
   var ns = window.ServerInstallerUI = window.ServerInstallerUI || {};
   ns.pages = ns.pages || {};
 
+  function OpenClawTerminal(props) {
+    var Box = MaterialUI.Box;
+    var cwd = props.cwd;
+    var queuedInput = props.queuedInput;
+    var queuedInputKey = props.queuedInputKey;
+    var onStatusChange = props.onStatusChange;
+
+    var containerRef = React.useRef(null);
+    var termRef = React.useRef(null);
+    var wsRef = React.useRef(null);
+    var fitRef = React.useRef(null);
+    var lastSentKeyRef = React.useRef(0);
+    var pendingInputRef = React.useRef("");
+    var pendingInputKeyRef = React.useRef(0);
+
+    React.useEffect(function() {
+      pendingInputRef.current = queuedInput || "";
+      pendingInputKeyRef.current = queuedInputKey || 0;
+    }, [queuedInput, queuedInputKey]);
+
+    React.useEffect(function() {
+      var el = containerRef.current;
+      if (!el) return;
+
+      var T = window.Terminal;
+      if (!T) {
+        el.style.cssText = "display:flex;align-items:center;justify-content:center;background:#0d1117;color:#c9d1d9;font-family:monospace;font-size:13px;padding:24px;";
+        el.textContent = "Terminal unavailable: xterm.js could not be loaded.";
+        if (onStatusChange) onStatusChange("Unavailable");
+        return;
+      }
+
+      var term = new T({
+        cursorBlink: true,
+        convertEol: true,
+        fontFamily: "'Cascadia Code', 'Fira Code', Consolas, 'Courier New', monospace",
+        fontSize: 13,
+        theme: {
+          background: "#0d1117",
+          foreground: "#c9d1d9",
+          cursor: "#f0f6fc",
+          selectionBackground: "#264f78",
+          black: "#0d1117",
+          red: "#ff7b72",
+          green: "#3fb950",
+          yellow: "#d29922",
+          blue: "#58a6ff",
+          magenta: "#d2a8ff",
+          cyan: "#39c5cf",
+          white: "#c9d1d9",
+          brightBlack: "#8b949e",
+          brightRed: "#ffa198",
+          brightGreen: "#56d364",
+          brightYellow: "#e3b341",
+          brightBlue: "#79c0ff",
+          brightMagenta: "#d2a8ff",
+          brightCyan: "#56d4dd",
+          brightWhite: "#f0f6fc",
+        },
+      });
+      var FA = window.FitAddon;
+      var fitAddon = null;
+      if (FA && FA.FitAddon) {
+        fitAddon = new FA.FitAddon();
+        term.loadAddon(fitAddon);
+      }
+      term.open(el);
+      if (fitAddon) {
+        try { fitAddon.fit(); } catch (_) {}
+      }
+      term.focus();
+      termRef.current = term;
+      fitRef.current = fitAddon;
+
+      var proto = location.protocol === "https:" ? "wss:" : "ws:";
+      var cols = term.cols || 80;
+      var rows = term.rows || 24;
+      var ws = new WebSocket(proto + "//" + location.host + "/ws/pty?cwd=" + encodeURIComponent(cwd || "") + "&cols=" + cols + "&rows=" + rows);
+      ws.binaryType = "arraybuffer";
+      wsRef.current = ws;
+      if (onStatusChange) onStatusChange("Connecting");
+
+      ws.onopen = function() {
+        if (fitAddon) {
+          try { fitAddon.fit(); } catch (_) {}
+        }
+        if (onStatusChange) onStatusChange("Connected");
+        if (pendingInputRef.current && pendingInputKeyRef.current && pendingInputKeyRef.current !== lastSentKeyRef.current) {
+          lastSentKeyRef.current = pendingInputKeyRef.current;
+          ws.send(pendingInputRef.current);
+        }
+        term.focus();
+      };
+      ws.onmessage = function(e) {
+        if (e.data instanceof ArrayBuffer) term.write(new Uint8Array(e.data));
+        else term.write(e.data);
+      };
+      ws.onclose = function() {
+        term.write("\r\n\x1b[33m[Terminal disconnected]\x1b[0m\r\n");
+        if (onStatusChange) onStatusChange("Disconnected");
+      };
+      ws.onerror = function() {
+        term.write("\r\n\x1b[31m[Connection failed]\x1b[0m\r\n");
+        if (onStatusChange) onStatusChange("Error");
+      };
+
+      term.onData(function(data) {
+        if (ws.readyState === WebSocket.OPEN) ws.send(data);
+      });
+
+      var sendResize = function() {
+        if (fitAddon) {
+          try { fitAddon.fit(); } catch (_) {}
+        }
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "resize", cols: term.cols, rows: term.rows }));
+        }
+      };
+      var observer = new ResizeObserver(sendResize);
+      observer.observe(el);
+
+      return function() {
+        observer.disconnect();
+        try { ws.close(); } catch (_) {}
+        try { term.dispose(); } catch (_) {}
+        termRef.current = null;
+        wsRef.current = null;
+        fitRef.current = null;
+      };
+    }, [cwd, onStatusChange]);
+
+    React.useEffect(function() {
+      if (!queuedInput || !queuedInputKey || queuedInputKey === lastSentKeyRef.current) return;
+      var ws = wsRef.current;
+      var term = termRef.current;
+      if (!ws || !term) return;
+      if (ws.readyState !== WebSocket.OPEN) return;
+      lastSentKeyRef.current = queuedInputKey;
+      ws.send(queuedInput);
+      term.focus();
+    }, [queuedInput, queuedInputKey]);
+
+    return (
+      <Box ref={containerRef} sx={{
+        width: "100%",
+        minHeight: 420,
+        height: { xs: 420, md: 520 },
+        flexGrow: 1,
+        bgcolor: "#0d1117",
+        overflow: "hidden",
+        borderRadius: 2,
+        "& .xterm": { height: "100%", padding: "8px" },
+        "& .xterm-viewport": { overflowY: "auto !important" },
+        "& .xterm-screen": { cursor: "text" },
+      }} />
+    );
+  }
+
   ns.pages["agent-openclaw"] = function renderOpenClawPage(p) {
     var Grid = p.Grid, Card = p.Card, CardContent = p.CardContent;
     var Typography = p.Typography, Stack = p.Stack, Button = p.Button;
@@ -10,8 +168,6 @@
     var isServiceRunningStatus = p.isServiceRunningStatus, onServiceAction = p.onServiceAction;
     var renderServiceUrls = p.renderServiceUrls;
     var setPage = p.setPage, copyText = p.copyText;
-    var termText = String(p.termText || "");
-    var termState = String(p.termState || "Idle");
 
     var ocInfo = p.openclawService || {};
     var ollamaInfo = p.ollamaService || {};
@@ -40,27 +196,20 @@
     }
 
     var installScriptCommand = cfg.os === "windows"
-      ? 'powershell -c "irm https://openclaw.ai/install.ps1 | iex"'
-      : "curl -fsSL https://openclaw.ai/install.sh | bash";
-    var terminalDisplayText = termText && termText.trim() ? termText : "Ready. Click Start to run and stream output.";
-    var terminalScrollRef = React.useRef(null);
-    var startFormRef = React.useRef(null);
-
-    React.useEffect(function() {
-      if (terminalScrollRef.current) {
-        terminalScrollRef.current.scrollTop = terminalScrollRef.current.scrollHeight;
-      }
-    }, [terminalDisplayText]);
+      ? "powershell -c \"irm https://openclaw.ai/install.ps1 | iex\"\r"
+      : "curl -fsSL https://openclaw.ai/install.sh | bash\n";
+    var installCwd = String(ocInfo.install_dir || "").trim();
+    var _terminalStatus = React.useState("Connecting");
+    var terminalStatus = _terminalStatus[0], setTerminalStatus = _terminalStatus[1];
+    var _queuedInput = React.useState("");
+    var queuedInput = _queuedInput[0], setQueuedInput = _queuedInput[1];
+    var _queuedInputKey = React.useState(0);
+    var queuedInputKey = _queuedInputKey[0], setQueuedInputKey = _queuedInputKey[1];
+    var actionFormRef = React.useRef(null);
 
     var startInstall = function() {
-      var formEl = startFormRef.current;
-      if (!formEl) return;
-      run(
-        { preventDefault: function() {}, currentTarget: formEl, target: formEl },
-        "/run/openclaw_install_script",
-        "OpenClaw Install",
-        formEl
-      );
+      setQueuedInput(installScriptCommand);
+      setQueuedInputKey(Date.now());
     };
 
     return (
@@ -71,17 +220,17 @@
               <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ xs: "stretch", sm: "center" }} spacing={1.5} sx={{ mb: 2 }}>
                 <Box sx={{ flexGrow: 1 }}>
                   <Typography variant="h6" fontWeight={800} sx={{ color: "#dc2626" }}>OpenClaw Install</Typography>
-                  <Typography variant="body2" color="text.secondary">Start the official installer script and watch the output here.</Typography>
+                  <Typography variant="body2" color="text.secondary">This is a real terminal. Click Start, then type, press Enter, and answer prompts directly in the shell.</Typography>
                 </Box>
-                <Chip label={termState} size="small" sx={{ alignSelf: { xs: "flex-start", sm: "center" }, bgcolor: "#fee2e2", color: "#991b1b", fontWeight: 700 }} />
+                <Chip label={terminalStatus} size="small" sx={{ alignSelf: { xs: "flex-start", sm: "center" }, bgcolor: "#fee2e2", color: "#991b1b", fontWeight: 700 }} />
               </Stack>
-              <Box component="form" ref={startFormRef}>
+              <Box component="form" ref={actionFormRef}>
                 <Stack direction={{ xs: "column", sm: "row" }} spacing={1.5} sx={{ mb: 2 }}>
                   <Button variant="contained" onClick={startInstall}
                     sx={{ textTransform: "none", bgcolor: "#dc2626", "&:hover": { bgcolor: "#b91c1c" }, fontWeight: 700, px: 3 }}>
                     Start
                   </Button>
-                  <Button variant="outlined" onClick={function() { if (copyText) copyText(installScriptCommand, "Command"); }}
+                  <Button variant="outlined" onClick={function() { if (copyText) copyText(installScriptCommand.trim(), "Command"); }}
                     sx={{ textTransform: "none", fontWeight: 700 }}>
                     Copy Command
                   </Button>
@@ -90,30 +239,16 @@
               <Paper elevation={0} sx={{ p: 1.5, mb: 2, bgcolor: "#f8fafc", borderRadius: 2, border: "1px solid #e2e8f0" }}>
                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>Command</Typography>
                 <Typography variant="body2" sx={{ fontFamily: "'Cascadia Code', 'Fira Code', monospace", fontSize: 12, wordBreak: "break-all" }}>
-                  {installScriptCommand}
+                  {installScriptCommand.trim()}
                 </Typography>
               </Paper>
-              <Paper
-                ref={terminalScrollRef}
-                elevation={0}
-                sx={{
-                  bgcolor: "#0d1117",
-                  borderRadius: 2,
-                  border: "1px solid #30363d",
-                  p: 2,
-                  minHeight: 320,
-                  maxHeight: 420,
-                  overflowY: "auto",
-                  overflowX: "auto",
-                  fontFamily: "'Cascadia Code', 'Fira Code', 'Consolas', monospace",
-                  fontSize: "0.85rem",
-                  lineHeight: 1.6,
-                  color: "#c9d1d9",
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                }}
-              >
-                {terminalDisplayText}
+              <Paper elevation={0} sx={{ bgcolor: "#0d1117", borderRadius: 2, border: "1px solid #30363d", overflow: "hidden" }}>
+                <OpenClawTerminal
+                  cwd={installCwd}
+                  queuedInput={queuedInput}
+                  queuedInputKey={queuedInputKey}
+                  onStatusChange={setTerminalStatus}
+                />
               </Paper>
             </CardContent>
           </Card>
@@ -135,12 +270,7 @@
                     {installed && <Button variant="outlined" size="small" disabled={serviceBusy} onClick={function() { onServiceAction(running ? "stop" : "start", primaryService); }} sx={{ textTransform: "none", fontSize: 12 }}>{running ? "Stop" : "Start"}</Button>}
                     {installed && <Button variant="outlined" size="small" color="error" disabled={serviceBusy} onClick={function() {
                       if (!window.confirm("Are you sure you want to completely uninstall OpenClaw?\n\nThis action cannot be undone.")) return;
-                      run(
-                        { preventDefault: function() {}, currentTarget: startFormRef.current, target: startFormRef.current },
-                        "/run/openclaw_delete",
-                        "Uninstall OpenClaw",
-                        startFormRef.current
-                      );
+                      run({ preventDefault: function() {}, currentTarget: actionFormRef.current, target: actionFormRef.current }, "/run/openclaw_delete", "Uninstall OpenClaw", actionFormRef.current);
                     }} sx={{ textTransform: "none", fontSize: 12 }}>Uninstall</Button>}
                   </Stack>
                 </Grid>
@@ -201,7 +331,7 @@
                     return (
                       <Paper key={"oc-" + svc.name} variant="outlined" sx={{ p: 1.5, borderRadius: 2 }}>
                         <Typography variant="body2" fontWeight={700}>{svc.display_name || svc.name}</Typography>
-                        <Typography variant="caption" color="text.secondary">{svc.kind} · {svc.status}</Typography>
+                        <Typography variant="caption" color="text.secondary">{svc.kind} | {svc.status}</Typography>
                         {renderServiceUrls(svc)}
                         <Stack direction="row" spacing={0.5} sx={{ mt: 1 }}>
                           <Button size="small" variant="outlined" color={svcRunning ? "error" : "success"} disabled={serviceBusy} onClick={function() { onServiceAction(svcRunning ? "stop" : "start", svc); }} sx={{ textTransform: "none", fontSize: 11, py: 0.3 }}>{svcRunning ? "Stop" : "Start"}</Button>
