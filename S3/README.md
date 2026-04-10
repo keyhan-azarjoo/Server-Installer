@@ -98,6 +98,186 @@ If domain works on server but not on other computers, set DNS properly:
 
 Without DNS mapping, use IP URL directly.
 
+## Manual Docker Setup
+
+If you want to run MinIO manually with Docker and Nginx, this structure works:
+
+```text
+C:\keyhan\API\S3
+```
+
+### Step 0: Clean everything
+
+```powershell
+cd C:\keyhan\API\S3
+docker compose down
+Remove-Item -Recurse -Force data, certs, nginx, docker-compose.yml -ErrorAction Ignore
+```
+
+### Step 1: Create structure
+
+```powershell
+mkdir data
+mkdir certs
+mkdir nginx
+```
+
+### Step 2: Generate SSL without installing OpenSSL locally
+
+```powershell
+docker run --rm -v ${PWD}/certs:/certs alpine sh -c "apk add --no-cache openssl && openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /certs/private.key -out /certs/public.crt -subj '/CN=localhost'"
+```
+
+After this you must have:
+
+```text
+certs/private.key
+certs/public.crt
+```
+
+### Step 3: Create `nginx\nginx.conf`
+
+```powershell
+notepad nginx\nginx.conf
+```
+
+Paste:
+
+```nginx
+events {}
+
+http {
+    server {
+        listen 80;
+
+        location / {
+            proxy_pass http://minio:9001;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+
+    server {
+        listen 443 ssl;
+
+        ssl_certificate /etc/nginx/certs/public.crt;
+        ssl_certificate_key /etc/nginx/certs/private.key;
+
+        location / {
+            proxy_pass http://minio:9001;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+        }
+    }
+}
+```
+
+### Step 4: Create `docker-compose.yml`
+
+```powershell
+notepad docker-compose.yml
+```
+
+Paste:
+
+```yaml
+services:
+  minio:
+    image: minio/minio:RELEASE.2024-01-16T16-07-38Z
+    container_name: minio
+    restart: unless-stopped
+
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: admin123
+
+    command: server /data --console-address ":9001"
+
+    volumes:
+      - ./data:/data
+
+    expose:
+      - "9000"
+      - "9001"
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    restart: unless-stopped
+
+    ports:
+      - "80:80"
+      - "443:443"
+
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+
+    depends_on:
+      - minio
+```
+
+### Step 5: Run everything
+
+```powershell
+docker compose up -d
+```
+
+### Step 6: Access
+
+HTTP:
+
+```text
+http://localhost
+```
+
+HTTPS:
+
+```text
+https://localhost
+```
+
+### Login
+
+- Username: `admin`
+- Password: `admin123`
+
+### What you should see
+
+The MinIO UI sidebar should include:
+
+- Buckets
+- Identity
+- Users
+- Access Keys
+- Policies
+
+### If something is wrong
+
+Check logs:
+
+```powershell
+docker logs nginx
+docker logs minio
+```
+
+### Why this works
+
+- MinIO API listens on `9000`.
+- MinIO Console UI listens on `9001`.
+- Nginx handles both HTTP and HTTPS in front of MinIO.
+- This setup proxies the UI through `/` to `http://minio:9001`.
+
+### Optional: Expose the S3 API through Nginx later
+
+If you also want an API path through the reverse proxy, add this block to `nginx.conf`:
+
+```nginx
+location /s3/ {
+    proxy_pass http://minio:9000;
+}
+```
+
 ## Known Notes
 
 - If Docker Compose fails with `invalid proto:`, installer automatically falls back to `docker run`.
