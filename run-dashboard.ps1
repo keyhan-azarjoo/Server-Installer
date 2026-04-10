@@ -46,6 +46,8 @@ function Test-IsAdministrator {
 
 function Restart-Elevated {
     $argLine = Get-InvocationArgumentLine -ScriptPath $PSCommandPath -Arguments $DashboardArgs
+    Write-Host "Administrator access is required. Waiting for the Windows UAC prompt..."
+    Write-Host "If nothing appears, check for a hidden UAC dialog or rerun this PowerShell window as Administrator."
     $proc = Start-Process -FilePath "powershell.exe" -ArgumentList $argLine -Verb RunAs -Wait -PassThru
     exit $proc.ExitCode
 }

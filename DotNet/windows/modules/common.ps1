@@ -6,6 +6,26 @@ function Test-Command {
     return [bool](Get-Command $Name -ErrorAction SilentlyContinue)
 }
 
+function Get-DotNetExecutablePath {
+    $dotnetCommand = Get-Command "dotnet" -ErrorAction SilentlyContinue
+    if ($dotnetCommand -and $dotnetCommand.Source) {
+        return $dotnetCommand.Source
+    }
+
+    foreach ($candidate in @(
+        (Join-Path $env:ProgramFiles "dotnet\dotnet.exe"),
+        (Join-Path ${env:ProgramFiles(x86)} "dotnet\dotnet.exe"),
+        "C:\Program Files\dotnet\dotnet.exe",
+        "C:\Program Files (x86)\dotnet\dotnet.exe"
+    )) {
+        if ($candidate -and (Test-Path -LiteralPath $candidate)) {
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
 function Assert-Administrator {
     param([hashtable]$OriginalBoundParameters)
 
@@ -105,22 +125,24 @@ function Install-Executable {
 function Test-DotNetSdkInstalled {
     param([Parameter(Mandatory = $true)][string]$MajorVersion)
 
-    if (-not (Test-Command -Name "dotnet")) {
+    $dotnetExe = Get-DotNetExecutablePath
+    if (-not $dotnetExe) {
         return $false
     }
 
-    $sdkList = & dotnet --list-sdks 2>$null
+    $sdkList = & $dotnetExe --list-sdks 2>$null
     return [bool]($sdkList | Where-Object { $_ -match "^$([regex]::Escape($MajorVersion))\." })
 }
 
 function Test-AspNetRuntimeInstalled {
     param([Parameter(Mandatory = $true)][string]$MajorVersion)
 
-    if (-not (Test-Command -Name "dotnet")) {
+    $dotnetExe = Get-DotNetExecutablePath
+    if (-not $dotnetExe) {
         return $false
     }
 
-    $runtimeList = & dotnet --list-runtimes 2>$null
+    $runtimeList = & $dotnetExe --list-runtimes 2>$null
     return [bool]($runtimeList | Where-Object { $_ -match "^Microsoft\.AspNetCore\.App $([regex]::Escape($MajorVersion))\." })
 }
 

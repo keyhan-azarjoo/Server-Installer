@@ -68,12 +68,7 @@ function Install-DotNetForSelectedMode {
     $supportsSkipHostingBundle = $installCommand.Parameters.ContainsKey("SkipHostingBundle")
 
     if ($SelectedMode -eq "Docker") {
-        if ($supportsSkipHostingBundle) {
-            Install-DotNetPrerequisites -Channel $Channel -SdkUrl $SdkUrl -RuntimeUrl $RuntimeUrl -HostingUrl $HostingUrl -SkipHostingBundle
-        }
-        else {
-            Install-DotNetPrerequisites -Channel $Channel -SdkUrl $SdkUrl -RuntimeUrl $RuntimeUrl -HostingUrl $HostingUrl
-        }
+        Write-Host "Docker deployment selected. Skipping host .NET SDK/runtime installation because the published app runs inside the container image."
         return
     }
 
