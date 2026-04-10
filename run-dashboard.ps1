@@ -244,6 +244,7 @@ function Ensure-Python {
 
 function Get-LocalIPv4Addresses {
     $ips = @()
+    $virtualAliasPattern = 'vEthernet|WSL|Hyper-V|VirtualBox|VMware|Loopback|Bluetooth|Tailscale|ZeroTier|Docker|Container|Npcap'
 
     try {
         $ips = Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue |
@@ -251,7 +252,8 @@ function Get-LocalIPv4Addresses {
                 $_.IPAddress -and
                 $_.IPAddress -ne "127.0.0.1" -and
                 $_.IPAddress -notlike "169.254.*" -and
-                $_.PrefixOrigin -ne "WellKnown"
+                $_.PrefixOrigin -ne "WellKnown" -and
+                ($_.InterfaceAlias -notmatch $virtualAliasPattern)
             } |
             Select-Object -ExpandProperty IPAddress -Unique
     } catch {

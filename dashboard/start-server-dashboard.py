@@ -442,6 +442,9 @@ def ensure_files(root: Path) -> None:
 def preferred_host(arg_host: str) -> str:
     if arg_host and arg_host not in ("auto", "0.0.0.0"):
         return arg_host
+    for ip in get_local_ipv4_addresses():
+        if ip:
+            return ip
     try:
         import socket
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -1215,6 +1218,31 @@ def resolve_windows_python() -> str:
 
 
 def get_local_ipv4_addresses():
+    if os.name == "nt":
+        try:
+            script = (
+                "$pattern = 'vEthernet|WSL|Hyper-V|VirtualBox|VMware|Loopback|Bluetooth|Tailscale|ZeroTier|Docker|Container|Npcap'; "
+                "Get-NetIPAddress -AddressFamily IPv4 -ErrorAction SilentlyContinue | "
+                "Where-Object { "
+                "$_.IPAddress -and $_.IPAddress -ne '127.0.0.1' -and $_.IPAddress -notlike '169.254.*' -and "
+                "$_.PrefixOrigin -ne 'WellKnown' -and $_.InterfaceAlias -notmatch $pattern "
+                "} | "
+                "Select-Object -ExpandProperty IPAddress -Unique"
+            )
+            proc = subprocess.run(
+                ["powershell.exe", "-NoProfile", "-Command", script],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                timeout=8,
+            )
+            if proc.returncode == 0:
+                ips = [line.strip() for line in (proc.stdout or "").splitlines() if line.strip()]
+                if ips:
+                    return ips
+        except Exception:
+            pass
+
     ips = []
     try:
         for ip in socket.gethostbyname_ex(socket.gethostname())[2]:
