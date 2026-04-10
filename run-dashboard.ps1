@@ -13,8 +13,30 @@ $RepoBase = "https://raw.githubusercontent.com/keyhan-azarjoo/Server-Installer/m
 $RequestedPythonVersion = "3.12"
 $PythonSetupRelativePath = "Python/windows/setup-python.ps1"
 $DashboardBootstrapRelativePath = "dashboard/start-server-dashboard-bootstrap.ps1"
-$ProgramDataRoot = Join-Path $env:ProgramData "Server-Installer"
-$DashboardStatePath = Join-Path $ProgramDataRoot "dashboard\service-state.json"
+
+function Get-InstallerRoot {
+    $override = [string]$env:SERVER_INSTALLER_DATA_DIR
+    if (-not [string]::IsNullOrWhiteSpace($override)) {
+        return $override
+    }
+
+    $launchDir = [string]$env:SERVER_INSTALLER_LAUNCH_DIR
+    if ([string]::IsNullOrWhiteSpace($launchDir)) {
+        $launchDir = (Get-Location).Path
+    }
+
+    $launchDir = [System.IO.Path]::GetFullPath($launchDir)
+    if ([System.IO.Path]::GetFileName($launchDir).Equals("Server-Installer", [System.StringComparison]::OrdinalIgnoreCase)) {
+        return $launchDir
+    }
+
+    return (Join-Path $launchDir "Server-Installer")
+}
+
+$InstallerRoot = Get-InstallerRoot
+$DashboardStatePath = Join-Path $InstallerRoot "dashboard\service-state.json"
+$env:SERVER_INSTALLER_LAUNCH_DIR = Split-Path -Parent $InstallerRoot
+$env:SERVER_INSTALLER_DATA_DIR = $InstallerRoot
 
 function Test-IsAdministrator {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
@@ -361,6 +383,7 @@ function Invoke-DashboardBootstrap {
 
     $env:DASHBOARD_HTTPS = "1"
     $env:SERVER_INSTALLER_FORCE_DOWNLOAD = "1"
+    $env:SERVER_INSTALLER_WINDOWS_DIRECT = "1"
     Write-Host "Repairing dashboard startup and launching the dashboard..."
     & $bootstrapPath @DashboardArgs
     return $LASTEXITCODE

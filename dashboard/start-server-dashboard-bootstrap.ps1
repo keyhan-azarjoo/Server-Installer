@@ -424,7 +424,11 @@ function Ensure-DashboardCaCertificate([string]$CertPath, [string]$KeyPath) {
   Set-Content -Path $KeyPath -Value (ConvertTo-PrivateKeyPem -Cert $leafCert) -Encoding ascii
 }
 
-$root = Join-Path $env:ProgramData "Server-Installer"
+$root = $env:SERVER_INSTALLER_DATA_DIR
+if ([string]::IsNullOrWhiteSpace($root)) {
+  $root = Join-Path $env:ProgramData "Server-Installer"
+}
+$root = [System.IO.Path]::GetFullPath($root)
 New-Item -ItemType Directory -Force -Path $root | Out-Null
 $pyDir = Join-Path $root "python"
 New-Item -ItemType Directory -Force -Path $root | Out-Null

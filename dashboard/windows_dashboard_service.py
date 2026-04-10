@@ -53,6 +53,12 @@ SERVICE_MODULE = "windows_dashboard_service"
 
 
 def data_root() -> Path:
+    override = os.environ.get("SERVER_INSTALLER_DATA_DIR", "").strip()
+    if override:
+        return Path(override)
+    sibling_root = Path(__file__).resolve().parents[1]
+    if (sibling_root / "dashboard" / "start-server-dashboard.py").exists():
+        return sibling_root
     return Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer"
 
 

@@ -320,6 +320,9 @@ def sync_files_for_current_os():
 
 
 def cache_root() -> Path:
+    override = os.environ.get("SERVER_INSTALLER_DATA_DIR", "").strip()
+    if override:
+        return Path(override)
     if os.name == "nt":
         base = Path(os.environ.get("ProgramData", "C:/ProgramData"))
         return base / "Server-Installer"
@@ -1058,8 +1061,7 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
 
     python_exe = resolve_windows_python()
     service_name = "ServerInstallerDashboard"
-    program_data = Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer"
-    log_dir = program_data / "logs"
+    log_dir = cache_root() / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / "server-installer-dashboard.log"
     service_script = (root / "dashboard" / "windows_dashboard_service.py").resolve()
@@ -1201,12 +1203,113 @@ def install_or_update_windows_task(root: Path, bind_host: str, selected_port: in
     return 0
 
 
+def launch_windows_dashboard_direct(root: Path, bind_host: str, selected_port: int, display_host: str) -> int:
+    if os.name != "nt":
+        return 1
+
+    owner_state, own, foreign = port_owner_state(selected_port)
+    if owner_state == "foreign":
+        print(
+            f"Port {selected_port} is owned by another process ({', '.join(map(str, sorted(foreign)))}). "
+            "Choose another port.",
+            file=sys.stderr,
+        )
+        return 1
+    if owner_state == "dashboard":
+        stop_existing_dashboard_on_port(selected_port)
+
+    python_exe = resolve_windows_python()
+    log_dir = cache_root() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "server-installer-dashboard.log"
+    fallback_log_path = log_dir / "server-installer-dashboard-fallback.log"
+    use_https, cert_path, key_path = resolve_https_config()
+
+    state_file = root / "dashboard" / "service-state.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "service": "ServerInstallerDashboard-Direct",
+                "root": str(root),
+                "host": bind_host,
+                "port": selected_port,
+                "updated_at": int(time.time()),
+            },
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    log_fp = try_open_append_log(log_path, fallback_log_path)
+    creation_flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    cmd = [
+        python_exe,
+        str((root / "dashboard" / "start-server-dashboard.py").resolve()),
+        "--run-server",
+        "--host",
+        bind_host,
+        "--port",
+        str(selected_port),
+        "--https",
+        "--cert",
+        cert_path,
+        "--key",
+        key_path,
+    ]
+    popen_kwargs = {
+        "cwd": str(root),
+        "creationflags": creation_flags,
+    }
+    if log_fp is not None:
+        popen_kwargs["stdout"] = log_fp
+        popen_kwargs["stderr"] = log_fp
+    else:
+        popen_kwargs["stdout"] = subprocess.DEVNULL
+        popen_kwargs["stderr"] = subprocess.DEVNULL
+
+    try:
+        try:
+            subprocess.Popen(cmd, **popen_kwargs)
+        finally:
+            if log_fp is not None:
+                log_fp.close()
+    except Exception as ex:
+        print(f"Failed to launch dashboard process: {ex}", file=sys.stderr)
+        print(f"Check log path: {log_path}", file=sys.stderr)
+        return 1
+
+    ok, detail = wait_for_local_http(selected_port, seconds=20, use_https=use_https)
+    urls = [f"https://127.0.0.1:{selected_port}"]
+    for ip in get_local_ipv4_addresses():
+        candidate = f"https://{ip}:{selected_port}"
+        if candidate not in urls:
+            urls.append(candidate)
+    if display_host and display_host not in ("127.0.0.1", "localhost"):
+        candidate = f"https://{display_host}:{selected_port}"
+        if candidate not in urls:
+            urls.insert(0, candidate)
+
+    print("")
+    print("=" * 60)
+    print("  Server Installer Dashboard")
+    print("=" * 60)
+    for url in urls:
+        print(f"  URL:      {url}")
+    print(f"  Port:     {selected_port}")
+    if ok:
+        print(f"  Status:   RUNNING (HTTP {detail})")
+    else:
+        print(f"  Status:   STARTING/FAILED (check log: {log_path})")
+    print("=" * 60)
+    print("")
+    return 0 if ok else 1
+
+
 def resolve_windows_python() -> str:
     env_override = os.environ.get("SERVER_INSTALLER_PYTHON", "").strip()
     if env_override and Path(env_override).exists():
         return env_override
-    program_data = Path(os.environ.get("ProgramData", "C:/ProgramData"))
-    embedded = program_data / "Server-Installer" / "python" / "python.exe"
+    embedded = cache_root() / "python" / "python.exe"
     if embedded.exists():
         return str(embedded)
     python_state_file = cache_root() / "python" / "python-state.json"
@@ -1521,6 +1624,10 @@ def main() -> int:
 
     if os.name != "nt":
         return install_or_update_linux_service(root, bind_host, selected_port, display_host)
+
+    direct_windows = os.environ.get("SERVER_INSTALLER_WINDOWS_DIRECT", "").strip().lower() in ("1", "true", "yes", "y", "on")
+    if direct_windows:
+        return launch_windows_dashboard_direct(root, bind_host, selected_port, display_host)
 
     return install_or_update_windows_task(root, bind_host, selected_port, display_host)
 

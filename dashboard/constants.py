@@ -11,6 +11,9 @@ def _server_installer_data_dir():
     override = os.environ.get("SERVER_INSTALLER_DATA_DIR", "").strip()
     if override:
         return Path(override)
+    sibling_root = Path(__file__).resolve().parents[1]
+    if (sibling_root / "dashboard" / "start-server-dashboard.py").exists():
+        return sibling_root
     if os.name == "nt":
         return Path(os.environ.get("ProgramData", "C:/ProgramData")) / "Server-Installer"
     if platform.system() == "Darwin":
