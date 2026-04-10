@@ -112,6 +112,7 @@ function Get-PythonInfoFromPath {
 
 function Get-PythonInfo {
     $versionPrefix = "$RequestedPythonVersion."
+    $fallbackInfo = $null
 
     $py = Get-Command py.exe -ErrorAction SilentlyContinue
     if ($py) {
@@ -126,6 +127,20 @@ function Get-PythonInfo {
                     }
                     if ($info.Version -eq $RequestedPythonVersion -or $info.Version.StartsWith($versionPrefix)) {
                         return $info
+                    }
+                }
+            }
+        } catch {
+        }
+
+        try {
+            $output = & $py.Source "-c" "import sys; print(sys.executable); print(sys.version.split()[0])" 2>$null
+            if ($output -and $LASTEXITCODE -eq 0) {
+                $lines = @($output | Where-Object { $_ -and $_.Trim() })
+                if ($lines.Count -ge 2) {
+                    $fallbackInfo = [PSCustomObject]@{
+                        Executable = $lines[0].Trim()
+                        Version = $lines[1].Trim()
                     }
                 }
             }
@@ -164,9 +179,12 @@ function Get-PythonInfo {
         if ($info.Version -eq $RequestedPythonVersion -or $info.Version.StartsWith($versionPrefix)) {
             return $info
         }
+        if (-not $fallbackInfo) {
+            $fallbackInfo = $info
+        }
     }
 
-    return $null
+    return $fallbackInfo
 }
 
 function Get-OrDownloadFile {
@@ -239,6 +257,10 @@ function Ensure-Python {
             return $null
         }
         return $pythonInfo
+    }
+
+    if (-not ($pythonInfo.Version -eq $RequestedPythonVersion -or $pythonInfo.Version.StartsWith("$RequestedPythonVersion."))) {
+        Write-Host "Python $RequestedPythonVersion not found. Using installed Python $($pythonInfo.Version) at $($pythonInfo.Executable)."
     }
 
     # Python exists, but may be missing the Windows service deps (pywin32/pythonservice.exe). Repair in-place.

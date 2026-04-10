@@ -108,6 +108,63 @@ function Resolve-PythonFromPathOrCommonLocations {
     return $null
 }
 
+function Resolve-AnyPython {
+    $candidates = New-Object System.Collections.Generic.List[string]
+
+    $py = Get-Command py.exe -ErrorAction SilentlyContinue
+    if ($py) {
+        try {
+            $output = & $py.Source "-c" "import sys; print(sys.executable); print(sys.version.split()[0])" 2>$null
+            if ($output -and $LASTEXITCODE -eq 0) {
+                $lines = @($output | Where-Object { $_ -and $_.Trim() })
+                if ($lines.Count -ge 1) {
+                    $info = [PSCustomObject]@{
+                        Executable = $lines[0].Trim()
+                        Version = if ($lines.Count -gt 1) { $lines[1].Trim() } else { "" }
+                    }
+                    if ($info.Executable -and (Test-Path -LiteralPath $info.Executable)) {
+                        return $info
+                    }
+                }
+            }
+        } catch {
+        }
+    }
+
+    foreach ($cmdName in @("python.exe", "python3.exe")) {
+        $cmd = Get-Command $cmdName -ErrorAction SilentlyContinue
+        if ($cmd -and $cmd.Source) {
+            [void]$candidates.Add($cmd.Source)
+        }
+    }
+
+    $roots = @(
+        $env:ProgramFiles,
+        $env:ProgramW6432,
+        ${env:ProgramFiles(x86)},
+        "C:\Program Files",
+        "C:\Program Files (x86)",
+        $env:LocalAppData
+    ) | Where-Object { $_ } | Select-Object -Unique
+
+    foreach ($root in $roots) {
+        foreach ($pattern in @("Python*\python.exe", "Programs\Python\Python*\python.exe")) {
+            Get-ChildItem -Path (Join-Path $root $pattern) -ErrorAction SilentlyContinue | ForEach-Object {
+                [void]$candidates.Add($_.FullName)
+            }
+        }
+    }
+
+    foreach ($candidate in ($candidates | Select-Object -Unique)) {
+        $info = Test-PythonExecutable -PythonExe $candidate
+        if ($info) {
+            return $info
+        }
+    }
+
+    return $null
+}
+
 function Install-PythonWithWinget {
     param(
         [Parameter(Mandatory = $true)]
@@ -270,6 +327,12 @@ $installPackageId = ""
 $pythonInfo = Resolve-PythonFromLauncher -Version $requestedVersion
 if (-not $pythonInfo) {
     $pythonInfo = Resolve-PythonFromPathOrCommonLocations -Version $requestedVersion
+}
+if (-not $pythonInfo) {
+    $pythonInfo = Resolve-AnyPython
+}
+if ($pythonInfo -and -not ($pythonInfo.Version -eq $requestedVersion -or $pythonInfo.Version.StartsWith("$requestedVersion."))) {
+    Write-Host "Python $requestedVersion not found. Using installed Python $($pythonInfo.Version) at $($pythonInfo.Executable)."
 }
 if (-not $pythonInfo) {
     try {
