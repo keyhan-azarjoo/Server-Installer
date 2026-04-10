@@ -715,6 +715,7 @@ function Write-FilesAndUp {
   New-Item -ItemType Directory -Force -Path $project,$ngconf,$ngcerts,$data | Out-Null
   Run-PreflightChecks -DataPath $data
   Info "Project folder: $project"
+  $projectLabelPath = ($project -replace '\\', '/')
   try {
     $state = [ordered]@{
       mode = "docker"
@@ -742,7 +743,7 @@ services:
     labels:
       - "com.locals3.installer=true"
       - "com.locals3.role=minio"
-      - "com.serverinstaller.project_path=$project"
+      - "com.serverinstaller.project_path=$projectLabelPath"
     environment:
       MINIO_ROOT_USER: admin
       MINIO_ROOT_PASSWORD: StrongPassword123
@@ -771,7 +772,7 @@ services:
     labels:
       - "com.locals3.installer=true"
       - "com.locals3.role=nginx"
-      - "com.serverinstaller.project_path=$project"
+      - "com.serverinstaller.project_path=$projectLabelPath"
     ports:
       - "$httpsPort:443"
       - "$consoleHttpsPort:4443"
