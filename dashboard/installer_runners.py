@@ -1187,7 +1187,6 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
         if live_cb:
             live_cb(f"[WARN] {reason} Falling back to IIS mode.\n")
         selected_mode = "iis"
-    mode_choice = "2\n" if selected_mode == "docker" else "1\n"
     requested_host = (form.get("LOCALS3_HOST", [""])[0] or "").strip()
     requested_mode = (form.get("LOCALS3_HOST_MODE", [""])[0] or "").strip().lower()
     requested_ip = (form.get("LOCALS3_HOST_IP", [""])[0] or "").strip()
@@ -1228,8 +1227,6 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
         if reason == "reserved by Windows":
             return 1, f"Requested {label} port {requested_value} is reserved by Windows. Choose another port."
         return 1, f"Requested {label} port {requested_value} is already in use. Choose another port."
-    # Script is interactive; only answer the mode prompt to avoid re-running the installer.
-    scripted_input = mode_choice + "\n"
     cmd = [
         "powershell.exe",
         "-NoProfile",
@@ -1257,7 +1254,8 @@ def run_windows_s3_installer(form, live_cb=None, mode="iis"):
         if value:
             env[key] = value
     env["LOCALS3_MODE"] = selected_mode
-    code, output = run_process(cmd, env=env, live_cb=live_cb, input_text=scripted_input)
+    env["SERVER_INSTALLER_NONINTERACTIVE"] = "1"
+    code, output = run_process(cmd, env=env, live_cb=live_cb)
     if code != 0:
         return code, output
 

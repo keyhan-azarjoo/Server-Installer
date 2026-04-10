@@ -20,6 +20,18 @@ function Info($m){ Write-Host "[INFO] $m" }
 function Warn($m){ Write-Host "[WARN] $m" -ForegroundColor Yellow }
 function Err ($m){ Write-Host "[ERROR] $m" -ForegroundColor Red }
 
+function Test-ServerInstallerNonInteractive {
+  $raw = [string]$env:SERVER_INSTALLER_NONINTERACTIVE
+  if ([string]::IsNullOrWhiteSpace($raw)) { return $false }
+  switch ($raw.Trim().ToLowerInvariant()) {
+    "1" { return $true }
+    "true" { return $true }
+    "yes" { return $true }
+    "y" { return $true }
+    default { return $false }
+  }
+}
+
 # ---------------------------------------------------------------------------
 # Utility: generic retry with optional exponential back-off
 # ---------------------------------------------------------------------------
@@ -370,6 +382,14 @@ function Test-MinIOAdminLogin([int]$uiPort, [string]$accessKey = "admin", [strin
 # ---------------------------------------------------------------------------
 
 function Ask-InstallMode {
+  if ($env:LOCALS3_MODE -and (-not [string]::IsNullOrWhiteSpace($env:LOCALS3_MODE))) {
+    $requested = $env:LOCALS3_MODE.Trim().ToLowerInvariant()
+    if ($requested -in @("iis", "docker")) {
+      Info "Using installation mode from environment: $requested"
+      return $requested
+    }
+    Warn "Ignoring invalid LOCALS3_MODE '$requested'. Falling back to interactive selection."
+  }
   Write-Host ""
   Write-Host "Choose installation mode:"
   Write-Host "  1) IIS (native MinIO + IIS reverse proxy)"

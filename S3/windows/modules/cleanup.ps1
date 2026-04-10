@@ -45,7 +45,12 @@ function Prompt-CleanupPreviousServers([string]$dockerCtx) {
   Warn "Found existing S3 containers from previous runs:"
   $existing | Sort-Object Name | Format-Table -AutoSize | Out-String | Write-Host
 
-  $ans = (Read-Host "Delete these previous containers before creating a new server? (Y/n)").Trim().ToLowerInvariant()
+  if (Test-ServerInstallerNonInteractive) {
+    Info "Non-interactive mode detected. Removing previous S3 containers automatically."
+    $ans = "y"
+  } else {
+    $ans = (Read-Host "Delete these previous containers before creating a new server? (Y/n)").Trim().ToLowerInvariant()
+  }
   if ($ans -eq "" -or $ans -eq "y" -or $ans -eq "yes") {
     $prev = $ErrorActionPreference
     $ErrorActionPreference = "Continue"

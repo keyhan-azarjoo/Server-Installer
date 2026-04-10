@@ -435,7 +435,12 @@ function Install-IISMode {
   }
   if ($busyDefaults.Count -gt 0 -and (Has-ExistingLocalS3IISInstall)) {
     Warn ("Some default ports are busy (" + ($busyDefaults -join ", ") + ") and an existing LocalS3 IIS installation was detected.")
-    $ans = (Read-Host "Delete previous LocalS3 IIS install and reinstall now? (Y/n)").Trim().ToLowerInvariant()
+    if (Test-ServerInstallerNonInteractive) {
+      Info "Non-interactive mode detected. Reinstalling LocalS3 IIS automatically."
+      $ans = "y"
+    } else {
+      $ans = (Read-Host "Delete previous LocalS3 IIS install and reinstall now? (Y/n)").Trim().ToLowerInvariant()
+    }
     if ($ans -eq "" -or $ans -eq "y" -or $ans -eq "yes") {
       Remove-ExistingLocalS3IISInstall -root $root
     } else {
