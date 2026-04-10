@@ -37,17 +37,18 @@ function Remove-ExistingLocalMongo([string]$dockerCtx) {
   $ErrorActionPreference = "Continue"
   docker --context $dockerCtx rm -f "$($Script:InstanceName)-https" "$($Script:InstanceName)-web" "$($Script:InstanceName)-mongodb" 2>$null | Out-Null
   docker --context $dockerCtx network rm "$($Script:InstanceName)-net" 2>$null | Out-Null
-  docker --context $dockerCtx volume rm -f "$($Script:InstanceName)-data" 2>$null | Out-Null
   schtasks /End /TN "LocalMongoDB-$($Script:InstanceName)-Autostart" 1>$null 2>$null | Out-Null
   schtasks /Delete /TN "LocalMongoDB-$($Script:InstanceName)-Autostart" /F 1>$null 2>$null | Out-Null
-  if (Test-Path $Script:MongoRoot) {
-    Remove-Item -Recurse -Force -Path $Script:MongoRoot -ErrorAction SilentlyContinue
-  }
   $ErrorActionPreference = $prev
 }
 
 function Register-LocalMongoAutostart([string]$dockerCtx) {
-  $taskCommand = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "docker --context ' + $dockerCtx + " start $($Script:InstanceName)-mongodb $($Script:InstanceName)-web $($Script:InstanceName)-https" + ' | Out-Null"'
+  $composePath = Join-Path $Script:MongoRoot "docker-compose.yml"
+  if (Test-Path -LiteralPath $composePath) {
+    $taskCommand = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "Push-Location ''' + $Script:MongoRoot + '''; docker --context ' + $dockerCtx + ' compose -f ''' + $composePath + ''' up -d | Out-Null; Pop-Location"'
+  } else {
+    $taskCommand = 'powershell -NoProfile -ExecutionPolicy Bypass -Command "docker --context ' + $dockerCtx + " start $($Script:InstanceName)-mongodb $($Script:InstanceName)-web $($Script:InstanceName)-https" + ' | Out-Null"'
+  }
   schtasks /Delete /TN "LocalMongoDB-$($Script:InstanceName)-Autostart" /F 1>$null 2>$null | Out-Null
   schtasks /Create /TN "LocalMongoDB-$($Script:InstanceName)-Autostart" /SC ONSTART /RU SYSTEM /RL HIGHEST /TR $taskCommand /F | Out-Null
 }
@@ -989,71 +990,104 @@ $($addresses -join ", ") {
   encode gzip
 }
 "@
-  $caddyfilePath = Join-Path $siteDir "Caddyfile"
-  [System.IO.File]::WriteAllText($caddyfilePath, $caddyfile, (New-Object System.Text.UTF8Encoding($false)))
+  $composePath = Join-Path $Script:MongoRoot "docker-compose.yml"
+  $projectLabelPath = ($Script:MongoRoot -replace '\\', '/')
+  $caddyForCompose = ($caddyfile -replace '\$', '$$') -replace "`r?`n", "`n        "
+  $compose = @"
+services:
+  $($Script:InstanceName)-mongodb:
+    image: mongo:7
+    container_name: $($Script:InstanceName)-mongodb
+    labels:
+      - "$($Script:MongoLabel)"
+      - "com.localmongo.role=mongodb"
+      - "com.serverinstaller.project_path=$projectLabelPath"
+    restart: always
+    networks:
+      - $($Script:InstanceName)-net
+    ports:
+      - "${mongoPort}:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: "$mongoUser"
+      MONGO_INITDB_ROOT_PASSWORD: "$mongoPassword"
+    volumes:
+      - $($Script:InstanceName)-data:/data/db
+
+  $($Script:InstanceName)-web:
+    image: mongo-express:latest
+    container_name: $($Script:InstanceName)-web
+    labels:
+      - "$($Script:MongoLabel)"
+      - "com.localmongo.role=web"
+      - "com.serverinstaller.project_path=$projectLabelPath"
+    restart: always
+    networks:
+      - $($Script:InstanceName)-net
+    ports:
+      - "127.0.0.1:${webPort}:8081"
+    environment:
+      ME_CONFIG_MONGODB_SERVER: "$($Script:InstanceName)-mongodb"
+      ME_CONFIG_MONGODB_URL: "mongodb://${mongoUser}:${mongoPassword}@$($Script:InstanceName)-mongodb:27017/"
+      ME_CONFIG_MONGODB_PORT: "27017"
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
+      ME_CONFIG_MONGODB_AUTH_DATABASE: "admin"
+      ME_CONFIG_MONGODB_ADMINUSERNAME: "$mongoUser"
+      ME_CONFIG_MONGODB_ADMINPASSWORD: "$mongoPassword"
+      ME_CONFIG_BASICAUTH_USERNAME: "$uiUser"
+      ME_CONFIG_BASICAUTH_PASSWORD: "$uiPassword"
+    depends_on:
+      - $($Script:InstanceName)-mongodb
+
+  $($Script:InstanceName)-https:
+    image: caddy:2-alpine
+    container_name: $($Script:InstanceName)-https
+    labels:
+      - "$($Script:MongoLabel)"
+      - "com.localmongo.role=https"
+      - "com.serverinstaller.project_path=$projectLabelPath"
+    restart: always
+    networks:
+      - $($Script:InstanceName)-net
+    ports:
+      - "${httpsPort}:${httpsPort}"
+    volumes:
+      - ./caddy-data:/data
+      - ./caddy-config:/config
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat >/etc/caddy/Caddyfile <<'EOF'
+        $caddyForCompose
+        EOF
+        exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    depends_on:
+      - $($Script:InstanceName)-web
+
+networks:
+  $($Script:InstanceName)-net:
+
+volumes:
+  $($Script:InstanceName)-data:
+"@
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  if (-not (Test-Path -LiteralPath $composePath)) {
+    [System.IO.File]::WriteAllText($composePath, $compose, $utf8NoBom)
+    Info "Created Docker Compose file: $composePath"
+  } else {
+    Info "Using existing Docker Compose file: $composePath"
+  }
 
   $prev = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
-  docker --context $dockerCtx network create "$($Script:InstanceName)-net" 2>$null | Out-Null
-  docker --context $dockerCtx volume create "$($Script:InstanceName)-data" 2>$null | Out-Null
-
-  docker --context $dockerCtx run -d `
-    --name "$($Script:InstanceName)-mongodb" `
-    --label $Script:MongoLabel `
-    --label "com.localmongo.role=mongodb" `
-    --label "com.serverinstaller.project_path=$Script:MongoRoot" `
-    --restart always `
-    --network "$($Script:InstanceName)-net" `
-    -p "${mongoPort}:27017" `
-    -e "MONGO_INITDB_ROOT_USERNAME=$mongoUser" `
-    -e "MONGO_INITDB_ROOT_PASSWORD=$mongoPassword" `
-    -v "$($Script:InstanceName)-data:/data/db" `
-    mongo:7 | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    $ErrorActionPreference = $prev
-    Err "Failed to start MongoDB container."
-    exit 1
-  }
-
-  docker --context $dockerCtx run -d `
-    --name "$($Script:InstanceName)-web" `
-    --label $Script:MongoLabel `
-    --label "com.localmongo.role=web" `
-    --label "com.serverinstaller.project_path=$Script:MongoRoot" `
-    --restart always `
-    --network "$($Script:InstanceName)-net" `
-    -p "127.0.0.1:${webPort}:8081" `
-    -e "ME_CONFIG_MONGODB_SERVER=$($Script:InstanceName)-mongodb" `
-    -e "ME_CONFIG_MONGODB_URL=mongodb://${mongoUser}:${mongoPassword}@$($Script:InstanceName)-mongodb:27017/" `
-    -e "ME_CONFIG_MONGODB_PORT=27017" `
-    -e "ME_CONFIG_MONGODB_ENABLE_ADMIN=true" `
-    -e "ME_CONFIG_MONGODB_AUTH_DATABASE=admin" `
-    -e "ME_CONFIG_MONGODB_ADMINUSERNAME=$mongoUser" `
-    -e "ME_CONFIG_MONGODB_ADMINPASSWORD=$mongoPassword" `
-    -e "ME_CONFIG_BASICAUTH_USERNAME=$uiUser" `
-    -e "ME_CONFIG_BASICAUTH_PASSWORD=$uiPassword" `
-    mongo-express:latest | Out-Null
-  if ($LASTEXITCODE -ne 0) {
-    $ErrorActionPreference = $prev
-    Err "Failed to start Mongo web admin container."
-    exit 1
-  }
-
-  docker --context $dockerCtx run -d `
-    --name "$($Script:InstanceName)-https" `
-    --label $Script:MongoLabel `
-    --label "com.localmongo.role=https" `
-    --label "com.serverinstaller.project_path=$Script:MongoRoot" `
-    --restart always `
-    --network "$($Script:InstanceName)-net" `
-    -p "${httpsPort}:${httpsPort}" `
-    -v "${caddyfilePath}:/etc/caddy/Caddyfile:ro" `
-    -v "${dataDir}:/data" `
-    -v "${configDir}:/config" `
-    caddy:2-alpine | Out-Null
+  Push-Location $Script:MongoRoot
+  docker --context $dockerCtx compose -f $composePath down --remove-orphans 2>$null | Out-Null
+  docker --context $dockerCtx compose -f $composePath up -d 2>&1 | Out-Host
+  $composeExit = $LASTEXITCODE
+  Pop-Location
   $ErrorActionPreference = $prev
-  if ($LASTEXITCODE -ne 0) {
-    Err "Failed to start HTTPS proxy container."
+  if ($composeExit -ne 0) {
+    Err "Failed to start MongoDB Docker Compose stack."
     exit 1
   }
 

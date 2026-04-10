@@ -735,58 +735,7 @@ function Write-FilesAndUp {
     Warn "Could not persist LocalS3 install state: $($_.Exception.Message)"
   }
 
-  $compose = @"
-services:
-  minio:
-    image: $minioImage
-    container_name: minio
-    labels:
-      - "com.locals3.installer=true"
-      - "com.locals3.role=minio"
-      - "com.serverinstaller.project_path=$projectLabelPath"
-    environment:
-      MINIO_ROOT_USER: admin
-      MINIO_ROOT_PASSWORD: StrongPassword123
-      MINIO_API_PORT: "9000"
-      MINIO_CONSOLE_PORT: "9001"
-      MINIO_ADMIN_CONSOLE_PORT: "9002"
-      MINIO_PROMETHEUS_AUTH_TYPE: public
-      MINIO_BROWSER_REDIRECT_URL: "$consoleRedirectUrl"
-      MINIO_BROWSER_SESSION_DURATION: "$browserSessionDuration"
-    volumes:
-      - ${minioVolume}:/data
-    ports:
-      - "$minioApi:9000"
-      - "$minioUI:9001"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-      start_period: 30s
-
-  nginx:
-    image: nginx:latest
-    container_name: nginx
-    labels:
-      - "com.locals3.installer=true"
-      - "com.locals3.role=nginx"
-      - "com.serverinstaller.project_path=$projectLabelPath"
-    ports:
-      - "$httpsPort:443"
-      - "$consoleHttpsPort:4443"
-    volumes:
-      - ./nginx/conf:/etc/nginx/conf.d:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
-    depends_on:
-      minio:
-        condition: service_started
-    restart: unless-stopped
-
-volumes:
-  ${minioVolume}:
-"@
+  $composePath = Join-Path $project "docker-compose.yml"
 
   $serverNames = if ($domain -eq "localhost") { "localhost" } else { "$domain localhost" }
   $nginx = @"
@@ -856,10 +805,78 @@ server {
     }
 }
 "@
+  $nginxForCompose = ($nginx -replace '\$', '$$') -replace "`r?`n", "`n        "
+
+  $compose = @"
+services:
+  minio:
+    image: $minioImage
+    container_name: minio
+    labels:
+      - "com.locals3.installer=true"
+      - "com.locals3.role=minio"
+      - "com.serverinstaller.project_path=$projectLabelPath"
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: StrongPassword123
+      MINIO_API_PORT: "9000"
+      MINIO_CONSOLE_PORT: "9001"
+      MINIO_ADMIN_CONSOLE_PORT: "9002"
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+      MINIO_BROWSER_REDIRECT_URL: "$consoleRedirectUrl"
+      MINIO_BROWSER_SESSION_DURATION: "$browserSessionDuration"
+    volumes:
+      - ${minioVolume}:/data
+    ports:
+      - "$minioApi:9000"
+      - "$minioUI:9001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  nginx:
+    image: nginx:latest
+    container_name: nginx
+    labels:
+      - "com.locals3.installer=true"
+      - "com.locals3.role=nginx"
+      - "com.serverinstaller.project_path=$projectLabelPath"
+    ports:
+      - "$httpsPort:443"
+      - "$consoleHttpsPort:4443"
+    volumes:
+      - ./nginx/certs:/etc/nginx/certs:ro
+    command:
+      - /bin/sh
+      - -c
+      - |
+        cat >/etc/nginx/conf.d/default.conf <<'EOF'
+        $nginxForCompose
+        EOF
+        exec nginx -g 'daemon off;'
+    depends_on:
+      minio:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  ${minioVolume}:
+"@
 
   $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-  [System.IO.File]::WriteAllText((Join-Path $project "docker-compose.yml"), $compose, $utf8NoBom)
-  [System.IO.File]::WriteAllText((Join-Path $ngconf "default.conf"), $nginx, $utf8NoBom)
+  if (-not (Test-Path -LiteralPath $composePath)) {
+    [System.IO.File]::WriteAllText($composePath, $compose, $utf8NoBom)
+    Info "Created Docker Compose file: $composePath"
+  } else {
+    Info "Using existing Docker Compose file: $composePath"
+  }
+  if (-not (Test-Path -LiteralPath (Join-Path $ngconf "default.conf"))) {
+    [System.IO.File]::WriteAllText((Join-Path $ngconf "default.conf"), $nginx, $utf8NoBom)
+  }
 
   Ensure-HostsEntry -domain $domain
   Ensure-LocalTlsCert -dockerCtx $dockerCtx -certDir $ngcerts -domain $domain -lanIp $lanIp
